@@ -14,10 +14,11 @@ use serde::{Deserialize, Serialize};
 mod types;
 use types::{
     AccountCredentials, Challenge, DirectoryUrls, Empty, FinalizeRequest, Header, JoseJson, Jwk,
-    KeyAuthorization, KeyOrKeyId, OrderState, Problem, SigningAlgorithm,
+    KeyAuthorization, KeyOrKeyId, Problem, SigningAlgorithm,
 };
 pub use types::{
-    Authorization, ChallengeType, Error, Identifier, LetsEncrypt, NewAccount, NewOrder, OrderStatus,
+    Authorization, ChallengeType, Error, Identifier, LetsEncrypt, NewAccount, NewOrder, OrderState,
+    OrderStatus,
 };
 
 pub struct Order {
