@@ -43,11 +43,7 @@ impl Order {
         KeyAuthorization(format!("{}.{}", challenge.token, &self.account.key.thumb))
     }
 
-    pub async fn finalize(
-        &mut self,
-        csr_der: &[u8],
-        finalize_url: &str,
-    ) -> Result<OrderState, Error> {
+    pub async fn finalize(&mut self, csr_der: &[u8], finalize_url: &str) -> Result<String, Error> {
         let rsp = self
             .account
             .post(
@@ -58,7 +54,24 @@ impl Order {
             .await?;
 
         self.nonce = nonce_from_response(&rsp);
-        Problem::check(rsp).await
+        let state = Problem::check::<OrderState>(rsp).await?;
+
+        let cert_url = match state.certificate {
+            Some(url) => url,
+            None => return Err(Error::Str("no certificate URL")),
+        };
+
+        let rsp = self
+            .account
+            .post(None::<&Empty>, self.nonce.take(), &cert_url)
+            .await?;
+
+        self.nonce = nonce_from_response(&rsp);
+        let status = rsp.status();
+        match status.is_client_error() || status.is_server_error() {
+            false => Ok(rsp.text().await?),
+            true => Err(rsp.json::<Problem>().await?.into()),
+        }
     }
 
     pub async fn set_challenge_ready(&mut self, challenge_url: &str) -> Result<(), Error> {
@@ -70,20 +83,6 @@ impl Order {
         self.nonce = nonce_from_response(&rsp);
         let _ = Problem::check::<Challenge>(rsp).await?;
         Ok(())
-    }
-
-    pub async fn certificate_chain(&mut self, cert_url: &str) -> Result<String, Error> {
-        let rsp = self
-            .account
-            .post(None::<&Empty>, self.nonce.take(), cert_url)
-            .await?;
-
-        self.nonce = nonce_from_response(&rsp);
-        let status = rsp.status();
-        match status.is_client_error() || status.is_server_error() {
-            false => Ok(rsp.text().await?),
-            true => Err(rsp.json::<Problem>().await?.into()),
-        }
     }
 
     pub async fn challenge(&mut self, challenge_url: &str) -> Result<Challenge, Error> {
