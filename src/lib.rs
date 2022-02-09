@@ -24,7 +24,6 @@ pub use types::{
 pub struct Order {
     account: Arc<AccountInner>,
     nonce: Option<String>,
-    #[allow(dead_code)]
     order_url: String,
 }
 
