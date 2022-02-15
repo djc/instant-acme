@@ -10,17 +10,17 @@ use thiserror::Error;
 
 #[derive(Debug, Error)]
 pub enum Error {
-    #[error("API error")]
+    #[error("API error: {0}")]
     Api(#[from] Problem),
-    #[error("base64 decoding failed")]
+    #[error("base64 decoding failed: {0}")]
     Base64(#[from] base64::DecodeError),
-    #[error("cryptographic operation failed")]
+    #[error("cryptographic operation failed: {0}")]
     Crypto(#[from] ring::error::Unspecified),
-    #[error("invalid key bytes")]
+    #[error("invalid key bytes: {0}")]
     CryptoKey(#[from] ring::error::KeyRejected),
-    #[error("HTTP request failure")]
+    #[error("HTTP request failure: {0}")]
     Http(#[from] reqwest::Error),
-    #[error("failed to (de)serialize JSON")]
+    #[error("failed to (de)serialize JSON: {0}")]
     Json(#[from] serde_json::Error),
     #[error("missing data: {0}")]
     Str(&'static str),
