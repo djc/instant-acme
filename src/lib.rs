@@ -228,7 +228,7 @@ impl AccountInner {
     ) -> Result<T, Error> {
         let rsp = self.post(None::<&Empty>, nonce.take(), url).await?;
         *nonce = nonce_from_response(&rsp);
-        Ok(Problem::check(rsp).await?)
+        Problem::check(rsp).await
     }
 
     async fn post(
