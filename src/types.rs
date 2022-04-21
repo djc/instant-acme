@@ -213,12 +213,17 @@ pub(crate) struct JoseJson {
 }
 
 #[derive(Debug, Deserialize)]
-#[serde(tag = "status", rename_all = "camelCase")]
-pub enum Authorization {
-    Pending {
-        identifier: Identifier,
-        challenges: Vec<Challenge>,
-    },
+#[serde(rename_all = "camelCase")]
+pub struct Authorization {
+    pub identifier: Identifier,
+    pub status: AuthorizationStatus,
+    pub challenges: Vec<Challenge>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum AuthorizationStatus {
+    Pending,
     Valid,
     Invalid,
     Revoked,

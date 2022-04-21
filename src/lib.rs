@@ -17,8 +17,8 @@ use types::{
     KeyAuthorization, KeyOrKeyId, Problem, SigningAlgorithm,
 };
 pub use types::{
-    Authorization, ChallengeType, Error, Identifier, LetsEncrypt, NewAccount, NewOrder, OrderState,
-    OrderStatus,
+    Authorization, AuthorizationStatus, ChallengeType, Error, Identifier, LetsEncrypt, NewAccount,
+    NewOrder, OrderState, OrderStatus,
 };
 
 pub struct Order {
