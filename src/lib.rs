@@ -113,11 +113,7 @@ impl Account {
             .and_then(|hv| hv.to_str().ok())
             .map(|s| s.to_owned());
 
-        let status = rsp.status();
-        if status.is_client_error() || status.is_server_error() {
-            return Err(rsp.json::<Problem>().await?.into());
-        }
-
+        Problem::from_response(rsp).await?;
         Ok(Self {
             inner: Arc::new(AccountInner {
                 client,

@@ -49,10 +49,14 @@ pub struct Problem {
 
 impl Problem {
     pub(crate) async fn check<T: DeserializeOwned>(rsp: Response) -> Result<T, Error> {
+        Ok(Self::from_response(rsp).await?.json().await?)
+    }
+
+    pub(crate) async fn from_response(rsp: Response) -> Result<Response, Error> {
         let status = rsp.status();
         match status.is_client_error() || status.is_server_error() {
-            false => Ok(rsp.json().await?),
-            true => Err(rsp.json::<Self>().await?.into()),
+            false => Ok(rsp),
+            true => Err(rsp.json::<Problem>().await?.into()),
         }
     }
 }
