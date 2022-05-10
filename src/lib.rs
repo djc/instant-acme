@@ -1,5 +1,6 @@
 #![warn(unreachable_pub)]
 
+use std::borrow::Cow;
 use std::sync::Arc;
 
 use base64::URL_SAFE_NO_PAD;
@@ -8,17 +9,17 @@ use hyper::header::{CONTENT_TYPE, LOCATION};
 use hyper::{Body, Method, Request, Response};
 use ring::rand::SystemRandom;
 use ring::signature::{EcdsaKeyPair, ECDSA_P256_SHA256_FIXED_SIGNING};
-use serde::de::{DeserializeOwned, Error as _, Unexpected};
-use serde::{Deserialize, Serialize};
+use serde::de::DeserializeOwned;
+use serde::Serialize;
 
 mod types;
-use types::{
-    AccountCredentials, Challenge, DirectoryUrls, Empty, FinalizeRequest, Header, JoseJson, Jwk,
-    KeyAuthorization, KeyOrKeyId, Problem, SigningAlgorithm,
-};
 pub use types::{
-    Authorization, AuthorizationStatus, ChallengeType, Error, Identifier, LetsEncrypt, NewAccount,
-    NewOrder, OrderState, OrderStatus,
+    AccountCredentials, Authorization, AuthorizationStatus, ChallengeType, Error, Identifier,
+    LetsEncrypt, NewAccount, NewOrder, OrderState, OrderStatus,
+};
+use types::{
+    Challenge, DirectoryUrls, Empty, FinalizeRequest, Header, JoseJson, Jwk, KeyAuthorization,
+    KeyOrKeyId, Problem, SigningAlgorithm,
 };
 
 pub struct Order {
@@ -100,6 +101,12 @@ pub struct Account {
 }
 
 impl Account {
+    pub fn from_credentials(credentials: AccountCredentials<'_>) -> Result<Self, Error> {
+        Ok(Self {
+            inner: Arc::new(AccountInner::from_credentials(credentials)?),
+        })
+    }
+
     pub async fn create(account: &NewAccount<'_>, server_url: &str) -> Result<Account, Error> {
         let client = Client::new(server_url).await?;
         let key = Key::generate()?;
@@ -150,50 +157,12 @@ impl Account {
             status,
         ))
     }
-}
 
-impl<'de> Deserialize<'de> for Account {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: serde::Deserializer<'de>,
-    {
-        let creds = AccountCredentials::deserialize(deserializer)?;
-        let pkcs8_der = base64::decode_config(&creds.key_pkcs8, URL_SAFE_NO_PAD).map_err(|_| {
-            D::Error::invalid_value(
-                Unexpected::Str(&creds.key_pkcs8),
-                &"unable to base64-decode key",
-            )
-        })?;
-
-        Ok(Self {
-            inner: Arc::new(AccountInner {
-                key: Key::from_pkcs8_der(pkcs8_der).map_err(|_| {
-                    D::Error::invalid_value(
-                        Unexpected::Str(&creds.key_pkcs8),
-                        &"unable to parse key",
-                    )
-                })?,
-                client: Client {
-                    client: client(),
-                    urls: creds.urls,
-                },
-                id: creds.id,
-            }),
-        })
-    }
-}
-
-impl Serialize for Account {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: serde::Serializer,
-    {
-        AccountCredentials {
-            id: self.inner.id.clone(),
-            key_pkcs8: base64::encode_config(&self.inner.key.pkcs8_der, URL_SAFE_NO_PAD),
-            urls: self.inner.client.urls.clone(),
-        }
-        .serialize(serializer)
+    /// Get the account's credentials, which can be serialized.
+    ///
+    /// Pass the credentials to [`Account::from_credentials`] to regain access to the `Account`.
+    pub fn credentials(&self) -> AccountCredentials<'_> {
+        self.inner.credentials()
     }
 }
 
@@ -204,6 +173,20 @@ struct AccountInner {
 }
 
 impl AccountInner {
+    fn from_credentials(credentials: AccountCredentials<'_>) -> Result<Self, Error> {
+        Ok(Self {
+            key: Key::from_pkcs8_der(base64::decode_config(
+                &credentials.key_pkcs8,
+                URL_SAFE_NO_PAD,
+            )?)?,
+            client: Client {
+                client: client(),
+                urls: credentials.urls.into_owned(),
+            },
+            id: credentials.id.into_owned(),
+        })
+    }
+
     async fn get<T: DeserializeOwned>(
         &self,
         nonce: &mut Option<String>,
@@ -221,6 +204,14 @@ impl AccountInner {
         url: &str,
     ) -> Result<Response<Body>, Error> {
         self.client.post(payload, nonce, self, url).await
+    }
+
+    fn credentials(&self) -> AccountCredentials<'_> {
+        AccountCredentials {
+            id: Cow::Borrowed(&self.id),
+            key_pkcs8: base64::encode_config(&self.key.pkcs8_der, URL_SAFE_NO_PAD),
+            urls: Cow::Borrowed(&self.client.urls),
+        }
     }
 }
 

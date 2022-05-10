@@ -1,3 +1,4 @@
+use std::borrow::Cow;
 use std::fmt;
 
 use base64::URL_SAFE_NO_PAD;
@@ -35,10 +36,10 @@ impl From<&'static str> for Error {
 }
 
 #[derive(Deserialize, Serialize)]
-pub(crate) struct AccountCredentials {
-    pub(crate) id: String,
+pub struct AccountCredentials<'a> {
+    pub(crate) id: Cow<'a, str>,
     pub(crate) key_pkcs8: String,
-    pub(crate) urls: DirectoryUrls,
+    pub(crate) urls: Cow<'a, DirectoryUrls>,
 }
 
 #[derive(Debug, Deserialize)]
