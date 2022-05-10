@@ -3,9 +3,9 @@
 use std::sync::Arc;
 
 use base64::URL_SAFE_NO_PAD;
-use reqwest::header::{CONTENT_TYPE, LOCATION};
-use reqwest::redirect::Policy;
-use reqwest::{Body, Response};
+use hyper::client::HttpConnector;
+use hyper::header::{CONTENT_TYPE, LOCATION};
+use hyper::{Body, Method, Request, Response};
 use ring::rand::SystemRandom;
 use ring::signature::{EcdsaKeyPair, ECDSA_P256_SHA256_FIXED_SIGNING};
 use serde::de::{DeserializeOwned, Error as _, Unexpected};
@@ -67,11 +67,11 @@ impl Order {
             .await?;
 
         self.nonce = nonce_from_response(&rsp);
-        let status = rsp.status();
-        match status.is_client_error() || status.is_server_error() {
-            false => Ok(rsp.text().await?),
-            true => Err(rsp.json::<Problem>().await?.into()),
-        }
+        let body = hyper::body::to_bytes(Problem::from_response(rsp).await?).await?;
+        Ok(
+            String::from_utf8(body.to_vec())
+                .map_err(|_| "unable to decode certificate as UTF-8")?,
+        )
     }
 
     pub async fn set_challenge_ready(&mut self, challenge_url: &str) -> Result<(), Error> {
@@ -113,7 +113,8 @@ impl Account {
             .and_then(|hv| hv.to_str().ok())
             .map(|s| s.to_owned());
 
-        Problem::from_response(rsp).await?;
+        // The response redirects, we don't need the body
+        let _ = Problem::from_response(rsp).await?;
         Ok(Self {
             inner: Arc::new(AccountInner {
                 client,
@@ -173,7 +174,7 @@ impl<'de> Deserialize<'de> for Account {
                     )
                 })?,
                 client: Client {
-                    client: client().map_err(D::Error::custom)?,
+                    client: client(),
                     urls: creds.urls.clone(),
                 },
                 id: creds.id.clone(),
@@ -218,7 +219,7 @@ impl AccountInner {
         payload: Option<&impl Serialize>,
         nonce: Option<String>,
         url: &str,
-    ) -> Result<Response, Error> {
+    ) -> Result<Response<Body>, Error> {
         self.client.post(payload, nonce, self, url).await
     }
 }
@@ -240,17 +241,18 @@ impl Signer for AccountInner {
 
 #[derive(Debug)]
 struct Client {
-    client: reqwest::Client,
+    client: hyper::Client<hyper_rustls::HttpsConnector<HttpConnector>>,
     urls: DirectoryUrls,
 }
 
 impl Client {
     async fn new(server_url: &str) -> Result<Self, Error> {
-        let client = client()?;
-        let urls = client.get(server_url).send().await?;
+        let client = client();
+        let rsp = client.get(server_url.parse()?).await?;
+        let body = hyper::body::to_bytes(rsp.into_body()).await?;
         Ok(Client {
             client,
-            urls: urls.json().await?,
+            urls: serde_json::from_slice(&body)?,
         })
     }
 
@@ -260,24 +262,31 @@ impl Client {
         nonce: Option<String>,
         signer: &impl Signer,
         url: &str,
-    ) -> Result<Response, Error> {
+    ) -> Result<Response<Body>, Error> {
         let nonce = match nonce {
             Some(nonce) => nonce,
             None => self.nonce().await?,
         };
 
-        Ok(self
-            .client
-            .post(url)
+        let request = Request::builder()
+            .method(Method::POST)
+            .uri(url)
             .header(CONTENT_TYPE, JOSE_JSON)
             .body(signer.signed_json(payload, &nonce, url)?)
-            .send()
-            .await?)
+            .unwrap();
+
+        Ok(self.client.request(request).await?)
     }
 
     async fn nonce(&self) -> Result<String, Error> {
-        let future = self.client.head(&self.urls.new_nonce).send();
-        match nonce_from_response(&future.await?) {
+        let request = Request::builder()
+            .method(Method::HEAD)
+            .uri(&self.urls.new_nonce)
+            .body(Body::empty())
+            .unwrap();
+
+        let rsp = self.client.request(request).await?;
+        match nonce_from_response(&rsp) {
             Some(nonce) => Ok(nonce),
             None => Err("no nonce found".into()),
         }
@@ -372,7 +381,7 @@ trait Signer {
     fn key(&self) -> &Key;
 }
 
-fn nonce_from_response(rsp: &Response) -> Option<String> {
+fn nonce_from_response(rsp: &Response<Body>) -> Option<String> {
     rsp.headers()
         .get(REPLAY_NONCE)
         .and_then(|hv| String::from_utf8(hv.as_ref().to_vec()).ok())
@@ -385,8 +394,15 @@ fn base64(data: &impl Serialize) -> Result<String, serde_json::Error> {
     ))
 }
 
-fn client() -> Result<reqwest::Client, reqwest::Error> {
-    reqwest::Client::builder().redirect(Policy::none()).build()
+fn client() -> hyper::Client<hyper_rustls::HttpsConnector<HttpConnector>> {
+    let https = hyper_rustls::HttpsConnectorBuilder::new()
+        .with_native_roots()
+        .https_only()
+        .enable_http1()
+        .enable_http2()
+        .build();
+
+    hyper::Client::builder().build(https)
 }
 
 const JOSE_JSON: &str = "application/jose+json";

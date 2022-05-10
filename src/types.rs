@@ -1,7 +1,7 @@
 use std::fmt;
 
 use base64::URL_SAFE_NO_PAD;
-use reqwest::Response;
+use hyper::{Body, Response};
 use ring::digest::{digest, Digest, SHA256};
 use ring::signature::{EcdsaKeyPair, KeyPair};
 use serde::de::DeserializeOwned;
@@ -19,7 +19,9 @@ pub enum Error {
     #[error("invalid key bytes: {0}")]
     CryptoKey(#[from] ring::error::KeyRejected),
     #[error("HTTP request failure: {0}")]
-    Http(#[from] reqwest::Error),
+    Http(#[from] hyper::Error),
+    #[error("invalid URI: {0}")]
+    InvalidUri(#[from] hyper::http::uri::InvalidUri),
     #[error("failed to (de)serialize JSON: {0}")]
     Json(#[from] serde_json::Error),
     #[error("missing data: {0}")]
@@ -48,16 +50,21 @@ pub struct Problem {
 }
 
 impl Problem {
-    pub(crate) async fn check<T: DeserializeOwned>(rsp: Response) -> Result<T, Error> {
-        Ok(Self::from_response(rsp).await?.json().await?)
+    pub(crate) async fn check<T: DeserializeOwned>(rsp: Response<Body>) -> Result<T, Error> {
+        Ok(serde_json::from_slice(
+            &hyper::body::to_bytes(Self::from_response(rsp).await?).await?,
+        )?)
     }
 
-    pub(crate) async fn from_response(rsp: Response) -> Result<Response, Error> {
+    pub(crate) async fn from_response(rsp: Response<Body>) -> Result<Body, Error> {
         let status = rsp.status();
-        match status.is_client_error() || status.is_server_error() {
-            false => Ok(rsp),
-            true => Err(rsp.json::<Problem>().await?.into()),
+        let body = rsp.into_body();
+        if status.is_informational() || status.is_success() || status.is_redirection() {
+            return Ok(body);
         }
+
+        let body = hyper::body::to_bytes(body).await?;
+        Err(serde_json::from_slice::<Problem>(&body)?.into())
     }
 }
 
