@@ -104,7 +104,7 @@ impl Account {
         let client = Client::new(server_url).await?;
         let key = Key::generate()?;
         let nonce = client.nonce().await?;
-        let header = key.key_header(&nonce, &client.urls.new_account);
+        let header = key.header(&nonce, &client.urls.new_account);
         let body = key.signed_json(Some(account), header)?;
 
         let rsp = client
@@ -236,7 +236,7 @@ impl AccountInner {
             None => self.client.nonce().await?,
         };
 
-        let header = self.key_id_header(&nonce, url);
+        let header = self.header(&nonce, url);
         let body = self.key.signed_json(payload, header)?;
         Ok(self
             .client
@@ -247,14 +247,20 @@ impl AccountInner {
             .send()
             .await?)
     }
+}
 
-    fn key_id_header<'n, 'u: 'n, 'a: 'u>(&'a self, nonce: &'n str, url: &'u str) -> Header<'n> {
+impl Signer for AccountInner {
+    fn header<'n, 'u: 'n, 's: 'u>(&'s self, nonce: &'n str, url: &'u str) -> Header<'n> {
         Header {
             alg: self.key.signing_algorithm,
             key: KeyOrKeyId::KeyId(&self.id),
             nonce,
             url,
         }
+    }
+
+    fn key(&self) -> &Key {
+        &self.key
     }
 }
 
@@ -339,8 +345,10 @@ impl Key {
             signature: base64::encode_config(signature.as_ref(), URL_SAFE_NO_PAD),
         })?))
     }
+}
 
-    fn key_header<'n, 'u: 'n, 'k: 'u>(&'k self, nonce: &'n str, url: &'u str) -> Header<'n> {
+impl Signer for Key {
+    fn header<'n, 'u: 'n, 's: 'u>(&'s self, nonce: &'n str, url: &'u str) -> Header<'n> {
         Header {
             alg: self.signing_algorithm,
             key: KeyOrKeyId::from_key(&self.inner),
@@ -348,6 +356,25 @@ impl Key {
             url,
         }
     }
+
+    fn key(&self) -> &Key {
+        self
+    }
+}
+
+trait Signer {
+    fn signed_json(
+        &self,
+        payload: Option<&impl Serialize>,
+        nonce: &str,
+        url: &str,
+    ) -> Result<Body, Error> {
+        self.key().signed_json(payload, self.header(nonce, url))
+    }
+
+    fn header<'n, 'u: 'n, 's: 'u>(&'s self, nonce: &'n str, url: &'u str) -> Header<'n>;
+
+    fn key(&self) -> &Key;
 }
 
 fn nonce_from_response(rsp: &Response) -> Option<String> {
