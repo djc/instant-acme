@@ -103,16 +103,8 @@ impl Account {
     pub async fn create(account: &NewAccount<'_>, server_url: &str) -> Result<Account, Error> {
         let client = Client::new(server_url).await?;
         let key = Key::generate()?;
-        let nonce = client.nonce().await?;
-        let header = key.header(&nonce, &client.urls.new_account);
-        let body = key.signed_json(Some(account), header)?;
-
         let rsp = client
-            .client
-            .post(&client.urls.new_account)
-            .header(CONTENT_TYPE, JOSE_JSON)
-            .body(body)
-            .send()
+            .post(Some(account), None, &key, &client.urls.new_account)
             .await?;
 
         let account_url = rsp
@@ -231,21 +223,7 @@ impl AccountInner {
         nonce: Option<String>,
         url: &str,
     ) -> Result<Response, Error> {
-        let nonce = match nonce {
-            Some(nonce) => nonce,
-            None => self.client.nonce().await?,
-        };
-
-        let header = self.header(&nonce, url);
-        let body = self.key.signed_json(payload, header)?;
-        Ok(self
-            .client
-            .client
-            .post(url)
-            .header(CONTENT_TYPE, JOSE_JSON)
-            .body(body)
-            .send()
-            .await?)
+        self.client.post(payload, nonce, self, url).await
     }
 }
 
@@ -278,6 +256,27 @@ impl Client {
             client,
             urls: urls.json().await?,
         })
+    }
+
+    async fn post(
+        &self,
+        payload: Option<&impl Serialize>,
+        nonce: Option<String>,
+        signer: &impl Signer,
+        url: &str,
+    ) -> Result<Response, Error> {
+        let nonce = match nonce {
+            Some(nonce) => nonce,
+            None => self.nonce().await?,
+        };
+
+        Ok(self
+            .client
+            .post(url)
+            .header(CONTENT_TYPE, JOSE_JSON)
+            .body(signer.signed_json(payload, &nonce, url)?)
+            .send()
+            .await?)
     }
 
     async fn nonce(&self) -> Result<String, Error> {
