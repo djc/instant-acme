@@ -101,13 +101,7 @@ pub struct Account {
 
 impl Account {
     pub async fn create(account: &NewAccount<'_>, server_url: &str) -> Result<Account, Error> {
-        let client = client()?;
-        let urls = client.get(server_url).send().await?;
-        let client = Client {
-            client,
-            urls: urls.json().await?,
-        };
-
+        let client = Client::new(server_url).await?;
         let key = Key::generate()?;
         let nonce = client.nonce().await?;
         let header = key.key_header(&nonce, &client.urls.new_account);
@@ -271,6 +265,15 @@ struct Client {
 }
 
 impl Client {
+    async fn new(server_url: &str) -> Result<Self, Error> {
+        let client = client()?;
+        let urls = client.get(server_url).send().await?;
+        Ok(Client {
+            client,
+            urls: urls.json().await?,
+        })
+    }
+
     async fn nonce(&self) -> Result<String, Error> {
         let future = self.client.head(&self.urls.new_nonce).send();
         match nonce_from_response(&future.await?) {
