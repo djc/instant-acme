@@ -259,15 +259,22 @@ impl Client {
     async fn post(
         &self,
         payload: Option<&impl Serialize>,
-        nonce: Option<String>,
+        mut nonce: Option<String>,
         signer: &impl Signer,
         url: &str,
     ) -> Result<Response<Body>, Error> {
-        let nonce = match nonce {
-            Some(nonce) => nonce,
-            None => self.nonce().await?,
+        if nonce.is_none() {
+            let request = Request::builder()
+                .method(Method::HEAD)
+                .uri(&self.urls.new_nonce)
+                .body(Body::empty())
+                .unwrap();
+
+            let rsp = self.client.request(request).await?;
+            nonce = nonce_from_response(&rsp);
         };
 
+        let nonce = nonce.ok_or("no nonce found")?;
         let request = Request::builder()
             .method(Method::POST)
             .uri(url)
@@ -276,20 +283,6 @@ impl Client {
             .unwrap();
 
         Ok(self.client.request(request).await?)
-    }
-
-    async fn nonce(&self) -> Result<String, Error> {
-        let request = Request::builder()
-            .method(Method::HEAD)
-            .uri(&self.urls.new_nonce)
-            .body(Body::empty())
-            .unwrap();
-
-        let rsp = self.client.request(request).await?;
-        match nonce_from_response(&rsp) {
-            Some(nonce) => Ok(nonce),
-            None => Err("no nonce found".into()),
-        }
     }
 }
 
