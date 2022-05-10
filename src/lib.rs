@@ -175,9 +175,9 @@ impl<'de> Deserialize<'de> for Account {
                 })?,
                 client: Client {
                     client: client(),
-                    urls: creds.urls.clone(),
+                    urls: creds.urls,
                 },
-                id: creds.id.clone(),
+                id: creds.id,
             }),
         })
     }
