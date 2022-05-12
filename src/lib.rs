@@ -1,4 +1,7 @@
+//! Async pure-Rust ACME (RFC 8555) client.
+
 #![warn(unreachable_pub)]
+#![warn(missing_docs)]
 
 use std::borrow::Cow;
 use std::sync::Arc;
@@ -14,14 +17,21 @@ use serde::Serialize;
 
 mod types;
 pub use types::{
-    AccountCredentials, Authorization, AuthorizationStatus, ChallengeType, Error, Identifier,
-    LetsEncrypt, NewAccount, NewOrder, OrderState, OrderStatus,
+    AccountCredentials, Authorization, AuthorizationStatus, Challenge, ChallengeType, Error,
+    Identifier, KeyAuthorization, LetsEncrypt, NewAccount, NewOrder, OrderState, OrderStatus,
+    Problem,
 };
 use types::{
-    Challenge, DirectoryUrls, Empty, FinalizeRequest, Header, JoseJson, Jwk, KeyAuthorization,
-    KeyOrKeyId, Problem, SigningAlgorithm,
+    DirectoryUrls, Empty, FinalizeRequest, Header, JoseJson, Jwk, KeyOrKeyId, SigningAlgorithm,
 };
 
+/// An ACME order as described in RFC 8555 (section 7.1.3)
+///
+/// An order is created from an [`Account`] by calling [`Account::new_order()`]. The `Order`
+/// type represents the stable identity of an order, while the [`Order::state()`] method
+/// gives you access to the current state of the order according to the server.
+///
+/// <https://datatracker.ietf.org/doc/html/rfc8555#section-7.1.3>
 pub struct Order {
     account: Arc<AccountInner>,
     nonce: Option<String>,
@@ -29,6 +39,21 @@ pub struct Order {
 }
 
 impl Order {
+    /// Retrieve the authorizations for this order
+    ///
+    /// An order will contain one authorization to complete per identifier in the order.
+    /// After creating an order, you'll need to retrieve the authorizations so that
+    /// you can set up a challenge response for each authorization.
+    ///
+    /// For each authorization, you'll need to:
+    ///
+    /// * Select which [`ChallengeType`] you want to complete
+    /// * Create a [`KeyAuthorization`] for that [`Challenge`]
+    /// * Call [`Order::set_challenge_ready()`] for that challenge
+    ///
+    /// After the challenges have been set up, check the [`Order::state()`] to see
+    /// if the order is ready to be finalized (or becomes invalid). Once it is
+    /// ready, call `Order::finalize()` to get the certificate.
     pub async fn authorizations(
         &mut self,
         authz_urls: &[String],
@@ -40,10 +65,19 @@ impl Order {
         Ok(authorizations)
     }
 
+    /// Create a [`KeyAuthorization`] for the given [`Challenge`]
+    ///
+    /// Signs the challenge's token with the account's private key and use the
+    /// value from [`KeyAuthorization::as_str()`] as the challenge response.
     pub fn key_authorization(&self, challenge: &Challenge) -> KeyAuthorization {
         KeyAuthorization(format!("{}.{}", challenge.token, &self.account.key.thumb))
     }
 
+    /// Request a certificate from the given Certificate Signing Request (CSR)
+    ///
+    /// Creating a CSR is outside of the scope of instant-acme. Make sure you pass in a
+    /// DER representation of the CSR in `csr_der` and the [`OrderState::finalize`] URL
+    /// in `finalize_url`. The resulting `String` will contain the PEM-encoded certificate chain.
     pub async fn finalize(&mut self, csr_der: &[u8], finalize_url: &str) -> Result<String, Error> {
         let rsp = self
             .account
@@ -75,6 +109,9 @@ impl Order {
         )
     }
 
+    /// Notify the server that the given challenge is ready to be completed
+    ///
+    /// `challenge_url` should be the `Challenge::url` field.
     pub async fn set_challenge_ready(&mut self, challenge_url: &str) -> Result<(), Error> {
         let rsp = self
             .account
@@ -86,27 +123,41 @@ impl Order {
         Ok(())
     }
 
+    /// Get the current state of the given challenge
     pub async fn challenge(&mut self, challenge_url: &str) -> Result<Challenge, Error> {
         self.account.get(&mut self.nonce, challenge_url).await
     }
 
+    /// Get the current state of the order
     pub async fn state(&mut self) -> Result<OrderState, Error> {
         self.account.get(&mut self.nonce, &self.order_url).await
     }
 }
 
+/// An ACME account as described in RFC 8555 (section 7.1.2)
+///
+/// Create an [`Account`] with [`Account::create()`] or restore it from serialized data
+/// by passing deserialized [`AccountCredentials`] to [`Account::from_credentials()`].
+///
+/// The [`Account`] type is cheap to clone.
+///
+/// <https://datatracker.ietf.org/doc/html/rfc8555#section-7.1.2>
 #[derive(Clone)]
 pub struct Account {
     inner: Arc<AccountInner>,
 }
 
 impl Account {
+    /// Restore an existing account from the given credentials
+    ///
+    /// The [`AccountCredentials`] type is opaque, but supports deserialization.
     pub fn from_credentials(credentials: AccountCredentials<'_>) -> Result<Self, Error> {
         Ok(Self {
             inner: Arc::new(AccountInner::from_credentials(credentials)?),
         })
     }
 
+    /// Create a new account on the `server_url` with the information in [`NewAccount`]
     pub async fn create(account: &NewAccount<'_>, server_url: &str) -> Result<Account, Error> {
         let client = Client::new(server_url).await?;
         let key = Key::generate()?;
@@ -131,6 +182,9 @@ impl Account {
         })
     }
 
+    /// Create a new order based on the given [`NewOrder`]
+    ///
+    /// Returns both an [`Order`] instance and the initial [`OrderState`].
     pub async fn new_order<'a>(
         &'a self,
         order: &NewOrder<'_>,
@@ -158,7 +212,7 @@ impl Account {
         ))
     }
 
-    /// Get the account's credentials, which can be serialized.
+    /// Get the account's credentials, which can be serialized
     ///
     /// Pass the credentials to [`Account::from_credentials`] to regain access to the `Account`.
     pub fn credentials(&self) -> AccountCredentials<'_> {
