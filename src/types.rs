@@ -284,7 +284,7 @@ pub enum LetsEncrypt {
 }
 
 impl LetsEncrypt {
-    pub fn url(&self) -> &'static str {
+    pub const fn url(&self) -> &'static str {
         match self {
             LetsEncrypt::Production => "https://acme-v02.api.letsencrypt.org/directory",
             LetsEncrypt::Staging => "https://acme-staging-v02.api.letsencrypt.org/directory",
