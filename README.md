@@ -7,6 +7,9 @@
 
 instant-acme is an async, pure-Rust ACME (RFC 8555) client.
 
+If you think this is interesting, Instant Domains is
+[hiring](https://bookface.ycombinator.com/company/25451/jobs/52868) experienced Rust engineers.
+
 instant-acme is used in production at [InstantDomain](https://instantdomain.com/) to help
 us provision TLS certificates within seconds for our customers. instant-acme relies
 on Tokio and rustls to implement the [RFC 8555](https://www.rfc-editor.org/rfc/rfc8555.html)
