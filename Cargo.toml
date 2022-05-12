@@ -2,6 +2,13 @@
 name = "acme"
 version = "0.1.0"
 edition = "2021"
+license = "Apache-2.0"
+description = "Async pure-Rust ACME client"
+homepage = "https://github.com/InstantDomain/instant-acme"
+repository = "https://github.com/InstantDomain/instant-acme"
+documentation = "https://docs.rs/instant-acme"
+keywords = ["letsencrypt", "acme"]
+categories = ["web-programming", "api-bindings"]
 
 [dependencies]
 base64 = "0.13.0"
