@@ -342,7 +342,7 @@ pub enum ChallengeStatus {
 
 /// Status of an [Order](crate::Order)
 #[allow(missing_docs)]
-#[derive(Debug, Deserialize, PartialEq)]
+#[derive(Debug, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub enum OrderStatus {
     Pending,
