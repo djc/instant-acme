@@ -102,8 +102,9 @@ impl std::error::Error for Problem {}
 
 /// The response value to use for challenge responses
 ///
-/// Use [`KeyAuthorization::dns_value()`] for DNS challenges and
-/// [`KeyAuthorization::as_str()`] for other challenge types.
+/// Use [`KeyAuthorization::dns_value()`] for DNS challenges,
+/// [`KeyAuthorization::tls_value()`] for TLS challenges, and
+/// [`KeyAuthorization::as_str()`] for HTTP challenges.
 ///
 /// <https://datatracker.ietf.org/doc/html/rfc8555#section-8.1>
 pub struct KeyAuthorization(pub(crate) String);
@@ -117,6 +118,11 @@ impl KeyAuthorization {
     /// Get the base64-encoded SHA256 digest of the key authorization
     pub fn dns_value(&self) -> String {
         base64::encode_config(digest(&SHA256, self.0.as_bytes()), URL_SAFE_NO_PAD)
+    }
+    
+    /// Get the SHA256 digest of the key authorization
+    pub fn tls_value(&self) -> Vec<u8> {
+        digest(&SHA256, self.0.as_bytes()).as_ref().to_vec()
     }
 }
 
