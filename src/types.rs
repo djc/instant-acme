@@ -107,6 +107,7 @@ impl std::error::Error for Problem {}
 /// [`KeyAuthorization::as_str()`] for HTTP challenges.
 ///
 /// <https://datatracker.ietf.org/doc/html/rfc8555#section-8.1>
+///
 /// <https://datatracker.ietf.org/doc/html/rfc8737#section-3>
 pub struct KeyAuthorization(pub(crate) String);
 
