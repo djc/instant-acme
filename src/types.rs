@@ -103,7 +103,7 @@ impl std::error::Error for Problem {}
 /// The response value to use for challenge responses
 ///
 /// Use [`KeyAuthorization::dns_value()`] for DNS challenges,
-/// [`KeyAuthorization::tls_value()`] for TLS challenges, and
+/// [`KeyAuthorization::to_bytes()`] for TLS challenges, and
 /// [`KeyAuthorization::as_str()`] for HTTP challenges.
 ///
 /// <https://datatracker.ietf.org/doc/html/rfc8555#section-8.1>
@@ -115,14 +115,14 @@ impl KeyAuthorization {
         &self.0
     }
 
+    /// Get the SHA256 digest of the key authorization
+    pub fn to_bytes(&self) -> Vec<u8> {
+        digest(&SHA256, self.0.as_bytes()).as_ref().to_vec()
+    }
+
     /// Get the base64-encoded SHA256 digest of the key authorization
     pub fn dns_value(&self) -> String {
-        base64::encode_config(digest(&SHA256, self.0.as_bytes()), URL_SAFE_NO_PAD)
-    }
-    
-    /// Get the SHA256 digest of the key authorization
-    pub fn tls_value(&self) -> Vec<u8> {
-        digest(&SHA256, self.0.as_bytes()).as_ref().to_vec()
+        base64::encode_config(self.to_bytes(), URL_SAFE_NO_PAD)
     }
 }
 
