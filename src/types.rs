@@ -121,7 +121,7 @@ impl KeyAuthorization {
     pub fn to_bytes(&self) -> impl AsRef<[u8]> {
         digest(&SHA256, self.0.as_bytes())
     }
-    
+
     /// Get the base64-encoded SHA256 digest of the key authorization
     pub fn dns_value(&self) -> String {
         base64::encode_config(self.to_bytes(), URL_SAFE_NO_PAD)
