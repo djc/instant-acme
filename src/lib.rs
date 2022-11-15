@@ -422,13 +422,9 @@ trait Signer {
 
 /// The response value to use for challenge responses
 ///
-/// Use [`KeyAuthorization::dns_value()`] for DNS challenges,
-/// [`KeyAuthorization::to_bytes()`] for TLS challenges, and
-/// [`KeyAuthorization::as_str()`] for HTTP challenges.
+/// Refer to the methods below to see which encoding to use for your challenge type.
 ///
 /// <https://datatracker.ietf.org/doc/html/rfc8555#section-8.1>
-///
-/// <https://datatracker.ietf.org/doc/html/rfc8737#section-3>
 pub struct KeyAuthorization(String);
 
 impl KeyAuthorization {
@@ -437,16 +433,24 @@ impl KeyAuthorization {
     }
 
     /// Get the key authorization value
+    ///
+    /// This can be used for HTTP-01 challenge responses.
     pub fn as_str(&self) -> &str {
         &self.0
     }
 
-    /// Get the SHA256 digest of the key authorization
+    /// Get the SHA-256 digest of the key authorization
+    ///
+    /// This can be used for TLS-ALPN-01 challenge responses.
+    ///
+    /// <https://datatracker.ietf.org/doc/html/rfc8737#section-3>
     pub fn to_bytes(&self) -> impl AsRef<[u8]> {
         digest(&SHA256, self.0.as_bytes())
     }
 
     /// Get the base64-encoded SHA256 digest of the key authorization
+    ///
+    /// This can be used for DNS-01 challenge responses.
     pub fn dns_value(&self) -> String {
         base64::encode_config(self.to_bytes(), URL_SAFE_NO_PAD)
     }
