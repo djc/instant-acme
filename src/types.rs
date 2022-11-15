@@ -100,40 +100,6 @@ impl fmt::Display for Problem {
 
 impl std::error::Error for Problem {}
 
-/// The response value to use for challenge responses
-///
-/// Use [`KeyAuthorization::dns_value()`] for DNS challenges,
-/// [`KeyAuthorization::to_bytes()`] for TLS challenges, and
-/// [`KeyAuthorization::as_str()`] for HTTP challenges.
-///
-/// <https://datatracker.ietf.org/doc/html/rfc8555#section-8.1>
-///
-/// <https://datatracker.ietf.org/doc/html/rfc8737#section-3>
-pub struct KeyAuthorization(pub(crate) String);
-
-impl KeyAuthorization {
-    /// Get the key authorization value
-    pub fn as_str(&self) -> &str {
-        &self.0
-    }
-
-    /// Get the SHA256 digest of the key authorization
-    pub fn to_bytes(&self) -> impl AsRef<[u8]> {
-        digest(&SHA256, self.0.as_bytes())
-    }
-
-    /// Get the base64-encoded SHA256 digest of the key authorization
-    pub fn dns_value(&self) -> String {
-        base64::encode_config(self.to_bytes(), URL_SAFE_NO_PAD)
-    }
-}
-
-impl fmt::Debug for KeyAuthorization {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_tuple("KeyAuthorization").finish()
-    }
-}
-
 #[derive(Debug, Serialize)]
 pub(crate) struct FinalizeRequest {
     csr: String,

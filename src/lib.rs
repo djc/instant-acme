@@ -4,12 +4,14 @@
 #![warn(missing_docs)]
 
 use std::borrow::Cow;
+use std::fmt;
 use std::sync::Arc;
 
 use base64::URL_SAFE_NO_PAD;
 use hyper::client::HttpConnector;
 use hyper::header::{CONTENT_TYPE, LOCATION};
 use hyper::{Body, Method, Request, Response};
+use ring::digest::{digest, SHA256};
 use ring::rand::SystemRandom;
 use ring::signature::{EcdsaKeyPair, ECDSA_P256_SHA256_FIXED_SIGNING};
 use serde::de::DeserializeOwned;
@@ -18,8 +20,7 @@ use serde::Serialize;
 mod types;
 pub use types::{
     AccountCredentials, Authorization, AuthorizationStatus, Challenge, ChallengeType, Error,
-    Identifier, KeyAuthorization, LetsEncrypt, NewAccount, NewOrder, OrderState, OrderStatus,
-    Problem,
+    Identifier, LetsEncrypt, NewAccount, NewOrder, OrderState, OrderStatus, Problem,
 };
 use types::{
     DirectoryUrls, Empty, FinalizeRequest, Header, JoseJson, Jwk, KeyOrKeyId, SigningAlgorithm,
@@ -417,6 +418,40 @@ trait Signer {
     fn header<'n, 'u: 'n, 's: 'u>(&'s self, nonce: &'n str, url: &'u str) -> Header<'n>;
 
     fn key(&self) -> &Key;
+}
+
+/// The response value to use for challenge responses
+///
+/// Use [`KeyAuthorization::dns_value()`] for DNS challenges,
+/// [`KeyAuthorization::to_bytes()`] for TLS challenges, and
+/// [`KeyAuthorization::as_str()`] for HTTP challenges.
+///
+/// <https://datatracker.ietf.org/doc/html/rfc8555#section-8.1>
+///
+/// <https://datatracker.ietf.org/doc/html/rfc8737#section-3>
+pub struct KeyAuthorization(pub(crate) String);
+
+impl KeyAuthorization {
+    /// Get the key authorization value
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+
+    /// Get the SHA256 digest of the key authorization
+    pub fn to_bytes(&self) -> impl AsRef<[u8]> {
+        digest(&SHA256, self.0.as_bytes())
+    }
+
+    /// Get the base64-encoded SHA256 digest of the key authorization
+    pub fn dns_value(&self) -> String {
+        base64::encode_config(self.to_bytes(), URL_SAFE_NO_PAD)
+    }
+}
+
+impl fmt::Debug for KeyAuthorization {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_tuple("KeyAuthorization").finish()
+    }
 }
 
 fn nonce_from_response(rsp: &Response<Body>) -> Option<String> {
