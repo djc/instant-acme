@@ -71,7 +71,7 @@ impl Order {
     /// Signs the challenge's token with the account's private key and use the
     /// value from [`KeyAuthorization::as_str()`] as the challenge response.
     pub fn key_authorization(&self, challenge: &Challenge) -> KeyAuthorization {
-        KeyAuthorization(format!("{}.{}", challenge.token, &self.account.key.thumb))
+        KeyAuthorization::new(challenge, &self.account.key)
     }
 
     /// Request a certificate from the given Certificate Signing Request (CSR)
@@ -429,9 +429,13 @@ trait Signer {
 /// <https://datatracker.ietf.org/doc/html/rfc8555#section-8.1>
 ///
 /// <https://datatracker.ietf.org/doc/html/rfc8737#section-3>
-pub struct KeyAuthorization(pub(crate) String);
+pub struct KeyAuthorization(String);
 
 impl KeyAuthorization {
+    fn new(challenge: &Challenge, key: &Key) -> Self {
+        Self(format!("{}.{}", challenge.token, &key.thumb))
+    }
+
     /// Get the key authorization value
     pub fn as_str(&self) -> &str {
         &self.0
