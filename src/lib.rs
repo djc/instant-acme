@@ -444,7 +444,7 @@ impl KeyAuthorization {
     /// This can be used for TLS-ALPN-01 challenge responses.
     ///
     /// <https://datatracker.ietf.org/doc/html/rfc8737#section-3>
-    pub fn to_bytes(&self) -> impl AsRef<[u8]> {
+    pub fn digest(&self) -> impl AsRef<[u8]> {
         digest(&SHA256, self.0.as_bytes())
     }
 
@@ -452,7 +452,7 @@ impl KeyAuthorization {
     ///
     /// This can be used for DNS-01 challenge responses.
     pub fn dns_value(&self) -> String {
-        base64::encode_config(self.to_bytes(), URL_SAFE_NO_PAD)
+        base64::encode_config(self.digest(), URL_SAFE_NO_PAD)
     }
 }
 
