@@ -5,6 +5,7 @@ use base64::URL_SAFE_NO_PAD;
 use hyper::{Body, Response};
 use ring::digest::{digest, Digest, SHA256};
 use ring::signature::{EcdsaKeyPair, KeyPair};
+use rustls::Certificate;
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
@@ -252,6 +253,7 @@ pub(crate) struct DirectoryUrls {
     pub(crate) new_nonce: String,
     pub(crate) new_account: String,
     pub(crate) new_order: String,
+    pub(crate) revoke_cert: String,
 }
 
 #[derive(Serialize)]
@@ -353,3 +355,16 @@ pub(crate) enum SigningAlgorithm {
 
 #[derive(Debug, Serialize)]
 pub(crate) struct Empty {}
+
+#[derive(Debug, Serialize)]
+pub(crate) struct RevocationRequest {
+    certificate: String,
+}
+
+impl RevocationRequest {
+    pub(crate) fn new(certificate: &Certificate) -> Self {
+        Self {
+            certificate: base64::encode_config(&certificate, base64::URL_SAFE_NO_PAD),
+        }
+    }
+}

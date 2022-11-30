@@ -14,6 +14,7 @@ use hyper::{Body, Method, Request, Response};
 use ring::digest::{digest, SHA256};
 use ring::rand::SystemRandom;
 use ring::signature::{EcdsaKeyPair, ECDSA_P256_SHA256_FIXED_SIGNING};
+use rustls::Certificate;
 use serde::de::DeserializeOwned;
 use serde::Serialize;
 
@@ -23,7 +24,8 @@ pub use types::{
     Identifier, LetsEncrypt, NewAccount, NewOrder, OrderState, OrderStatus, Problem,
 };
 use types::{
-    DirectoryUrls, Empty, FinalizeRequest, Header, JoseJson, Jwk, KeyOrKeyId, SigningAlgorithm,
+    DirectoryUrls, Empty, FinalizeRequest, Header, JoseJson, Jwk, KeyOrKeyId, RevocationRequest,
+    SigningAlgorithm,
 };
 
 /// An ACME order as described in RFC 8555 (section 7.1.3)
@@ -219,6 +221,21 @@ impl Account {
     pub fn credentials(&self) -> AccountCredentials<'_> {
         self.inner.credentials()
     }
+
+    /// Revoke a certificate
+    pub async fn revoke(&self, certificate: &Certificate) -> Result<(), Error> {
+        let rsp = self
+            .inner
+            .post(
+                Some(&RevocationRequest::new(certificate)),
+                None,
+                &self.inner.client.urls.revoke_cert,
+            )
+            .await?;
+
+        let _ = Problem::from_response(rsp).await?;
+        Ok(())
+    }
 }
 
 struct AccountInner {
@@ -284,6 +301,28 @@ impl Signer for AccountInner {
         &self.key
     }
 }
+
+// struct Revocation {
+//     account: Arc<AccountInner>,
+//     certificate: Certificate,
+// }
+
+// impl Revocation {
+//     async fn revoke(&self) -> Result<(), Error> {
+//         let rsp = self
+//             .account
+//             .post(
+//                 Some(&RevocationRequest {
+//                     certificate: &self.certificate,
+//                 }),
+//                 None,
+//                 &self.account.client.urls.revoke_cert,
+//             )
+//             .await?;
+//         Problem::check(rsp).await?;
+//         Ok(())
+//     }
+// }
 
 #[derive(Debug)]
 struct Client {
