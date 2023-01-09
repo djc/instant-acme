@@ -7,7 +7,7 @@ use std::borrow::Cow;
 use std::fmt;
 use std::sync::Arc;
 
-use base64::URL_SAFE_NO_PAD;
+use base64::prelude::{Engine, BASE64_URL_SAFE_NO_PAD};
 use hyper::client::HttpConnector;
 use hyper::header::{CONTENT_TYPE, LOCATION};
 use hyper::{Body, Method, Request, Response};
@@ -230,10 +230,7 @@ struct AccountInner {
 impl AccountInner {
     fn from_credentials(credentials: AccountCredentials<'_>) -> Result<Self, Error> {
         Ok(Self {
-            key: Key::from_pkcs8_der(base64::decode_config(
-                &credentials.key_pkcs8,
-                URL_SAFE_NO_PAD,
-            )?)?,
+            key: Key::from_pkcs8_der(BASE64_URL_SAFE_NO_PAD.decode(&credentials.key_pkcs8)?)?,
             client: Client {
                 client: client(),
                 urls: credentials.urls.into_owned(),
@@ -264,7 +261,7 @@ impl AccountInner {
     fn credentials(&self) -> AccountCredentials<'_> {
         AccountCredentials {
             id: Cow::Borrowed(&self.id),
-            key_pkcs8: base64::encode_config(&self.key.pkcs8_der, URL_SAFE_NO_PAD),
+            key_pkcs8: BASE64_URL_SAFE_NO_PAD.encode(&self.key.pkcs8_der),
             urls: Cow::Borrowed(&self.client.urls),
         }
     }
@@ -345,7 +342,7 @@ impl Key {
         let rng = SystemRandom::new();
         let pkcs8 = EcdsaKeyPair::generate_pkcs8(&ECDSA_P256_SHA256_FIXED_SIGNING, &rng)?;
         let key = EcdsaKeyPair::from_pkcs8(&ECDSA_P256_SHA256_FIXED_SIGNING, pkcs8.as_ref())?;
-        let thumb = base64::encode_config(Jwk::thumb_sha256(&key)?, URL_SAFE_NO_PAD);
+        let thumb = BASE64_URL_SAFE_NO_PAD.encode(Jwk::thumb_sha256(&key)?);
 
         Ok(Self {
             rng,
@@ -358,7 +355,7 @@ impl Key {
 
     fn from_pkcs8_der(pkcs8_der: Vec<u8>) -> Result<Self, Error> {
         let key = EcdsaKeyPair::from_pkcs8(&ECDSA_P256_SHA256_FIXED_SIGNING, &pkcs8_der)?;
-        let thumb = base64::encode_config(Jwk::thumb_sha256(&key)?, URL_SAFE_NO_PAD);
+        let thumb = BASE64_URL_SAFE_NO_PAD.encode(Jwk::thumb_sha256(&key)?);
 
         Ok(Self {
             rng: SystemRandom::new(),
@@ -385,7 +382,7 @@ impl Key {
         Ok(Body::from(serde_json::to_vec(&JoseJson {
             protected,
             payload,
-            signature: base64::encode_config(signature.as_ref(), URL_SAFE_NO_PAD),
+            signature: BASE64_URL_SAFE_NO_PAD.encode(signature.as_ref()),
         })?))
     }
 }
@@ -452,7 +449,7 @@ impl KeyAuthorization {
     ///
     /// This can be used for DNS-01 challenge responses.
     pub fn dns_value(&self) -> String {
-        base64::encode_config(self.digest(), URL_SAFE_NO_PAD)
+        BASE64_URL_SAFE_NO_PAD.encode(self.digest())
     }
 }
 
@@ -469,10 +466,7 @@ fn nonce_from_response(rsp: &Response<Body>) -> Option<String> {
 }
 
 fn base64(data: &impl Serialize) -> Result<String, serde_json::Error> {
-    Ok(base64::encode_config(
-        serde_json::to_vec(data)?,
-        URL_SAFE_NO_PAD,
-    ))
+    Ok(BASE64_URL_SAFE_NO_PAD.encode(serde_json::to_vec(data)?))
 }
 
 fn client() -> hyper::Client<hyper_rustls::HttpsConnector<HttpConnector>> {

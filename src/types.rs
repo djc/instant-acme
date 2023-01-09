@@ -1,7 +1,7 @@
 use std::borrow::Cow;
 use std::fmt;
 
-use base64::URL_SAFE_NO_PAD;
+use base64::prelude::{Engine, BASE64_URL_SAFE_NO_PAD};
 use hyper::{Body, Response};
 use ring::digest::{digest, Digest, SHA256};
 use ring::signature::{EcdsaKeyPair, KeyPair};
@@ -108,7 +108,7 @@ pub(crate) struct FinalizeRequest {
 impl FinalizeRequest {
     pub(crate) fn new(csr_der: &[u8]) -> Self {
         Self {
-            csr: base64::encode_config(csr_der, URL_SAFE_NO_PAD),
+            csr: BASE64_URL_SAFE_NO_PAD.encode(csr_der),
         }
     }
 }
@@ -154,8 +154,8 @@ impl Jwk {
             crv: "P-256",
             kty: "EC",
             r#use: "sig",
-            x: base64::encode_config(x, URL_SAFE_NO_PAD),
-            y: base64::encode_config(y, URL_SAFE_NO_PAD),
+            x: BASE64_URL_SAFE_NO_PAD.encode(x),
+            y: BASE64_URL_SAFE_NO_PAD.encode(y),
         }
     }
 
