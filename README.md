@@ -22,7 +22,7 @@ specification.
 * Support for processing multiple orders concurrently
 * Uses hyper with rustls and Tokio for HTTP requests
 * Uses *ring* for ECDSA signing
-* Minimum supported Rust version: 1.51
+* Minimum supported Rust version: 1.64
 
 ## Limitations
 
