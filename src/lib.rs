@@ -377,7 +377,7 @@ impl Key {
             None => String::new(),
         };
 
-        let combined = format!("{}.{}", protected, payload);
+        let combined = format!("{protected}.{payload}");
         let signature = self.inner.sign(&self.rng, combined.as_bytes())?;
         Ok(Body::from(serde_json::to_vec(&JoseJson {
             protected,
