@@ -75,9 +75,9 @@ impl Order {
     /// Request a certificate from the given Certificate Signing Request (CSR)
     ///
     /// Creating a CSR is outside of the scope of instant-acme. Make sure you pass in a
-    /// DER representation of the CSR in `csr_der`. The resulting `String` will contain the
-    /// PEM-encoded certificate chain.
-    pub async fn finalize(&mut self, csr_der: &[u8]) -> Result<String, Error> {
+    /// DER representation of the CSR in `csr_der`. Call `certificate()` to retrieve the
+    /// certificate chain once the order is in the appropriate state.
+    pub async fn finalize(&mut self, csr_der: &[u8]) -> Result<(), Error> {
         let rsp = self
             .account
             .post(
@@ -88,24 +88,51 @@ impl Order {
             .await?;
 
         self.nonce = nonce_from_response(&rsp);
-        let state = Problem::check::<OrderState>(rsp).await?;
+        self.state = Problem::check::<OrderState>(rsp).await?;
+        Ok(())
+    }
 
-        let cert_url = match state.certificate {
-            Some(url) => url,
-            None => return Err(Error::Str("no certificate URL")),
+    /// Get the certificate for this order
+    ///
+    /// If the cached order state is in `ready` or `processing` state, this will poll the server
+    /// for the latest state. If the order is still in `processing` state after that, this will
+    /// return `Ok(None)`. If the order is in `valid` state, this will attempt to retrieve
+    /// the certificate from the server and return it as a `String`. If the order contains
+    /// an error or ends up in any state other than `valid` or `processing`, return an error.
+    pub async fn certificate(&mut self) -> Result<Option<String>, Error> {
+        if matches!(self.state.status, OrderStatus::Processing) {
+            let rsp = self
+                .account
+                .post(None::<&Empty>, self.nonce.take(), &self.url)
+                .await?;
+            self.nonce = nonce_from_response(&rsp);
+            self.state = Problem::check::<OrderState>(rsp).await?;
+        }
+
+        if let Some(error) = &self.state.error {
+            return Err(Error::Api(error.clone()));
+        } else if self.state.status == OrderStatus::Processing {
+            return Ok(None);
+        } else if self.state.status != OrderStatus::Valid {
+            return Err(Error::Str("invalid order state"));
+        }
+
+        let cert_url = match &self.state.certificate {
+            Some(cert_url) => cert_url,
+            None => return Err(Error::Str("no certificate URL found")),
         };
 
         let rsp = self
             .account
-            .post(None::<&Empty>, self.nonce.take(), &cert_url)
+            .post(None::<&Empty>, self.nonce.take(), cert_url)
             .await?;
 
         self.nonce = nonce_from_response(&rsp);
         let body = hyper::body::to_bytes(Problem::from_response(rsp).await?).await?;
-        Ok(
+        Ok(Some(
             String::from_utf8(body.to_vec())
                 .map_err(|_| "unable to decode certificate as UTF-8")?,
-        )
+        ))
     }
 
     /// Notify the server that the given challenge is ready to be completed
