@@ -36,7 +36,8 @@ use types::{
 pub struct Order {
     account: Arc<AccountInner>,
     nonce: Option<String>,
-    order_url: String,
+    url: String,
+    state: OrderState,
 }
 
 impl Order {
@@ -55,12 +56,9 @@ impl Order {
     /// After the challenges have been set up, check the [`Order::state()`] to see
     /// if the order is ready to be finalized (or becomes invalid). Once it is
     /// ready, call `Order::finalize()` to get the certificate.
-    pub async fn authorizations(
-        &mut self,
-        authz_urls: &[String],
-    ) -> Result<Vec<Authorization>, Error> {
-        let mut authorizations = Vec::with_capacity(authz_urls.len());
-        for url in authz_urls {
+    pub async fn authorizations(&mut self) -> Result<Vec<Authorization>, Error> {
+        let mut authorizations = Vec::with_capacity(self.state.authorizations.len());
+        for url in &self.state.authorizations {
             authorizations.push(self.account.get(&mut self.nonce, url).await?);
         }
         Ok(authorizations)
@@ -77,15 +75,15 @@ impl Order {
     /// Request a certificate from the given Certificate Signing Request (CSR)
     ///
     /// Creating a CSR is outside of the scope of instant-acme. Make sure you pass in a
-    /// DER representation of the CSR in `csr_der` and the [`OrderState::finalize`] URL
-    /// in `finalize_url`. The resulting `String` will contain the PEM-encoded certificate chain.
-    pub async fn finalize(&mut self, csr_der: &[u8], finalize_url: &str) -> Result<String, Error> {
+    /// DER representation of the CSR in `csr_der`. The resulting `String` will contain the
+    /// PEM-encoded certificate chain.
+    pub async fn finalize(&mut self, csr_der: &[u8]) -> Result<String, Error> {
         let rsp = self
             .account
             .post(
                 Some(&FinalizeRequest::new(csr_der)),
                 self.nonce.take(),
-                finalize_url,
+                &self.state.finalize,
             )
             .await?;
 
@@ -129,9 +127,28 @@ impl Order {
         self.account.get(&mut self.nonce, challenge_url).await
     }
 
-    /// Get the current state of the order
-    pub async fn state(&mut self) -> Result<OrderState, Error> {
-        self.account.get(&mut self.nonce, &self.order_url).await
+    /// Refresh the current state of the order
+    pub async fn refresh(&mut self) -> Result<&OrderState, Error> {
+        let rsp = self
+            .account
+            .post(None::<&Empty>, self.nonce.take(), &self.url)
+            .await?;
+
+        self.nonce = nonce_from_response(&rsp);
+        self.state = Problem::check::<OrderState>(rsp).await?;
+        Ok(&self.state)
+    }
+
+    /// Get the last known state of the order
+    ///
+    /// Call `refresh()` to get the latest state from the server.
+    pub fn state(&mut self) -> &OrderState {
+        &self.state
+    }
+
+    /// Get the URL of the order
+    pub fn url(&self) -> &str {
+        &self.url
     }
 }
 
@@ -185,11 +202,8 @@ impl Account {
 
     /// Create a new order based on the given [`NewOrder`]
     ///
-    /// Returns both an [`Order`] instance and the initial [`OrderState`].
-    pub async fn new_order<'a>(
-        &'a self,
-        order: &NewOrder<'_>,
-    ) -> Result<(Order, OrderState), Error> {
+    /// Returns an [`Order`] instance. Use the [`Order::state()`] method to inspect its state.
+    pub async fn new_order<'a>(&'a self, order: &NewOrder<'_>) -> Result<Order, Error> {
         let rsp = self
             .inner
             .post(Some(order), None, &self.inner.client.urls.new_order)
@@ -202,15 +216,12 @@ impl Account {
             .and_then(|hv| hv.to_str().ok())
             .map(|s| s.to_owned());
 
-        let status = Problem::check(rsp).await?;
-        Ok((
-            Order {
-                account: self.inner.clone(),
-                nonce,
-                order_url: order_url.ok_or("no order URL found")?,
-            },
-            status,
-        ))
+        Ok(Order {
+            account: self.inner.clone(),
+            nonce,
+            url: order_url.ok_or("no order URL found")?,
+            state: Problem::check::<OrderState>(rsp).await?,
+        })
     }
 
     /// Get the account's credentials, which can be serialized
