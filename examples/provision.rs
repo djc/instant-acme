@@ -34,19 +34,20 @@ async fn main() -> anyhow::Result<()> {
     // process multiple orders in parallel for a single account.
 
     let identifier = Identifier::Dns(opts.name);
-    let (mut order, state) = account
+    let mut order = account
         .new_order(&NewOrder {
             identifiers: &[identifier],
         })
         .await
         .unwrap();
 
+    let state = order.state();
     info!("order state: {:#?}", state);
     assert!(matches!(state.status, OrderStatus::Pending));
 
     // Pick the desired challenge type and prepare the response.
 
-    let authorizations = order.authorizations(&state.authorizations).await.unwrap();
+    let authorizations = order.authorizations().await.unwrap();
     let mut challenges = Vec::with_capacity(authorizations.len());
     for authz in &authorizations {
         match authz.status {
@@ -87,12 +88,12 @@ async fn main() -> anyhow::Result<()> {
 
     let mut tries = 1u8;
     let mut delay = Duration::from_millis(250);
-    let state = loop {
+    loop {
         sleep(delay).await;
-        let state = order.state().await.unwrap();
+        let state = order.refresh().await.unwrap();
         if let OrderStatus::Ready | OrderStatus::Invalid = state.status {
             info!("order state: {:#?}", state);
-            break state;
+            break;
         }
 
         delay *= 2;
@@ -104,10 +105,14 @@ async fn main() -> anyhow::Result<()> {
                 return Err(anyhow::anyhow!("order is not ready"));
             }
         }
-    };
+    }
 
-    if state.status == OrderStatus::Invalid {
-        return Err(anyhow::anyhow!("order is invalid"));
+    let state = order.state();
+    if state.status != OrderStatus::Ready {
+        return Err(anyhow::anyhow!(
+            "unexpected order status: {:?}",
+            state.status
+        ));
     }
 
     let mut names = Vec::with_capacity(challenges.len());
@@ -125,7 +130,7 @@ async fn main() -> anyhow::Result<()> {
 
     // Finalize the order and print certificate chain, private key and account credentials.
 
-    let cert_chain_pem = order.finalize(&csr, &state.finalize).await.unwrap();
+    let cert_chain_pem = order.finalize(&csr).await.unwrap();
     info!("certficate chain:\n\n{}", cert_chain_pem,);
     info!("private key:\n\n{}", cert.serialize_private_key_pem());
     info!(
