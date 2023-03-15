@@ -60,7 +60,7 @@ pub struct AccountCredentials<'a> {
 }
 
 /// An RFC 7807 problem document as returned by the ACME server
-#[derive(Debug, Deserialize)]
+#[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Problem {
     /// One of an enumerated list of problem types

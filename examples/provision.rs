@@ -130,8 +130,15 @@ async fn main() -> anyhow::Result<()> {
 
     // Finalize the order and print certificate chain, private key and account credentials.
 
-    let cert_chain_pem = order.finalize(&csr).await.unwrap();
-    info!("certficate chain:\n\n{}", cert_chain_pem,);
+    order.finalize(&csr).await.unwrap();
+    let cert_chain_pem = loop {
+        match order.certificate().await.unwrap() {
+            Some(cert_chain_pem) => break cert_chain_pem,
+            None => sleep(Duration::from_secs(1)).await,
+        }
+    };
+
+    info!("certficate chain:\n\n{}", cert_chain_pem);
     info!("private key:\n\n{}", cert.serialize_private_key_pem());
     info!(
         "account credentials:\n\n{}",
