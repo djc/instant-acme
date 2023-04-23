@@ -246,8 +246,8 @@ impl Account {
         Ok(Order {
             account: self.inner.clone(),
             nonce,
-            url: order_url.ok_or("no order URL found")?,
             state: Problem::check::<OrderState>(rsp).await?,
+            url: order_url.ok_or("no order URL found")?,
         })
     }
 
