@@ -15,7 +15,7 @@ pub enum Error {
     /// An JSON problem as returned by the ACME server
     ///
     /// RFC 8555 uses problem documents as described in RFC 7807.
-    #[error("API error: {0}")]
+    #[error(transparent)]
     Api(#[from] Problem),
     /// Failed to base64-decode data
     #[error("base64 decoding failed: {0}")]
