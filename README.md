@@ -17,6 +17,7 @@ specification.
 * Store/recover your account credentials by serializing/deserializing
 * Fully async implementation with tracing support
 * Support for processing multiple orders concurrently
+* Support for external account binding
 * Uses hyper with rustls and Tokio for HTTP requests
 * Uses *ring* for ECDSA signing
 * Minimum supported Rust version: 1.64

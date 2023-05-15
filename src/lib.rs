@@ -12,6 +12,7 @@ use hyper::client::HttpConnector;
 use hyper::header::{CONTENT_TYPE, LOCATION};
 use hyper::{Body, Method, Request, Response};
 use ring::digest::{digest, SHA256};
+use ring::hmac;
 use ring::rand::SystemRandom;
 use ring::signature::{EcdsaKeyPair, ECDSA_P256_SHA256_FIXED_SIGNING};
 use serde::de::DeserializeOwned;
@@ -23,8 +24,8 @@ pub use types::{
     Identifier, LetsEncrypt, NewAccount, NewOrder, OrderState, OrderStatus, Problem,
 };
 use types::{
-    DirectoryUrls, Empty, FinalizeRequest, Header, JoseJson, Jwk, KeyOrKeyId, Signer,
-    SigningAlgorithm,
+    DirectoryUrls, Empty, FinalizeRequest, Header, JoseJson, Jwk, KeyOrKeyId, NewAccountPayload,
+    Signer, SigningAlgorithm,
 };
 
 /// An ACME order as described in RFC 8555 (section 7.1.3)
@@ -204,11 +205,28 @@ impl Account {
     }
 
     /// Create a new account on the `server_url` with the information in [`NewAccount`]
-    pub async fn create(account: &NewAccount<'_>, server_url: &str) -> Result<Account, Error> {
+    pub async fn create(
+        account: &NewAccount<'_>,
+        server_url: &str,
+        external_account: Option<&ExternalAccountKey>,
+    ) -> Result<Account, Error> {
         let client = Client::new(server_url).await?;
         let key = Key::generate()?;
+        let payload = NewAccountPayload {
+            new_account: account,
+            external_account_binding: external_account
+                .map(|eak| {
+                    JoseJson::new(
+                        Some(&Jwk::new(&key.inner)),
+                        eak.header(None, &client.urls.new_account),
+                        eak,
+                    )
+                })
+                .transpose()?,
+        };
+
         let rsp = client
-            .post(Some(account), None, &key, &client.urls.new_account)
+            .post(Some(&payload), None, &key, &client.urls.new_account)
             .await?;
 
         let account_url = rsp
@@ -312,7 +330,8 @@ impl AccountInner {
 impl Signer for AccountInner {
     type Signature = <Key as Signer>::Signature;
 
-    fn header<'n, 'u: 'n, 's: 'u>(&'s self, nonce: &'n str, url: &'u str) -> Header<'n> {
+    fn header<'n, 'u: 'n, 's: 'u>(&'s self, nonce: Option<&'n str>, url: &'u str) -> Header<'n> {
+        debug_assert!(nonce.is_some());
         Header {
             alg: self.key.signing_algorithm,
             key: KeyOrKeyId::KeyId(&self.id),
@@ -362,7 +381,7 @@ impl Client {
         };
 
         let nonce = nonce.ok_or("no nonce found")?;
-        let body = JoseJson::new(payload, signer.header(&nonce, url), signer)?;
+        let body = JoseJson::new(payload, signer.header(Some(&nonce), url), signer)?;
         let request = Request::builder()
             .method(Method::POST)
             .uri(url)
@@ -415,7 +434,8 @@ impl Key {
 impl Signer for Key {
     type Signature = ring::signature::Signature;
 
-    fn header<'n, 'u: 'n, 's: 'u>(&'s self, nonce: &'n str, url: &'u str) -> Header<'n> {
+    fn header<'n, 'u: 'n, 's: 'u>(&'s self, nonce: Option<&'n str>, url: &'u str) -> Header<'n> {
+        debug_assert!(nonce.is_some());
         Header {
             alg: self.signing_algorithm,
             key: KeyOrKeyId::from_key(&self.inner),
@@ -468,6 +488,42 @@ impl KeyAuthorization {
 impl fmt::Debug for KeyAuthorization {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_tuple("KeyAuthorization").finish()
+    }
+}
+
+/// A HMAC key used to link account creation requests to an external account
+///
+/// See RFC 8555 section 7.3.4 for more information.
+pub struct ExternalAccountKey {
+    id: String,
+    key: hmac::Key,
+}
+
+impl ExternalAccountKey {
+    /// Create a new external account key
+    pub fn new(id: String, key_value: &[u8]) -> Self {
+        Self {
+            id,
+            key: hmac::Key::new(hmac::HMAC_SHA256, key_value),
+        }
+    }
+}
+
+impl Signer for ExternalAccountKey {
+    type Signature = hmac::Tag;
+
+    fn header<'n, 'u: 'n, 's: 'u>(&'s self, nonce: Option<&'n str>, url: &'u str) -> Header<'n> {
+        debug_assert_eq!(nonce, None);
+        Header {
+            alg: SigningAlgorithm::Hs256,
+            key: KeyOrKeyId::KeyId(&self.id),
+            nonce,
+            url,
+        }
+    }
+
+    fn sign(&self, payload: &[u8]) -> Result<Self::Signature, Error> {
+        Ok(hmac::sign(&self.key, payload))
     }
 }
 

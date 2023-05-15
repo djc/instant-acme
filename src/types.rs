@@ -118,7 +118,8 @@ pub(crate) struct Header<'a> {
     pub(crate) alg: SigningAlgorithm,
     #[serde(flatten)]
     pub(crate) key: KeyOrKeyId<'a>,
-    pub(crate) nonce: &'a str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) nonce: Option<&'a str>,
     pub(crate) url: &'a str,
 }
 
@@ -230,6 +231,15 @@ pub struct NewOrder<'a> {
     pub identifiers: &'a [Identifier],
 }
 
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct NewAccountPayload<'a> {
+    #[serde(flatten)]
+    pub(crate) new_account: &'a NewAccount<'a>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) external_account_binding: Option<JoseJson>,
+}
+
 /// Input data for [Account](crate::Account) creation
 ///
 /// To be passed into [Account::create()](crate::Account::create()).
@@ -286,7 +296,7 @@ impl JoseJson {
 pub(crate) trait Signer {
     type Signature: AsRef<[u8]>;
 
-    fn header<'n, 'u: 'n, 's: 'u>(&'s self, nonce: &'n str, url: &'u str) -> Header<'n>;
+    fn header<'n, 'u: 'n, 's: 'u>(&'s self, nonce: Option<&'n str>, url: &'u str) -> Header<'n>;
 
     fn sign(&self, payload: &[u8]) -> Result<Self::Signature, Error>;
 }
@@ -383,6 +393,8 @@ impl LetsEncrypt {
 pub(crate) enum SigningAlgorithm {
     /// ECDSA using P-256 and SHA-256
     Es256,
+    /// HMAC with SHA-256,
+    Hs256,
 }
 
 #[derive(Debug, Serialize)]
