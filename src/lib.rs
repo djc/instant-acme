@@ -12,6 +12,7 @@ use hyper::client::HttpConnector;
 use hyper::header::{CONTENT_TYPE, LOCATION};
 use hyper::{Body, Method, Request, Response};
 use ring::digest::{digest, SHA256};
+use ring::hmac;
 use ring::rand::SystemRandom;
 use ring::signature::{EcdsaKeyPair, ECDSA_P256_SHA256_FIXED_SIGNING};
 use serde::de::DeserializeOwned;
@@ -20,10 +21,12 @@ use serde::Serialize;
 mod types;
 pub use types::{
     AccountCredentials, Authorization, AuthorizationStatus, Challenge, ChallengeType, Error,
-    Identifier, LetsEncrypt, NewAccount, NewOrder, OrderState, OrderStatus, Problem,
+    ExternalAccountBinding, Identifier, LetsEncrypt, NewAccount, NewOrder, OrderState, OrderStatus,
+    Problem,
 };
 use types::{
-    DirectoryUrls, Empty, FinalizeRequest, Header, JoseJson, Jwk, KeyOrKeyId, SigningAlgorithm,
+    DirectoryUrls, Empty, FinalizeRequest, Header, JoseJson, JoseNewAccount, Jwk, KeyOrKeyId,
+    SigningAlgorithm,
 };
 
 /// An ACME order as described in RFC 8555 (section 7.1.3)
@@ -206,8 +209,9 @@ impl Account {
     pub async fn create(account: &NewAccount<'_>, server_url: &str) -> Result<Account, Error> {
         let client = Client::new(server_url).await?;
         let key = Key::generate()?;
+        let jose_account = JoseNewAccount::new(account, &key, &client.urls.new_account)?;
         let rsp = client
-            .post(Some(account), None, &key, &client.urls.new_account)
+            .post(Some(&jose_account), None, &key, &client.urls.new_account)
             .await?;
 
         let account_url = rsp
@@ -313,7 +317,7 @@ impl Signer for AccountInner {
         Header {
             alg: self.key.signing_algorithm,
             key: KeyOrKeyId::KeyId(&self.id),
-            nonce,
+            nonce: Some(nonce),
             url,
         }
     }
@@ -433,7 +437,7 @@ impl Signer for Key {
         Header {
             alg: self.signing_algorithm,
             key: KeyOrKeyId::from_key(&self.inner),
-            nonce,
+            nonce: Some(nonce),
             url,
         }
     }
@@ -456,6 +460,43 @@ trait Signer {
     fn header<'n, 'u: 'n, 's: 'u>(&'s self, nonce: &'n str, url: &'u str) -> Header<'n>;
 
     fn key(&self) -> &Key;
+}
+
+impl<'a> JoseNewAccount<'a> {
+    fn new(account: &NewAccount<'a>, key: &Key, server_url: &str) -> Result<Self, Error> {
+        Ok(Self {
+            contact: account.contact,
+            terms_of_service_agreed: account.terms_of_service_agreed,
+            only_return_existing: account.only_return_existing,
+            external_account_binding: if let Some(eab) = &account.external_account_binding {
+                Some(eab.sign(key, server_url)?)
+            } else {
+                None
+            },
+        })
+    }
+}
+
+impl<'a> ExternalAccountBinding<'a> {
+    fn sign(&self, key: &Key, server_url: &str) -> Result<JoseJson, Error> {
+        let header = Header {
+            alg: SigningAlgorithm::Hs256,
+            key: KeyOrKeyId::KeyId(self.key_id),
+            nonce: None,
+            url: server_url,
+        };
+        let protected = base64(&header)?;
+        let payload = base64(&Jwk::new(&key.inner))?;
+        let combined = format!("{protected}.{payload}");
+        let hmac_key = BASE64_URL_SAFE_NO_PAD.decode(self.hmac_key)?;
+        let hmac_key = hmac::Key::new(hmac::HMAC_SHA256, &hmac_key);
+        let signature = hmac::sign(&hmac_key, combined.as_bytes());
+        Ok(JoseJson {
+            protected,
+            payload,
+            signature: BASE64_URL_SAFE_NO_PAD.encode(signature.as_ref()),
+        })
+    }
 }
 
 /// The response value to use for challenge responses

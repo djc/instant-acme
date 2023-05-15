@@ -118,7 +118,8 @@ pub(crate) struct Header<'a> {
     pub(crate) alg: SigningAlgorithm,
     #[serde(flatten)]
     pub(crate) key: KeyOrKeyId<'a>,
-    pub(crate) nonce: &'a str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) nonce: Option<&'a str>,
     pub(crate) url: &'a str,
 }
 
@@ -233,8 +234,7 @@ pub struct NewOrder<'a> {
 /// Input data for [Account](crate::Account) creation
 ///
 /// To be passed into [Account::create()](crate::Account::create()).
-#[derive(Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
+#[derive(Debug)]
 pub struct NewAccount<'a> {
     /// A list of contact URIs (like `mailto:info@example.com`)
     pub contact: &'a [&'a str],
@@ -244,6 +244,28 @@ pub struct NewAccount<'a> {
     ///
     /// Setting this to `false` has not been tested.
     pub only_return_existing: bool,
+    /// External account binding
+    pub external_account_binding: Option<ExternalAccountBinding<'a>>,
+}
+
+/// External account binding as described in RFC 8555 (section 7.3.4)
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ExternalAccountBinding<'a> {
+    /// EAB Key ID
+    pub key_id: &'a str,
+    /// EAB HMAC key
+    pub hmac_key: &'a str,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct JoseNewAccount<'a> {
+    pub(crate) contact: &'a [&'a str],
+    pub(crate) terms_of_service_agreed: bool,
+    pub(crate) only_return_existing: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) external_account_binding: Option<JoseJson>,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -349,6 +371,8 @@ impl LetsEncrypt {
 pub(crate) enum SigningAlgorithm {
     /// ECDSA using P-256 and SHA-256
     Es256,
+    /// HMAC with SHA-256,
+    Hs256,
 }
 
 #[derive(Debug, Serialize)]

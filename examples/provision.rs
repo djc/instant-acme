@@ -24,6 +24,7 @@ async fn main() -> anyhow::Result<()> {
             contact: &[],
             terms_of_service_agreed: true,
             only_return_existing: false,
+            external_account_binding: None,
         },
         LetsEncrypt::Staging.url(),
     )
