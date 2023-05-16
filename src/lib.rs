@@ -12,7 +12,6 @@ use hyper::client::HttpConnector;
 use hyper::header::{CONTENT_TYPE, LOCATION};
 use hyper::{Body, Method, Request, Response};
 use ring::digest::{digest, SHA256};
-use ring::hmac;
 use ring::rand::SystemRandom;
 use ring::signature::{EcdsaKeyPair, ECDSA_P256_SHA256_FIXED_SIGNING};
 use serde::de::DeserializeOwned;
@@ -460,43 +459,6 @@ trait Signer {
     fn header<'n, 'u: 'n, 's: 'u>(&'s self, nonce: &'n str, url: &'u str) -> Header<'n>;
 
     fn key(&self) -> &Key;
-}
-
-impl<'a> JoseNewAccount<'a> {
-    fn new(account: &NewAccount<'a>, key: &Key, server_url: &str) -> Result<Self, Error> {
-        Ok(Self {
-            contact: account.contact,
-            terms_of_service_agreed: account.terms_of_service_agreed,
-            only_return_existing: account.only_return_existing,
-            external_account_binding: if let Some(eab) = &account.external_account_binding {
-                Some(eab.sign(key, server_url)?)
-            } else {
-                None
-            },
-        })
-    }
-}
-
-impl<'a> ExternalAccountBinding<'a> {
-    fn sign(&self, key: &Key, server_url: &str) -> Result<JoseJson, Error> {
-        let header = Header {
-            alg: SigningAlgorithm::Hs256,
-            key: KeyOrKeyId::KeyId(self.key_id),
-            nonce: None,
-            url: server_url,
-        };
-        let protected = base64(&header)?;
-        let payload = base64(&Jwk::new(&key.inner))?;
-        let combined = format!("{protected}.{payload}");
-        let hmac_key = BASE64_URL_SAFE_NO_PAD.decode(self.hmac_key)?;
-        let hmac_key = hmac::Key::new(hmac::HMAC_SHA256, &hmac_key);
-        let signature = hmac::sign(&hmac_key, combined.as_bytes());
-        Ok(JoseJson {
-            protected,
-            payload,
-            signature: BASE64_URL_SAFE_NO_PAD.encode(signature.as_ref()),
-        })
-    }
 }
 
 /// The response value to use for challenge responses

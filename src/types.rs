@@ -1,9 +1,11 @@
 use std::borrow::Cow;
 use std::fmt;
 
+use super::{base64, Key};
 use base64::prelude::{Engine, BASE64_URL_SAFE_NO_PAD};
 use hyper::{Body, Response};
 use ring::digest::{digest, Digest, SHA256};
+use ring::hmac;
 use ring::signature::{EcdsaKeyPair, KeyPair};
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
@@ -258,6 +260,28 @@ pub struct ExternalAccountBinding<'a> {
     pub hmac_key: &'a str,
 }
 
+impl<'a> ExternalAccountBinding<'a> {
+    fn sign(&self, key: &Key, server_url: &str) -> Result<JoseJson, Error> {
+        let header = Header {
+            alg: SigningAlgorithm::Hs256,
+            key: KeyOrKeyId::KeyId(self.key_id),
+            nonce: None,
+            url: server_url,
+        };
+        let protected = base64(&header)?;
+        let payload = base64(&Jwk::new(&key.inner))?;
+        let combined = format!("{protected}.{payload}");
+        let hmac_key = BASE64_URL_SAFE_NO_PAD.decode(self.hmac_key)?;
+        let hmac_key = hmac::Key::new(hmac::HMAC_SHA256, &hmac_key);
+        let signature = hmac::sign(&hmac_key, combined.as_bytes());
+        Ok(JoseJson {
+            protected,
+            payload,
+            signature: BASE64_URL_SAFE_NO_PAD.encode(signature.as_ref()),
+        })
+    }
+}
+
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct JoseNewAccount<'a> {
@@ -266,6 +290,25 @@ pub(crate) struct JoseNewAccount<'a> {
     pub(crate) only_return_existing: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) external_account_binding: Option<JoseJson>,
+}
+
+impl<'a> JoseNewAccount<'a> {
+    pub(crate) fn new(
+        account: &NewAccount<'a>,
+        key: &Key,
+        server_url: &str,
+    ) -> Result<Self, Error> {
+        Ok(Self {
+            contact: account.contact,
+            terms_of_service_agreed: account.terms_of_service_agreed,
+            only_return_existing: account.only_return_existing,
+            external_account_binding: if let Some(eab) = &account.external_account_binding {
+                Some(eab.sign(key, server_url)?)
+            } else {
+                None
+            },
+        })
+    }
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
