@@ -23,7 +23,7 @@ pub use types::{
     Identifier, LetsEncrypt, NewAccount, NewOrder, OrderState, OrderStatus, Problem,
 };
 use types::{
-    DirectoryUrls, Empty, FinalizeRequest, Header, JoseJson, Jwk, KeyOrKeyId, SigningAlgorithm,
+    DirectoryUrls, Empty, FinalizeRequest, Header, Jwk, KeyOrKeyId, Signer, SigningAlgorithm,
 };
 
 /// An ACME order as described in RFC 8555 (section 7.1.3)
@@ -428,34 +428,6 @@ impl Signer for Key {
     }
 }
 
-trait Signer {
-    type Signature: AsRef<[u8]>;
-
-    fn signed_json(
-        &self,
-        payload: Option<&impl Serialize>,
-        protected: Header<'_>,
-    ) -> Result<JoseJson, Error> {
-        let protected = base64(&protected)?;
-        let payload = match payload {
-            Some(data) => base64(&data)?,
-            None => String::new(),
-        };
-
-        let combined = format!("{protected}.{payload}");
-        let signature = self.sign(combined.as_bytes())?;
-        Ok(JoseJson {
-            protected,
-            payload,
-            signature: BASE64_URL_SAFE_NO_PAD.encode(signature.as_ref()),
-        })
-    }
-
-    fn header<'n, 'u: 'n, 's: 'u>(&'s self, nonce: &'n str, url: &'u str) -> Header<'n>;
-
-    fn sign(&self, payload: &[u8]) -> Result<Self::Signature, Error>;
-}
-
 /// The response value to use for challenge responses
 ///
 /// Refer to the methods below to see which encoding to use for your challenge type.
@@ -502,10 +474,6 @@ fn nonce_from_response(rsp: &Response<Body>) -> Option<String> {
     rsp.headers()
         .get(REPLAY_NONCE)
         .and_then(|hv| String::from_utf8(hv.as_ref().to_vec()).ok())
-}
-
-fn base64(data: &impl Serialize) -> Result<String, serde_json::Error> {
-    Ok(BASE64_URL_SAFE_NO_PAD.encode(serde_json::to_vec(data)?))
 }
 
 fn client() -> hyper::Client<hyper_rustls::HttpsConnector<HttpConnector>> {
