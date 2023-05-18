@@ -261,6 +261,38 @@ pub(crate) struct JoseJson {
     pub(crate) signature: String,
 }
 
+pub(crate) trait Signer {
+    type Signature: AsRef<[u8]>;
+
+    fn signed_json(
+        &self,
+        payload: Option<&impl Serialize>,
+        protected: Header<'_>,
+    ) -> Result<JoseJson, Error> {
+        let protected = base64(&protected)?;
+        let payload = match payload {
+            Some(data) => base64(&data)?,
+            None => String::new(),
+        };
+
+        let combined = format!("{protected}.{payload}");
+        let signature = self.sign(combined.as_bytes())?;
+        Ok(JoseJson {
+            protected,
+            payload,
+            signature: BASE64_URL_SAFE_NO_PAD.encode(signature.as_ref()),
+        })
+    }
+
+    fn header<'n, 'u: 'n, 's: 'u>(&'s self, nonce: &'n str, url: &'u str) -> Header<'n>;
+
+    fn sign(&self, payload: &[u8]) -> Result<Self::Signature, Error>;
+}
+
+fn base64(data: &impl Serialize) -> Result<String, serde_json::Error> {
+    Ok(BASE64_URL_SAFE_NO_PAD.encode(serde_json::to_vec(data)?))
+}
+
 /// An ACME authorization as described in RFC 8555 (section 7.1.4)
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
