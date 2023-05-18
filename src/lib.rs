@@ -309,6 +309,8 @@ impl AccountInner {
 }
 
 impl Signer for AccountInner {
+    type Signature = <Key as Signer>::Signature;
+
     fn header<'n, 'u: 'n, 's: 'u>(&'s self, nonce: &'n str, url: &'u str) -> Header<'n> {
         Header {
             alg: self.key.signing_algorithm,
@@ -316,6 +318,10 @@ impl Signer for AccountInner {
             nonce,
             url,
         }
+    }
+
+    fn sign(&self, payload: &[u8]) -> Result<Self::Signature, Error> {
+        self.key.sign(payload)
     }
 
     fn key(&self) -> &Key {
@@ -359,7 +365,9 @@ impl Client {
         };
 
         let nonce = nonce.ok_or("no nonce found")?;
-        let body = signer.key().signed_json(payload, signer.header(&nonce, url))?;
+        let body = signer
+            .key()
+            .signed_json(payload, signer.header(&nonce, url))?;
         let request = Request::builder()
             .method(Method::POST)
             .uri(url)
@@ -420,7 +428,7 @@ impl Key {
         };
 
         let combined = format!("{protected}.{payload}");
-        let signature = self.inner.sign(&self.rng, combined.as_bytes())?;
+        let signature = self.sign(combined.as_bytes())?;
         Ok(Body::from(serde_json::to_vec(&JoseJson {
             protected,
             payload,
@@ -430,6 +438,8 @@ impl Key {
 }
 
 impl Signer for Key {
+    type Signature = ring::signature::Signature;
+
     fn header<'n, 'u: 'n, 's: 'u>(&'s self, nonce: &'n str, url: &'u str) -> Header<'n> {
         Header {
             alg: self.signing_algorithm,
@@ -439,13 +449,21 @@ impl Signer for Key {
         }
     }
 
+    fn sign(&self, payload: &[u8]) -> Result<Self::Signature, Error> {
+        Ok(self.inner.sign(&self.rng, payload)?)
+    }
+
     fn key(&self) -> &Key {
         self
     }
 }
 
 trait Signer {
+    type Signature: AsRef<[u8]>;
+
     fn header<'n, 'u: 'n, 's: 'u>(&'s self, nonce: &'n str, url: &'u str) -> Header<'n>;
+
+    fn sign(&self, payload: &[u8]) -> Result<Self::Signature, Error>;
 
     fn key(&self) -> &Key;
 }
