@@ -359,11 +359,12 @@ impl Client {
         };
 
         let nonce = nonce.ok_or("no nonce found")?;
+        let body = signer.key().signed_json(payload, signer.header(&nonce, url))?;
         let request = Request::builder()
             .method(Method::POST)
             .uri(url)
             .header(CONTENT_TYPE, JOSE_JSON)
-            .body(signer.signed_json(payload, &nonce, url)?)
+            .body(body)
             .unwrap();
 
         Ok(self.client.request(request).await?)
@@ -444,15 +445,6 @@ impl Signer for Key {
 }
 
 trait Signer {
-    fn signed_json(
-        &self,
-        payload: Option<&impl Serialize>,
-        nonce: &str,
-        url: &str,
-    ) -> Result<Body, Error> {
-        self.key().signed_json(payload, self.header(nonce, url))
-    }
-
     fn header<'n, 'u: 'n, 's: 'u>(&'s self, nonce: &'n str, url: &'u str) -> Header<'n>;
 
     fn key(&self) -> &Key;
