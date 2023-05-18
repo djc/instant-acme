@@ -323,10 +323,6 @@ impl Signer for AccountInner {
     fn sign(&self, payload: &[u8]) -> Result<Self::Signature, Error> {
         self.key.sign(payload)
     }
-
-    fn key(&self) -> &Key {
-        &self.key
-    }
 }
 
 #[derive(Debug)]
@@ -365,9 +361,7 @@ impl Client {
         };
 
         let nonce = nonce.ok_or("no nonce found")?;
-        let body = signer
-            .key()
-            .signed_json(payload, signer.header(&nonce, url))?;
+        let body = signer.signed_json(payload, signer.header(&nonce, url))?;
         let request = Request::builder()
             .method(Method::POST)
             .uri(url)
@@ -415,6 +409,27 @@ impl Key {
             thumb,
         })
     }
+}
+
+impl Signer for Key {
+    type Signature = ring::signature::Signature;
+
+    fn header<'n, 'u: 'n, 's: 'u>(&'s self, nonce: &'n str, url: &'u str) -> Header<'n> {
+        Header {
+            alg: self.signing_algorithm,
+            key: KeyOrKeyId::from_key(&self.inner),
+            nonce,
+            url,
+        }
+    }
+
+    fn sign(&self, payload: &[u8]) -> Result<Self::Signature, Error> {
+        Ok(self.inner.sign(&self.rng, payload)?)
+    }
+}
+
+trait Signer {
+    type Signature: AsRef<[u8]>;
 
     fn signed_json(
         &self,
@@ -435,37 +450,10 @@ impl Key {
             signature: BASE64_URL_SAFE_NO_PAD.encode(signature.as_ref()),
         })
     }
-}
-
-impl Signer for Key {
-    type Signature = ring::signature::Signature;
-
-    fn header<'n, 'u: 'n, 's: 'u>(&'s self, nonce: &'n str, url: &'u str) -> Header<'n> {
-        Header {
-            alg: self.signing_algorithm,
-            key: KeyOrKeyId::from_key(&self.inner),
-            nonce,
-            url,
-        }
-    }
-
-    fn sign(&self, payload: &[u8]) -> Result<Self::Signature, Error> {
-        Ok(self.inner.sign(&self.rng, payload)?)
-    }
-
-    fn key(&self) -> &Key {
-        self
-    }
-}
-
-trait Signer {
-    type Signature: AsRef<[u8]>;
 
     fn header<'n, 'u: 'n, 's: 'u>(&'s self, nonce: &'n str, url: &'u str) -> Header<'n>;
 
     fn sign(&self, payload: &[u8]) -> Result<Self::Signature, Error>;
-
-    fn key(&self) -> &Key;
 }
 
 /// The response value to use for challenge responses
