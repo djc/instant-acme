@@ -372,7 +372,7 @@ impl Client {
             .method(Method::POST)
             .uri(url)
             .header(CONTENT_TYPE, JOSE_JSON)
-            .body(body)
+            .body(Body::from(serde_json::to_vec(&body)?))
             .unwrap();
 
         Ok(self.client.request(request).await?)
@@ -420,7 +420,7 @@ impl Key {
         &self,
         payload: Option<&impl Serialize>,
         protected: Header<'_>,
-    ) -> Result<Body, Error> {
+    ) -> Result<JoseJson, Error> {
         let protected = base64(&protected)?;
         let payload = match payload {
             Some(data) => base64(&data)?,
@@ -429,11 +429,11 @@ impl Key {
 
         let combined = format!("{protected}.{payload}");
         let signature = self.sign(combined.as_bytes())?;
-        Ok(Body::from(serde_json::to_vec(&JoseJson {
+        Ok(JoseJson {
             protected,
             payload,
             signature: BASE64_URL_SAFE_NO_PAD.encode(signature.as_ref()),
-        })?))
+        })
     }
 }
 
