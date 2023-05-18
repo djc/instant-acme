@@ -261,14 +261,12 @@ pub(crate) struct JoseJson {
     pub(crate) signature: String,
 }
 
-pub(crate) trait Signer {
-    type Signature: AsRef<[u8]>;
-
-    fn signed_json(
-        &self,
+impl JoseJson {
+    pub(crate) fn new(
         payload: Option<&impl Serialize>,
         protected: Header<'_>,
-    ) -> Result<JoseJson, Error> {
+        signer: &impl Signer,
+    ) -> Result<Self, Error> {
         let protected = base64(&protected)?;
         let payload = match payload {
             Some(data) => base64(&data)?,
@@ -276,13 +274,17 @@ pub(crate) trait Signer {
         };
 
         let combined = format!("{protected}.{payload}");
-        let signature = self.sign(combined.as_bytes())?;
-        Ok(JoseJson {
+        let signature = signer.sign(combined.as_bytes())?;
+        Ok(Self {
             protected,
             payload,
             signature: BASE64_URL_SAFE_NO_PAD.encode(signature.as_ref()),
         })
     }
+}
+
+pub(crate) trait Signer {
+    type Signature: AsRef<[u8]>;
 
     fn header<'n, 'u: 'n, 's: 'u>(&'s self, nonce: &'n str, url: &'u str) -> Header<'n>;
 
