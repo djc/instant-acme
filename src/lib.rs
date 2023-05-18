@@ -23,7 +23,8 @@ pub use types::{
     Identifier, LetsEncrypt, NewAccount, NewOrder, OrderState, OrderStatus, Problem,
 };
 use types::{
-    DirectoryUrls, Empty, FinalizeRequest, Header, Jwk, KeyOrKeyId, Signer, SigningAlgorithm,
+    DirectoryUrls, Empty, FinalizeRequest, Header, JoseJson, Jwk, KeyOrKeyId, Signer,
+    SigningAlgorithm,
 };
 
 /// An ACME order as described in RFC 8555 (section 7.1.3)
@@ -361,7 +362,7 @@ impl Client {
         };
 
         let nonce = nonce.ok_or("no nonce found")?;
-        let body = signer.signed_json(payload, signer.header(&nonce, url))?;
+        let body = JoseJson::new(payload, signer.header(&nonce, url), signer)?;
         let request = Request::builder()
             .method(Method::POST)
             .uri(url)
