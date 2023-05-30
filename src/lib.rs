@@ -8,7 +8,9 @@ use std::fmt;
 use std::sync::Arc;
 
 use base64::prelude::{Engine, BASE64_URL_SAFE_NO_PAD};
-use hyper::client::{HttpConnector, ResponseFuture};
+#[cfg(feature = "hyper-rustls")]
+use hyper::client::HttpConnector;
+use hyper::client::ResponseFuture;
 use hyper::header::{CONTENT_TYPE, LOCATION};
 use hyper::{Body, Method, Request, Response};
 use ring::digest::{digest, SHA256};
@@ -198,6 +200,7 @@ impl Account {
     /// Restore an existing account from the given credentials
     ///
     /// The [`AccountCredentials`] type is opaque, but supports deserialization.
+    #[cfg(feature = "hyper-rustls")]
     pub fn from_credentials(credentials: AccountCredentials<'_>) -> Result<Self, Error> {
         Ok(Self {
             inner: Arc::new(AccountInner::from_credentials(
@@ -220,6 +223,7 @@ impl Account {
     }
 
     /// Create a new account on the `server_url` with the information in [`NewAccount`]
+    #[cfg(feature = "hyper-rustls")]
     pub async fn create(
         account: &NewAccount<'_>,
         server_url: &str,
@@ -589,14 +593,17 @@ fn nonce_from_response(rsp: &Response<Body>) -> Option<String> {
         .and_then(|hv| String::from_utf8(hv.as_ref().to_vec()).ok())
 }
 
+#[cfg(feature = "hyper-rustls")]
 struct DefaultClient(hyper::Client<hyper_rustls::HttpsConnector<HttpConnector>>);
 
+#[cfg(feature = "hyper-rustls")]
 impl HttpClient for DefaultClient {
     fn request(&self, req: Request<Body>) -> ResponseFuture {
         self.0.request(req)
     }
 }
 
+#[cfg(feature = "hyper-rustls")]
 impl Default for DefaultClient {
     fn default() -> Self {
         Self(
