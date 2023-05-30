@@ -8,7 +8,7 @@ use std::fmt;
 use std::sync::Arc;
 
 use base64::prelude::{Engine, BASE64_URL_SAFE_NO_PAD};
-use hyper::client::HttpConnector;
+use hyper::client::{HttpConnector, ResponseFuture};
 use hyper::header::{CONTENT_TYPE, LOCATION};
 use hyper::{Body, Method, Request, Response};
 use ring::digest::{digest, SHA256};
@@ -210,7 +210,7 @@ impl Account {
         server_url: &str,
         external_account: Option<&ExternalAccountKey>,
     ) -> Result<Account, Error> {
-        let client = Client::new(server_url).await?;
+        let client = Client::new(server_url, Box::new(DefaultClient::default())).await?;
         let key = Key::generate()?;
         let payload = NewAccountPayload {
             new_account: account,
@@ -292,7 +292,7 @@ impl AccountInner {
         Ok(Self {
             key: Key::from_pkcs8_der(BASE64_URL_SAFE_NO_PAD.decode(&credentials.key_pkcs8)?)?,
             client: Client {
-                client: client(),
+                http: Box::new(DefaultClient::default()),
                 urls: credentials.urls.into_owned(),
             },
             id: credentials.id.into_owned(),
@@ -345,19 +345,21 @@ impl Signer for AccountInner {
     }
 }
 
-#[derive(Debug)]
 struct Client {
-    client: hyper::Client<hyper_rustls::HttpsConnector<HttpConnector>>,
+    http: Box<dyn HttpClient>,
     urls: DirectoryUrls,
 }
 
 impl Client {
-    async fn new(server_url: &str) -> Result<Self, Error> {
-        let client = client();
-        let rsp = client.get(server_url.parse()?).await?;
+    async fn new(server_url: &str, http: Box<dyn HttpClient>) -> Result<Self, Error> {
+        let req = Request::builder()
+            .uri(server_url)
+            .body(Body::empty())
+            .unwrap();
+        let rsp = http.request(req).await?;
         let body = hyper::body::to_bytes(rsp.into_body()).await?;
         Ok(Client {
-            client,
+            http,
             urls: serde_json::from_slice(&body)?,
         })
     }
@@ -376,7 +378,7 @@ impl Client {
                 .body(Body::empty())
                 .unwrap();
 
-            let rsp = self.client.request(request).await?;
+            let rsp = self.http.request(request).await?;
             nonce = nonce_from_response(&rsp);
         };
 
@@ -389,7 +391,16 @@ impl Client {
             .body(Body::from(serde_json::to_vec(&body)?))
             .unwrap();
 
-        Ok(self.client.request(request).await?)
+        Ok(self.http.request(request).await?)
+    }
+}
+
+impl fmt::Debug for Client {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("Client")
+            .field("client", &"..")
+            .field("urls", &self.urls)
+            .finish()
     }
 }
 
@@ -533,15 +544,31 @@ fn nonce_from_response(rsp: &Response<Body>) -> Option<String> {
         .and_then(|hv| String::from_utf8(hv.as_ref().to_vec()).ok())
 }
 
-fn client() -> hyper::Client<hyper_rustls::HttpsConnector<HttpConnector>> {
-    let https = hyper_rustls::HttpsConnectorBuilder::new()
-        .with_native_roots()
-        .https_only()
-        .enable_http1()
-        .enable_http2()
-        .build();
+struct DefaultClient(hyper::Client<hyper_rustls::HttpsConnector<HttpConnector>>);
 
-    hyper::Client::builder().build(https)
+impl HttpClient for DefaultClient {
+    fn request(&self, req: Request<Body>) -> ResponseFuture {
+        self.0.request(req)
+    }
+}
+
+impl Default for DefaultClient {
+    fn default() -> Self {
+        Self(
+            hyper::Client::builder().build(
+                hyper_rustls::HttpsConnectorBuilder::new()
+                    .with_native_roots()
+                    .https_only()
+                    .enable_http1()
+                    .enable_http2()
+                    .build(),
+            ),
+        )
+    }
+}
+
+trait HttpClient {
+    fn request(&self, req: Request<Body>) -> ResponseFuture;
 }
 
 const JOSE_JSON: &str = "application/jose+json";
