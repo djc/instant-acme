@@ -200,7 +200,22 @@ impl Account {
     /// The [`AccountCredentials`] type is opaque, but supports deserialization.
     pub fn from_credentials(credentials: AccountCredentials<'_>) -> Result<Self, Error> {
         Ok(Self {
-            inner: Arc::new(AccountInner::from_credentials(credentials)?),
+            inner: Arc::new(AccountInner::from_credentials(
+                credentials,
+                Box::<DefaultClient>::default(),
+            )?),
+        })
+    }
+
+    /// Restore an existing account from the given credentials and HTTP client
+    ///
+    /// The [`AccountCredentials`] type is opaque, but supports deserialization.
+    pub fn from_credentials_and_http(
+        credentials: AccountCredentials<'_>,
+        http: Box<dyn HttpClient>,
+    ) -> Result<Self, Error> {
+        Ok(Self {
+            inner: Arc::new(AccountInner::from_credentials(credentials, http)?),
         })
     }
 
@@ -210,7 +225,34 @@ impl Account {
         server_url: &str,
         external_account: Option<&ExternalAccountKey>,
     ) -> Result<Account, Error> {
-        let client = Client::new(server_url, Box::new(DefaultClient::default())).await?;
+        Self::create_inner(
+            account,
+            external_account,
+            Client::new(server_url, Box::<DefaultClient>::default()).await?,
+        )
+        .await
+    }
+
+    /// Create a new account with a custom HTTP client
+    pub async fn create_with_http(
+        account: &NewAccount<'_>,
+        server_url: &str,
+        external_account: Option<&ExternalAccountKey>,
+        http: Box<dyn HttpClient>,
+    ) -> Result<Account, Error> {
+        Self::create_inner(
+            account,
+            external_account,
+            Client::new(server_url, http).await?,
+        )
+        .await
+    }
+
+    async fn create_inner(
+        account: &NewAccount<'_>,
+        external_account: Option<&ExternalAccountKey>,
+        client: Client,
+    ) -> Result<Account, Error> {
         let key = Key::generate()?;
         let payload = NewAccountPayload {
             new_account: account,
@@ -288,11 +330,14 @@ struct AccountInner {
 }
 
 impl AccountInner {
-    fn from_credentials(credentials: AccountCredentials<'_>) -> Result<Self, Error> {
+    fn from_credentials(
+        credentials: AccountCredentials<'_>,
+        http: Box<dyn HttpClient>,
+    ) -> Result<Self, Error> {
         Ok(Self {
             key: Key::from_pkcs8_der(BASE64_URL_SAFE_NO_PAD.decode(&credentials.key_pkcs8)?)?,
             client: Client {
-                http: Box::new(DefaultClient::default()),
+                http,
                 urls: credentials.urls.into_owned(),
             },
             id: credentials.id.into_owned(),
@@ -567,7 +612,9 @@ impl Default for DefaultClient {
     }
 }
 
-trait HttpClient {
+/// A HTTP client based on [`hyper::Client`]
+pub trait HttpClient {
+    /// Send the given request and return the response
     fn request(&self, req: Request<Body>) -> ResponseFuture;
 }
 
