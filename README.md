@@ -20,7 +20,7 @@ specification.
 * Support for external account binding
 * Uses hyper with rustls and Tokio for HTTP requests
 * Uses *ring* for ECDSA signing
-* Minimum supported Rust version: 1.64
+* Minimum supported Rust version: 1.60
 
 ## Limitations
 
