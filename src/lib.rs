@@ -8,6 +8,7 @@ use std::fmt;
 use std::sync::Arc;
 
 use base64::prelude::{Engine, BASE64_URL_SAFE_NO_PAD};
+use hyper::client::connect::Connect;
 #[cfg(feature = "hyper-rustls")]
 use hyper::client::HttpConnector;
 use hyper::client::ResponseFuture;
@@ -623,6 +624,15 @@ impl Default for DefaultClient {
 pub trait HttpClient {
     /// Send the given request and return the response
     fn request(&self, req: Request<Body>) -> ResponseFuture;
+}
+
+impl<C> HttpClient for hyper::Client<C>
+where
+    C: Connect + Clone + Send + Sync + 'static,
+{
+    fn request(&self, req: Request<Body>) -> ResponseFuture {
+        <hyper::Client<C>>::request(self, req)
+    }
 }
 
 const JOSE_JSON: &str = "application/jose+json";
