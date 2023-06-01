@@ -621,6 +621,12 @@ impl Default for DefaultClient {
 }
 
 /// A HTTP client based on [`hyper::Client`]
+#[cfg(all(feature = "hyper-rustls", not(feature = "single-thread")))]
+pub trait HttpClient: Send + Sync {
+    /// Send the given request and return the response
+    fn request(&self, req: Request<Body>) -> ResponseFuture;
+}
+#[cfg(all(feature = "hyper-rustls", feature = "single-thread"))]
 pub trait HttpClient {
     /// Send the given request and return the response
     fn request(&self, req: Request<Body>) -> ResponseFuture;
