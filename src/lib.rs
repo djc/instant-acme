@@ -621,7 +621,7 @@ impl Default for DefaultClient {
 }
 
 /// A HTTP client based on [`hyper::Client`]
-pub trait HttpClient {
+pub trait HttpClient: Send + Sync + 'static {
     /// Send the given request and return the response
     fn request(&self, req: Request<Body>) -> ResponseFuture;
 }
