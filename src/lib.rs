@@ -5,13 +5,13 @@
 
 use std::borrow::Cow;
 use std::fmt;
+use std::future::Future;
 use std::sync::Arc;
 
 use base64::prelude::{Engine, BASE64_URL_SAFE_NO_PAD};
 use hyper::client::connect::Connect;
 #[cfg(feature = "hyper-rustls")]
 use hyper::client::HttpConnector;
-use hyper::client::ResponseFuture;
 use hyper::header::{CONTENT_TYPE, LOCATION};
 use hyper::{Body, Method, Request, Response};
 use ring::digest::{digest, SHA256};
@@ -406,7 +406,7 @@ impl Client {
             .uri(server_url)
             .body(Body::empty())
             .unwrap();
-        let rsp = http.request(req).await?;
+        let rsp = Box::into_pin(http.request(req)).await?;
         let body = hyper::body::to_bytes(rsp.into_body()).await?;
         Ok(Client {
             http,
@@ -428,7 +428,7 @@ impl Client {
                 .body(Body::empty())
                 .unwrap();
 
-            let rsp = self.http.request(request).await?;
+            let rsp = Box::into_pin(self.http.request(request)).await?;
             nonce = nonce_from_response(&rsp);
         };
 
@@ -441,7 +441,7 @@ impl Client {
             .body(Body::from(serde_json::to_vec(&body)?))
             .unwrap();
 
-        Ok(self.http.request(request).await?)
+        Ok(Box::into_pin(self.http.request(request)).await?)
     }
 }
 
@@ -599,8 +599,8 @@ struct DefaultClient(hyper::Client<hyper_rustls::HttpsConnector<HttpConnector>>)
 
 #[cfg(feature = "hyper-rustls")]
 impl HttpClient for DefaultClient {
-    fn request(&self, req: Request<Body>) -> ResponseFuture {
-        self.0.request(req)
+    fn request(&self, req: Request<Body>) -> Box<dyn Future<Output = hyper::Result<Response<Body>>>> {
+        Box::new(self.0.request(req))
     }
 }
 
@@ -623,15 +623,15 @@ impl Default for DefaultClient {
 /// A HTTP client based on [`hyper::Client`]
 pub trait HttpClient: Send + Sync + 'static {
     /// Send the given request and return the response
-    fn request(&self, req: Request<Body>) -> ResponseFuture;
+    fn request(&self, req: Request<Body>) -> Box<dyn Future<Output = hyper::Result<Response<Body>>>>;
 }
 
 impl<C> HttpClient for hyper::Client<C>
 where
     C: Connect + Clone + Send + Sync + 'static,
 {
-    fn request(&self, req: Request<Body>) -> ResponseFuture {
-        <hyper::Client<C>>::request(self, req)
+    fn request(&self, req: Request<Body>) -> Box<dyn Future<Output = hyper::Result<Response<Body>>>> {
+        Box::new(<hyper::Client<C>>::request(self, req))
     }
 }
 
