@@ -600,7 +600,10 @@ struct DefaultClient(hyper::Client<hyper_rustls::HttpsConnector<HttpConnector>>)
 
 #[cfg(feature = "hyper-rustls")]
 impl HttpClient for DefaultClient {
-    fn request(&self, req: Request<Body>) -> Pin<Box<dyn Future<Output = hyper::Result<Response<Body>>>>> {
+    fn request(
+        &self,
+        req: Request<Body>,
+    ) -> Pin<Box<dyn Future<Output = hyper::Result<Response<Body>>>>> {
         Box::pin(self.0.request(req))
     }
 }
@@ -624,14 +627,20 @@ impl Default for DefaultClient {
 /// A HTTP client based on [`hyper::Client`]
 pub trait HttpClient: Send + Sync + 'static {
     /// Send the given request and return the response
-    fn request(&self, req: Request<Body>) -> Pin<Box<dyn Future<Output = hyper::Result<Response<Body>>>>>;
+    fn request(
+        &self,
+        req: Request<Body>,
+    ) -> Pin<Box<dyn Future<Output = hyper::Result<Response<Body>>>>>;
 }
 
 impl<C> HttpClient for hyper::Client<C>
 where
     C: Connect + Clone + Send + Sync + 'static,
 {
-    fn request(&self, req: Request<Body>) -> Pin<Box<dyn Future<Output = hyper::Result<Response<Body>>>>> {
+    fn request(
+        &self,
+        req: Request<Body>,
+    ) -> Pin<Box<dyn Future<Output = hyper::Result<Response<Body>>>>> {
         Box::pin(<hyper::Client<C>>::request(self, req))
     }
 }
