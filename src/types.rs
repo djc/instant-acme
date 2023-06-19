@@ -319,7 +319,7 @@ pub struct Authorization {
 
 /// Status for an [`Authorization`]
 #[allow(missing_docs)]
-#[derive(Debug, Deserialize)]
+#[derive(Clone, Copy, Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub enum AuthorizationStatus {
     Pending,
@@ -349,7 +349,7 @@ pub enum ChallengeType {
     TlsAlpn01,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Clone, Copy, Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub enum ChallengeStatus {
     Pending,
@@ -360,7 +360,7 @@ pub enum ChallengeStatus {
 
 /// Status of an [Order](crate::Order)
 #[allow(missing_docs)]
-#[derive(Debug, Deserialize, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub enum OrderStatus {
     Pending,
