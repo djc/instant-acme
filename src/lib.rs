@@ -13,7 +13,7 @@ use hyper::client::connect::Connect;
 use hyper::client::HttpConnector;
 use hyper::client::ResponseFuture;
 use hyper::header::{CONTENT_TYPE, LOCATION};
-use hyper::{Body, Method, Request, Response};
+use hyper::{Body, Method, Request, Response, StatusCode};
 use ring::digest::{digest, SHA256};
 use ring::hmac;
 use ring::rand::SystemRandom;
@@ -445,7 +445,17 @@ impl Client {
             .unwrap();
 
         let rsp = self.http.request(request).await?;
-        Ok(nonce_from_response(&rsp).ok_or("no nonce found")?)
+        // https://datatracker.ietf.org/doc/html/rfc8555#section-7.2
+        // "The server's response MUST include a Replay-Nonce header field containing a fresh
+        // nonce and SHOULD have status code 200 (OK)."
+        if rsp.status() != StatusCode::OK {
+            return Err("error response from newNonce resource".into());
+        }
+
+        match nonce_from_response(&rsp) {
+            Some(nonce) => Ok(nonce),
+            None => Err("no nonce found in newNonce response".into()),
+        }
     }
 }
 
