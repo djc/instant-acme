@@ -418,22 +418,11 @@ impl Client {
     async fn post(
         &self,
         payload: Option<&impl Serialize>,
-        mut nonce: Option<String>,
+        nonce: Option<String>,
         signer: &impl Signer,
         url: &str,
     ) -> Result<Response<Body>, Error> {
-        if nonce.is_none() {
-            let request = Request::builder()
-                .method(Method::HEAD)
-                .uri(&self.urls.new_nonce)
-                .body(Body::empty())
-                .unwrap();
-
-            let rsp = self.http.request(request).await?;
-            nonce = nonce_from_response(&rsp);
-        };
-
-        let nonce = nonce.ok_or("no nonce found")?;
+        let nonce = self.nonce(nonce).await?;
         let body = JoseJson::new(payload, signer.header(Some(&nonce), url), signer)?;
         let request = Request::builder()
             .method(Method::POST)
@@ -443,6 +432,21 @@ impl Client {
             .unwrap();
 
         Ok(self.http.request(request).await?)
+    }
+
+    async fn nonce(&self, nonce: Option<String>) -> Result<String, Error> {
+        if let Some(nonce) = nonce {
+            return Ok(nonce);
+        }
+
+        let request = Request::builder()
+            .method(Method::HEAD)
+            .uri(&self.urls.new_nonce)
+            .body(Body::empty())
+            .unwrap();
+
+        let rsp = self.http.request(request).await?;
+        Ok(nonce_from_response(&rsp).ok_or("no nonce found")?)
     }
 }
 
