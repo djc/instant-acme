@@ -617,7 +617,7 @@ impl HttpClient for DefaultClient {
     fn request(
         &self,
         req: Request<Body>,
-    ) -> Pin<Box<dyn Future<Output = hyper::Result<Response<Body>>>>> {
+    ) -> Pin<Box<dyn Future<Output = hyper::Result<Response<Body>>> + Send>> {
         Box::pin(self.0.request(req))
     }
 }
@@ -644,7 +644,7 @@ pub trait HttpClient: Send + Sync + 'static {
     fn request(
         &self,
         req: Request<Body>,
-    ) -> Pin<Box<dyn Future<Output = hyper::Result<Response<Body>>>>>;
+    ) -> Pin<Box<dyn Future<Output = hyper::Result<Response<Body>>> + Send>>;
 }
 
 impl<C> HttpClient for hyper::Client<C>
@@ -654,7 +654,7 @@ where
     fn request(
         &self,
         req: Request<Body>,
-    ) -> Pin<Box<dyn Future<Output = hyper::Result<Response<Body>>>>> {
+    ) -> Pin<Box<dyn Future<Output = hyper::Result<Response<Body>>> + Send>> {
         Box::pin(<hyper::Client<C>>::request(self, req))
     }
 }
