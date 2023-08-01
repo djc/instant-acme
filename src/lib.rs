@@ -236,7 +236,7 @@ impl Account {
         Ok(Self {
             inner: Arc::new(AccountInner {
                 id,
-                key: Key::from_pkcs8_der(BASE64_URL_SAFE_NO_PAD.decode(key_pkcs8_der)?)?,
+                key: Key::from_pkcs8_der(key_pkcs8_der)?,
                 client: Client::new(directory_url, http).await?,
             }),
         })
@@ -315,7 +315,7 @@ impl Account {
         let id = account_url.ok_or("failed to get account URL")?;
         let credentials = AccountCredentials {
             id: id.clone(),
-            key_pkcs8: BASE64_URL_SAFE_NO_PAD.encode(key_pkcs8.as_ref()),
+            key_pkcs8: key_pkcs8.as_ref().to_vec(),
             directory: Some(server_url.to_owned()),
             // We support deserializing URLs for compatibility with versions pre 0.4,
             // but we prefer to get fresh URLs from the `server_url` for newer credentials.
@@ -377,7 +377,7 @@ impl AccountInner {
     ) -> Result<Self, Error> {
         Ok(Self {
             id: credentials.id,
-            key: Key::from_pkcs8_der(BASE64_URL_SAFE_NO_PAD.decode(&credentials.key_pkcs8)?)?,
+            key: Key::from_pkcs8_der(credentials.key_pkcs8.as_ref())?,
             client: match (credentials.directory, credentials.urls) {
                 (Some(server_url), _) => Client::new(&server_url, http).await?,
                 (None, Some(urls)) => Client { http, urls },
@@ -522,8 +522,8 @@ impl Key {
         ))
     }
 
-    fn from_pkcs8_der(pkcs8_der: Vec<u8>) -> Result<Self, Error> {
-        let key = EcdsaKeyPair::from_pkcs8(&ECDSA_P256_SHA256_FIXED_SIGNING, &pkcs8_der)?;
+    fn from_pkcs8_der(pkcs8_der: &[u8]) -> Result<Self, Error> {
+        let key = EcdsaKeyPair::from_pkcs8(&ECDSA_P256_SHA256_FIXED_SIGNING, pkcs8_der)?;
         let thumb = BASE64_URL_SAFE_NO_PAD.encode(Jwk::thumb_sha256(&key)?);
 
         Ok(Self {

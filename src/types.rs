@@ -54,9 +54,49 @@ impl From<&'static str> for Error {
 #[derive(Deserialize, Serialize)]
 pub struct AccountCredentials {
     pub(crate) id: String,
-    pub(crate) key_pkcs8: String,
+    /// Stored in DER, serialized as base64
+    #[serde(with = "pkcs8_serde")]
+    pub(crate) key_pkcs8: Vec<u8>,
     pub(crate) directory: Option<String>,
     pub(crate) urls: Option<DirectoryUrls>,
+}
+
+mod pkcs8_serde {
+    use std::fmt;
+
+    use base64::prelude::{Engine, BASE64_URL_SAFE_NO_PAD};
+    use serde::{de, Deserializer, Serializer};
+
+    pub(crate) fn serialize<S>(key_pkcs8: &[u8], serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        let encoded = BASE64_URL_SAFE_NO_PAD.encode(key_pkcs8.as_ref());
+        serializer.serialize_str(&encoded)
+    }
+
+    pub(crate) fn deserialize<'de, D: Deserializer<'de>>(
+        deserializer: D,
+    ) -> Result<Vec<u8>, D::Error> {
+        struct Visitor;
+
+        impl<'de> de::Visitor<'de> for Visitor {
+            type Value = Vec<u8>;
+
+            fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+                formatter.write_str("a base64-encoded PKCS#8 private key")
+            }
+
+            fn visit_str<E>(self, v: &str) -> Result<Vec<u8>, E>
+            where
+                E: de::Error,
+            {
+                BASE64_URL_SAFE_NO_PAD.decode(v).map_err(de::Error::custom)
+            }
+        }
+
+        deserializer.deserialize_str(Visitor)
+    }
 }
 
 /// An RFC 7807 problem document as returned by the ACME server
