@@ -72,7 +72,7 @@ async fn main() -> anyhow::Result<()> {
 
         let Identifier::Dns(identifier) = &authz.identifier;
 
-        println!("Please set the following DNS record then press any key:");
+        println!("Please set the following DNS record then press the Return key:");
         println!(
             "_acme-challenge.{} IN TXT {}",
             identifier,
@@ -106,7 +106,7 @@ async fn main() -> anyhow::Result<()> {
         match tries < 5 {
             true => info!(?state, tries, "order is not ready, waiting {delay:?}"),
             false => {
-                error!(?state, tries, "order is not ready");
+                error!(tries, "order is not ready: {state:#?}");
                 return Err(anyhow::anyhow!("order is not ready"));
             }
         }
