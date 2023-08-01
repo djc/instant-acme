@@ -1,4 +1,3 @@
-use std::borrow::Cow;
 use std::fmt;
 
 use base64::prelude::{Engine, BASE64_URL_SAFE_NO_PAD};
@@ -53,10 +52,11 @@ impl From<&'static str> for Error {
 /// the account credentials to a file or secret manager and restore the
 /// account from persistent storage.
 #[derive(Deserialize, Serialize)]
-pub struct AccountCredentials<'a> {
-    pub(crate) id: Cow<'a, str>,
+pub struct AccountCredentials {
+    pub(crate) id: String,
     pub(crate) key_pkcs8: String,
-    pub(crate) urls: Cow<'a, DirectoryUrls>,
+    pub(crate) directory: Option<String>,
+    pub(crate) urls: Option<DirectoryUrls>,
 }
 
 /// An RFC 7807 problem document as returned by the ACME server

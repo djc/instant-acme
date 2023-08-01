@@ -19,7 +19,7 @@ async fn main() -> anyhow::Result<()> {
     // Alternatively, restore an account from serialized credentials by
     // using `Account::from_credentials()`.
 
-    let account = Account::create(
+    let (account, credentials) = Account::create(
         &NewAccount {
             contact: &[],
             terms_of_service_agreed: true,
@@ -29,6 +29,10 @@ async fn main() -> anyhow::Result<()> {
         None,
     )
     .await?;
+    info!(
+        "account credentials:\n\n{}",
+        serde_json::to_string_pretty(&credentials).unwrap()
+    );
 
     // Create the ACME order based on the given domain names.
     // Note that this only needs an `&Account`, so the library will let you
@@ -141,11 +145,6 @@ async fn main() -> anyhow::Result<()> {
 
     info!("certficate chain:\n\n{}", cert_chain_pem);
     info!("private key:\n\n{}", cert.serialize_private_key_pem());
-    info!(
-        "account credentials:\n\n{}",
-        serde_json::to_string_pretty(&account.credentials()).unwrap()
-    );
-
     Ok(())
 }
 
