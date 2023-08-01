@@ -3,7 +3,6 @@
 #![warn(unreachable_pub)]
 #![warn(missing_docs)]
 
-use std::borrow::Cow;
 use std::fmt;
 use std::future::Future;
 use std::pin::Pin;
@@ -203,53 +202,61 @@ impl Account {
     ///
     /// The [`AccountCredentials`] type is opaque, but supports deserialization.
     #[cfg(feature = "hyper-rustls")]
-    pub fn from_credentials(credentials: AccountCredentials<'_>) -> Result<Self, Error> {
+    pub async fn from_credentials(credentials: AccountCredentials) -> Result<Self, Error> {
         Ok(Self {
-            inner: Arc::new(AccountInner::from_credentials(
-                credentials,
-                Box::<DefaultClient>::default(),
-            )?),
+            inner: Arc::new(
+                AccountInner::from_credentials(credentials, Box::<DefaultClient>::default())
+                    .await?,
+            ),
         })
     }
 
     /// Restore an existing account from the given credentials and HTTP client
     ///
     /// The [`AccountCredentials`] type is opaque, but supports deserialization.
-    pub fn from_credentials_and_http(
-        credentials: AccountCredentials<'_>,
+    pub async fn from_credentials_and_http(
+        credentials: AccountCredentials,
         http: Box<dyn HttpClient>,
     ) -> Result<Self, Error> {
         Ok(Self {
-            inner: Arc::new(AccountInner::from_credentials(credentials, http)?),
+            inner: Arc::new(AccountInner::from_credentials(credentials, http).await?),
         })
     }
 
     /// Create a new account on the `server_url` with the information in [`NewAccount`]
+    ///
+    /// The returned [`AccountCredentials`] can be serialized and stored for later use.
+    /// Use [`Account::from_credentials()`] to restore the account from the credentials.
     #[cfg(feature = "hyper-rustls")]
     pub async fn create(
         account: &NewAccount<'_>,
         server_url: &str,
         external_account: Option<&ExternalAccountKey>,
-    ) -> Result<Account, Error> {
+    ) -> Result<(Account, AccountCredentials), Error> {
         Self::create_inner(
             account,
             external_account,
             Client::new(server_url, Box::<DefaultClient>::default()).await?,
+            server_url,
         )
         .await
     }
 
     /// Create a new account with a custom HTTP client
+    ///
+    /// The returned [`AccountCredentials`] can be serialized and stored for later use.
+    /// Use [`Account::from_credentials()`] to restore the account from the credentials.
     pub async fn create_with_http(
         account: &NewAccount<'_>,
         server_url: &str,
         external_account: Option<&ExternalAccountKey>,
         http: Box<dyn HttpClient>,
-    ) -> Result<Account, Error> {
+    ) -> Result<(Account, AccountCredentials), Error> {
         Self::create_inner(
             account,
             external_account,
             Client::new(server_url, http).await?,
+            server_url,
         )
         .await
     }
@@ -258,7 +265,8 @@ impl Account {
         account: &NewAccount<'_>,
         external_account: Option<&ExternalAccountKey>,
         client: Client,
-    ) -> Result<Account, Error> {
+        server_url: &str,
+    ) -> Result<(Account, AccountCredentials), Error> {
         let key = Key::generate()?;
         let payload = NewAccountPayload {
             new_account: account,
@@ -285,13 +293,28 @@ impl Account {
 
         // The response redirects, we don't need the body
         let _ = Problem::from_response(rsp).await?;
-        Ok(Self {
-            inner: Arc::new(AccountInner {
-                client,
-                key,
-                id: account_url.ok_or("failed to get account URL")?,
-            }),
-        })
+        let id = account_url.ok_or("failed to get account URL")?;
+        let credentials = AccountCredentials {
+            id: id.clone(),
+            key_pkcs8: BASE64_URL_SAFE_NO_PAD.encode(&key.pkcs8_der),
+            directory: Some(server_url.to_owned()),
+            // We support deserializing URLs for compatibility with versions pre 0.4,
+            // but we prefer to get fresh URLs from the `server_url` for newer credentials.
+            urls: None,
+        };
+
+        let account = AccountInner {
+            client,
+            key,
+            id: id.clone(),
+        };
+
+        Ok((
+            Self {
+                inner: Arc::new(account),
+            },
+            credentials,
+        ))
     }
 
     /// Create a new order based on the given [`NewOrder`]
@@ -320,13 +343,6 @@ impl Account {
             url: order_url.ok_or("no order URL found")?,
         })
     }
-
-    /// Get the account's credentials, which can be serialized
-    ///
-    /// Pass the credentials to [`Account::from_credentials`] to regain access to the `Account`.
-    pub fn credentials(&self) -> AccountCredentials<'_> {
-        self.inner.credentials()
-    }
 }
 
 struct AccountInner {
@@ -336,17 +352,18 @@ struct AccountInner {
 }
 
 impl AccountInner {
-    fn from_credentials(
-        credentials: AccountCredentials<'_>,
+    async fn from_credentials(
+        credentials: AccountCredentials,
         http: Box<dyn HttpClient>,
     ) -> Result<Self, Error> {
         Ok(Self {
+            id: credentials.id,
             key: Key::from_pkcs8_der(BASE64_URL_SAFE_NO_PAD.decode(&credentials.key_pkcs8)?)?,
-            client: Client {
-                http,
-                urls: credentials.urls.into_owned(),
+            client: match (credentials.directory, credentials.urls) {
+                (Some(server_url), _) => Client::new(&server_url, http).await?,
+                (None, Some(urls)) => Client { http, urls },
+                (None, None) => return Err("no server URLs found".into()),
             },
-            id: credentials.id.into_owned(),
         })
     }
 
@@ -367,14 +384,6 @@ impl AccountInner {
         url: &str,
     ) -> Result<Response<Body>, Error> {
         self.client.post(payload, nonce, self, url).await
-    }
-
-    fn credentials(&self) -> AccountCredentials<'_> {
-        AccountCredentials {
-            id: Cow::Borrowed(&self.id),
-            key_pkcs8: BASE64_URL_SAFE_NO_PAD.encode(&self.key.pkcs8_der),
-            urls: Cow::Borrowed(&self.client.urls),
-        }
     }
 }
 
