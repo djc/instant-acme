@@ -223,6 +223,25 @@ impl Account {
         })
     }
 
+    /// Restore an existing account from the given ID, private key, server URL and HTTP client
+    ///
+    /// The key must be provided in DER-encoded PKCS#8. This is usually how ECDSA keys are
+    /// encoded in PEM files. Use a crate like rustls-pemfile to decode from PEM to DER.
+    pub async fn from_parts(
+        id: String,
+        key_pkcs8_der: &[u8],
+        directory_url: &str,
+        http: Box<dyn HttpClient>,
+    ) -> Result<Self, Error> {
+        Ok(Self {
+            inner: Arc::new(AccountInner {
+                id,
+                key: Key::from_pkcs8_der(BASE64_URL_SAFE_NO_PAD.decode(key_pkcs8_der)?)?,
+                client: Client::new(directory_url, http).await?,
+            }),
+        })
+    }
+
     /// Create a new account on the `server_url` with the information in [`NewAccount`]
     ///
     /// The returned [`AccountCredentials`] can be serialized and stored for later use.
