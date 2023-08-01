@@ -15,9 +15,9 @@ use hyper::client::HttpConnector;
 use hyper::header::{CONTENT_TYPE, LOCATION};
 use hyper::{Body, Method, Request, Response, StatusCode};
 use ring::digest::{digest, SHA256};
-use ring::hmac;
 use ring::rand::SystemRandom;
 use ring::signature::{EcdsaKeyPair, ECDSA_P256_SHA256_FIXED_SIGNING};
+use ring::{hmac, pkcs8};
 use serde::de::DeserializeOwned;
 use serde::Serialize;
 
@@ -286,7 +286,7 @@ impl Account {
         client: Client,
         server_url: &str,
     ) -> Result<(Account, AccountCredentials), Error> {
-        let key = Key::generate()?;
+        let (key, key_pkcs8) = Key::generate()?;
         let payload = NewAccountPayload {
             new_account: account,
             external_account_binding: external_account
@@ -315,7 +315,7 @@ impl Account {
         let id = account_url.ok_or("failed to get account URL")?;
         let credentials = AccountCredentials {
             id: id.clone(),
-            key_pkcs8: BASE64_URL_SAFE_NO_PAD.encode(&key.pkcs8_der),
+            key_pkcs8: BASE64_URL_SAFE_NO_PAD.encode(key_pkcs8.as_ref()),
             directory: Some(server_url.to_owned()),
             // We support deserializing URLs for compatibility with versions pre 0.4,
             // but we prefer to get fresh URLs from the `server_url` for newer credentials.
@@ -501,24 +501,25 @@ struct Key {
     rng: SystemRandom,
     signing_algorithm: SigningAlgorithm,
     inner: EcdsaKeyPair,
-    pkcs8_der: Vec<u8>,
     thumb: String,
 }
 
 impl Key {
-    fn generate() -> Result<Self, Error> {
+    fn generate() -> Result<(Self, pkcs8::Document), Error> {
         let rng = SystemRandom::new();
         let pkcs8 = EcdsaKeyPair::generate_pkcs8(&ECDSA_P256_SHA256_FIXED_SIGNING, &rng)?;
         let key = EcdsaKeyPair::from_pkcs8(&ECDSA_P256_SHA256_FIXED_SIGNING, pkcs8.as_ref())?;
         let thumb = BASE64_URL_SAFE_NO_PAD.encode(Jwk::thumb_sha256(&key)?);
 
-        Ok(Self {
-            rng,
-            signing_algorithm: SigningAlgorithm::Es256,
-            inner: key,
-            pkcs8_der: pkcs8.as_ref().to_vec(),
-            thumb,
-        })
+        Ok((
+            Self {
+                rng,
+                signing_algorithm: SigningAlgorithm::Es256,
+                inner: key,
+                thumb,
+            },
+            pkcs8,
+        ))
     }
 
     fn from_pkcs8_der(pkcs8_der: Vec<u8>) -> Result<Self, Error> {
@@ -529,7 +530,6 @@ impl Key {
             rng: SystemRandom::new(),
             signing_algorithm: SigningAlgorithm::Es256,
             inner: key,
-            pkcs8_der,
             thumb,
         })
     }
