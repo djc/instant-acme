@@ -508,7 +508,7 @@ impl Key {
     fn generate() -> Result<(Self, pkcs8::Document), Error> {
         let rng = SystemRandom::new();
         let pkcs8 = EcdsaKeyPair::generate_pkcs8(&ECDSA_P256_SHA256_FIXED_SIGNING, &rng)?;
-        let key = EcdsaKeyPair::from_pkcs8(&ECDSA_P256_SHA256_FIXED_SIGNING, pkcs8.as_ref())?;
+        let key = EcdsaKeyPair::from_pkcs8(&ECDSA_P256_SHA256_FIXED_SIGNING, pkcs8.as_ref(), &rng)?;
         let thumb = BASE64_URL_SAFE_NO_PAD.encode(Jwk::thumb_sha256(&key)?);
 
         Ok((
@@ -523,11 +523,12 @@ impl Key {
     }
 
     fn from_pkcs8_der(pkcs8_der: &[u8]) -> Result<Self, Error> {
-        let key = EcdsaKeyPair::from_pkcs8(&ECDSA_P256_SHA256_FIXED_SIGNING, pkcs8_der)?;
+        let rng = SystemRandom::new();
+        let key = EcdsaKeyPair::from_pkcs8(&ECDSA_P256_SHA256_FIXED_SIGNING, pkcs8_der, &rng)?;
         let thumb = BASE64_URL_SAFE_NO_PAD.encode(Jwk::thumb_sha256(&key)?);
 
         Ok(Self {
-            rng: SystemRandom::new(),
+            rng,
             signing_algorithm: SigningAlgorithm::Es256,
             inner: key,
             thumb,

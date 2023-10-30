@@ -18,7 +18,7 @@ default = ["hyper-rustls"]
 base64 = "0.21.0"
 hyper = { version = "0.14.18", features = ["client", "http1", "http2"] }
 hyper-rustls = { version = "0.24", default-features = false, features = ["http1", "http2", "native-tokio", "tls12"], optional = true }
-ring = { version = "0.16.20", features = ["std"] }
+ring = { version = "0.17", features = ["std"] }
 serde = { version = "1.0.104", features = ["derive"] }
 serde_json = "1.0.78"
 thiserror = "1.0.30"
