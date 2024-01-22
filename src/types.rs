@@ -422,8 +422,8 @@ impl LetsEncrypt {
     /// Get the directory URL for the given Let's Encrypt server
     pub const fn url(&self) -> &'static str {
         match self {
-            LetsEncrypt::Production => "https://acme-v02.api.letsencrypt.org/directory",
-            LetsEncrypt::Staging => "https://acme-staging-v02.api.letsencrypt.org/directory",
+            Self::Production => "https://acme-v02.api.letsencrypt.org/directory",
+            Self::Staging => "https://acme-staging-v02.api.letsencrypt.org/directory",
         }
     }
 }
