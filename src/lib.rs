@@ -24,7 +24,7 @@ use serde::Serialize;
 mod types;
 pub use types::{
     AccountCredentials, Authorization, AuthorizationStatus, Challenge, ChallengeType, Error,
-    Identifier, LetsEncrypt, NewAccount, NewOrder, OrderState, OrderStatus, Problem,
+    Identifier, LetsEncrypt, NewAccount, NewOrder, OrderState, OrderStatus, Problem, ZeroSsl,
 };
 use types::{
     DirectoryUrls, Empty, FinalizeRequest, Header, JoseJson, Jwk, KeyOrKeyId, NewAccountPayload,
