@@ -428,6 +428,22 @@ impl LetsEncrypt {
     }
 }
 
+/// ZeroSSL ACME only supports production at the moment
+#[allow(missing_docs)]
+#[derive(Clone, Copy, Debug)]
+pub enum ZeroSsl {
+    Production,
+}
+
+impl ZeroSsl {
+    /// Get the directory URL for the given ZeroSSL server
+    pub const fn url(&self) -> &'static str {
+        match self {
+            Self::Production => "https://acme.zerossl.com/v2/DV90",
+        }
+    }
+}
+
 #[derive(Clone, Copy, Debug, Serialize)]
 #[serde(rename_all = "UPPERCASE")]
 pub(crate) enum SigningAlgorithm {
