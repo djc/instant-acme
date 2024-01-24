@@ -271,6 +271,52 @@ pub struct NewOrder<'a> {
     pub identifiers: &'a [Identifier],
 }
 
+/// The reason for a certificate revocation
+/// Defined in <https://datatracker.ietf.org/doc/html/rfc5280#section-5.3.1>
+#[allow(missing_docs)]
+pub enum RevocationReason {
+    Unspecified,
+    KeyCompromise,
+    CaCompromise,
+    AffiliationChanged,
+    Superseded,
+    CessationOfOperation,
+    CertificateHold,
+    RemoveFromCrl,
+    PrivilegeWithdrawn,
+    AaCompromise,
+}
+
+/// Payload for a certificate revocation request
+/// Defined in <https://datatracker.ietf.org/doc/html/rfc8555#section-7.6>
+#[derive(Debug, Serialize)]
+pub struct CertificateRevocation {
+    /// URL safe base64 encoded certificate (not a chain)
+    /// The certificate should not contain a header or footer or line breaks
+    pub certificate: String,
+    /// Reason for revocation
+    pub reason: Option<i32>,
+}
+
+impl CertificateRevocation {
+    /// Create a new revocation request from a certificate.
+    /// The certificate cannot be a chain.
+    pub fn new(certificate: &str, reason: Option<RevocationReason>) -> CertificateRevocation {
+        let reason_code = reason.map(|reason| reason as i32);
+        // Strip header, remove line breaks, and make it URL safe
+        let body = certificate
+            .replace("-----BEGIN CERTIFICATE-----", "")
+            .replace("-----END CERTIFICATE-----", "")
+            .replace('+', "-")
+            .replace('/', "_")
+            .replace(['\n', '\r'], "");
+        CertificateRevocation {
+            certificate: body,
+            reason: reason_code,
+        }
+    }
+}
+
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct NewAccountPayload<'a> {
@@ -302,6 +348,7 @@ pub(crate) struct DirectoryUrls {
     pub(crate) new_nonce: String,
     pub(crate) new_account: String,
     pub(crate) new_order: String,
+    pub(crate) revoke_cert: String,
 }
 
 #[derive(Serialize)]

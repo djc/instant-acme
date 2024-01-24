@@ -23,8 +23,9 @@ use serde::Serialize;
 
 mod types;
 pub use types::{
-    AccountCredentials, Authorization, AuthorizationStatus, Challenge, ChallengeType, Error,
-    Identifier, LetsEncrypt, NewAccount, NewOrder, OrderState, OrderStatus, Problem, ZeroSsl,
+    AccountCredentials, Authorization, AuthorizationStatus, CertificateRevocation, Challenge,
+    ChallengeType, Error, Identifier, LetsEncrypt, NewAccount, NewOrder, OrderState, OrderStatus,
+    Problem, RevocationReason, ZeroSsl,
 };
 use types::{
     DirectoryUrls, Empty, FinalizeRequest, Header, JoseJson, Jwk, KeyOrKeyId, NewAccountPayload,
@@ -361,6 +362,17 @@ impl Account {
             state: Problem::check::<OrderState>(rsp).await?,
             url: order_url.ok_or("no order URL found")?,
         })
+    }
+
+    /// Revokes a previously issued certificate
+    pub async fn revoke<'a>(&'a self, payload: &'a CertificateRevocation) -> Result<(), Error> {
+        let rsp = self
+            .inner
+            .post(Some(payload), None, &self.inner.client.urls.revoke_cert)
+            .await?;
+        // The body is empty if the request was successful
+        let _ = Problem::from_response(rsp).await?;
+        Ok(())
     }
 }
 
