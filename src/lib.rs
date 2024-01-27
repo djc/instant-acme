@@ -23,9 +23,9 @@ use serde::Serialize;
 
 mod types;
 pub use types::{
-    AccountCredentials, Authorization, AuthorizationStatus, CertificateRevocation, Challenge,
-    ChallengeType, Error, Identifier, LetsEncrypt, NewAccount, NewOrder, OrderState, OrderStatus,
-    Problem, RevocationReason, ZeroSsl,
+    AccountCredentials, Authorization, AuthorizationStatus, Challenge, ChallengeType, Error,
+    Identifier, LetsEncrypt, NewAccount, NewOrder, OrderState, OrderStatus, Problem,
+    RevocationReason, RevocationRequest, ZeroSsl,
 };
 use types::{
     DirectoryUrls, Empty, FinalizeRequest, Header, JoseJson, Jwk, KeyOrKeyId, NewAccountPayload,
@@ -365,7 +365,7 @@ impl Account {
     }
 
     /// Revokes a previously issued certificate
-    pub async fn revoke<'a>(&'a self, payload: &'a CertificateRevocation) -> Result<(), Error> {
+    pub async fn revoke<'a>(&'a self, payload: &'a RevocationRequest) -> Result<(), Error> {
         let rsp = self
             .inner
             .post(Some(payload), None, &self.inner.client.urls.revoke_cert)

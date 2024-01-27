@@ -4,6 +4,7 @@ use base64::prelude::{Engine, BASE64_URL_SAFE_NO_PAD};
 use hyper::{Body, Response};
 use ring::digest::{digest, Digest, SHA256};
 use ring::signature::{EcdsaKeyPair, KeyPair};
+use rustls_pki_types::CertificateDer;
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
@@ -271,49 +272,54 @@ pub struct NewOrder<'a> {
     pub identifiers: &'a [Identifier],
 }
 
-/// The reason for a certificate revocation
-/// Defined in <https://datatracker.ietf.org/doc/html/rfc5280#section-5.3.1>
-#[allow(missing_docs)]
-pub enum RevocationReason {
-    Unspecified,
-    KeyCompromise,
-    CaCompromise,
-    AffiliationChanged,
-    Superseded,
-    CessationOfOperation,
-    CertificateHold,
-    RemoveFromCrl,
-    PrivilegeWithdrawn,
-    AaCompromise,
-}
-
 /// Payload for a certificate revocation request
 /// Defined in <https://datatracker.ietf.org/doc/html/rfc8555#section-7.6>
 #[derive(Debug, Serialize)]
-pub struct CertificateRevocation {
+pub struct RevocationRequest {
     /// URL safe base64 encoded certificate (not a chain)
     /// The certificate should not contain a header or footer or line breaks
     pub certificate: String,
     /// Reason for revocation
-    pub reason: Option<i32>,
+    pub reason: Option<RevocationReason>,
 }
 
-impl CertificateRevocation {
+impl RevocationRequest {
     /// Create a new revocation request from a certificate.
-    /// The certificate cannot be a chain.
-    pub fn new(certificate: &str, reason: Option<RevocationReason>) -> CertificateRevocation {
-        let reason_code = reason.map(|reason| reason as i32);
-        // Strip header, remove line breaks, and make it URL safe
-        let body = certificate
-            .replace("-----BEGIN CERTIFICATE-----", "")
-            .replace("-----END CERTIFICATE-----", "")
-            .replace('+', "-")
-            .replace('/', "_")
-            .replace(['\n', '\r'], "");
-        CertificateRevocation {
-            certificate: body,
-            reason: reason_code,
+    /// The CertificateDer is the certificate to be revoked.
+    /// The rustls_pemfile crate can be used to obtain a CertificateDer from a PEM file.
+    pub fn new(
+        certificate: &CertificateDer,
+        reason: Option<RevocationReason>,
+    ) -> RevocationRequest {
+        let base64 = BASE64_URL_SAFE_NO_PAD.encode(certificate);
+        RevocationRequest {
+            certificate: base64,
+            reason,
         }
+    }
+}
+
+/// The reason for a certificate revocation
+/// Defined in <https://datatracker.ietf.org/doc/html/rfc5280#section-5.3.1>
+#[allow(missing_docs)]
+#[derive(Debug, Clone)]
+#[repr(u8)]
+pub enum RevocationReason {
+    Unspecified = 0,
+    KeyCompromise = 1,
+    CaCompromise = 2,
+    AffiliationChanged = 3,
+    Superseded = 4,
+    CessationOfOperation = 5,
+    CertificateHold = 6,
+    RemoveFromCrl = 8,
+    PrivilegeWithdrawn = 9,
+    AaCompromise = 10,
+}
+
+impl Serialize for RevocationReason {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.serialize_u8(self.clone() as u8)
     }
 }
 
