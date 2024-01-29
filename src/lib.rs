@@ -365,7 +365,7 @@ impl Account {
     }
 
     /// Revokes a previously issued certificate
-    pub async fn revoke<'a>(&'a self, payload: &'a RevocationRequest) -> Result<(), Error> {
+    pub async fn revoke<'a>(&'a self, payload: &RevocationRequest<'a>) -> Result<(), Error> {
         let rsp = self
             .inner
             .post(Some(payload), None, &self.inner.client.urls.revoke_cert)

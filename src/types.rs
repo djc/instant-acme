@@ -6,6 +6,7 @@ use ring::digest::{digest, Digest, SHA256};
 use ring::signature::{EcdsaKeyPair, KeyPair};
 use rustls_pki_types::CertificateDer;
 use serde::de::DeserializeOwned;
+use serde::ser::SerializeMap;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
@@ -274,28 +275,23 @@ pub struct NewOrder<'a> {
 
 /// Payload for a certificate revocation request
 /// Defined in <https://datatracker.ietf.org/doc/html/rfc8555#section-7.6>
-#[derive(Debug, Serialize)]
-pub struct RevocationRequest {
-    /// URL safe base64 encoded certificate (not a chain)
-    /// The certificate should not contain a header or footer or line breaks
-    pub certificate: String,
+#[derive(Debug)]
+pub struct RevocationRequest<'a> {
+    /// The certificate to revoke
+    pub certificate: &'a CertificateDer<'a>,
     /// Reason for revocation
     pub reason: Option<RevocationReason>,
 }
 
-impl RevocationRequest {
-    /// Create a new revocation request from a certificate.
-    /// The CertificateDer is the certificate to be revoked.
-    /// The rustls_pemfile crate can be used to obtain a CertificateDer from a PEM file.
-    pub fn new(
-        certificate: &CertificateDer,
-        reason: Option<RevocationReason>,
-    ) -> RevocationRequest {
-        let base64 = BASE64_URL_SAFE_NO_PAD.encode(certificate);
-        RevocationRequest {
-            certificate: base64,
-            reason,
+impl<'a> Serialize for RevocationRequest<'a> {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        let base64 = BASE64_URL_SAFE_NO_PAD.encode(self.certificate);
+        let mut map = serializer.serialize_map(Some(2))?;
+        map.serialize_entry("certificate", &base64)?;
+        if let Some(reason) = &self.reason {
+            map.serialize_entry("reason", reason)?;
         }
+        map.end()
     }
 }
 
