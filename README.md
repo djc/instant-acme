@@ -25,7 +25,7 @@ specification.
 
 ## Limitations
 
-* Only tested with DNS challenges against Let's Encrypt (staging and production) and ZeroSSL (production) so far 
+* Only tested with DNS challenges against Let's Encrypt (staging and production) and ZeroSSL (production) so far
 * Only supports ECDSA keys for now
 
 ## Getting started
