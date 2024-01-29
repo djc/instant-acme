@@ -4,7 +4,9 @@ use base64::prelude::{Engine, BASE64_URL_SAFE_NO_PAD};
 use hyper::{Body, Response};
 use ring::digest::{digest, Digest, SHA256};
 use ring::signature::{EcdsaKeyPair, KeyPair};
+use rustls_pki_types::CertificateDer;
 use serde::de::DeserializeOwned;
+use serde::ser::SerializeMap;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
@@ -271,6 +273,52 @@ pub struct NewOrder<'a> {
     pub identifiers: &'a [Identifier],
 }
 
+/// Payload for a certificate revocation request
+/// Defined in <https://datatracker.ietf.org/doc/html/rfc8555#section-7.6>
+#[derive(Debug)]
+pub struct RevocationRequest<'a> {
+    /// The certificate to revoke
+    pub certificate: &'a CertificateDer<'a>,
+    /// Reason for revocation
+    pub reason: Option<RevocationReason>,
+}
+
+impl<'a> Serialize for RevocationRequest<'a> {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        let base64 = BASE64_URL_SAFE_NO_PAD.encode(self.certificate);
+        let mut map = serializer.serialize_map(Some(2))?;
+        map.serialize_entry("certificate", &base64)?;
+        if let Some(reason) = &self.reason {
+            map.serialize_entry("reason", reason)?;
+        }
+        map.end()
+    }
+}
+
+/// The reason for a certificate revocation
+/// Defined in <https://datatracker.ietf.org/doc/html/rfc5280#section-5.3.1>
+#[allow(missing_docs)]
+#[derive(Debug, Clone)]
+#[repr(u8)]
+pub enum RevocationReason {
+    Unspecified = 0,
+    KeyCompromise = 1,
+    CaCompromise = 2,
+    AffiliationChanged = 3,
+    Superseded = 4,
+    CessationOfOperation = 5,
+    CertificateHold = 6,
+    RemoveFromCrl = 8,
+    PrivilegeWithdrawn = 9,
+    AaCompromise = 10,
+}
+
+impl Serialize for RevocationReason {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.serialize_u8(self.clone() as u8)
+    }
+}
+
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct NewAccountPayload<'a> {
@@ -302,6 +350,7 @@ pub(crate) struct DirectoryUrls {
     pub(crate) new_nonce: String,
     pub(crate) new_account: String,
     pub(crate) new_order: String,
+    pub(crate) revoke_cert: String,
 }
 
 #[derive(Serialize)]

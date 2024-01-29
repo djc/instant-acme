@@ -24,7 +24,8 @@ use serde::Serialize;
 mod types;
 pub use types::{
     AccountCredentials, Authorization, AuthorizationStatus, Challenge, ChallengeType, Error,
-    Identifier, LetsEncrypt, NewAccount, NewOrder, OrderState, OrderStatus, Problem, ZeroSsl,
+    Identifier, LetsEncrypt, NewAccount, NewOrder, OrderState, OrderStatus, Problem,
+    RevocationReason, RevocationRequest, ZeroSsl,
 };
 use types::{
     DirectoryUrls, Empty, FinalizeRequest, Header, JoseJson, Jwk, KeyOrKeyId, NewAccountPayload,
@@ -362,6 +363,17 @@ impl Account {
             url: order_url.ok_or("no order URL found")?,
         })
     }
+
+    /// Revokes a previously issued certificate
+    pub async fn revoke<'a>(&'a self, payload: &RevocationRequest<'a>) -> Result<(), Error> {
+        let rsp = self
+            .inner
+            .post(Some(payload), None, &self.inner.client.urls.revoke_cert)
+            .await?;
+        // The body is empty if the request was successful
+        let _ = Problem::from_response(rsp).await?;
+        Ok(())
+    }
 }
 
 struct AccountInner {
@@ -697,7 +709,7 @@ mod tests {
 
     #[tokio::test]
     async fn deserialize_old_credentials() -> Result<(), Error> {
-        const CREDENTIALS: &str = r#"{"id":"id","key_pkcs8":"MIGHAgEAMBMGByqGSM49AgEGCCqGSM49AwEHBG0wawIBAQQgJVWC_QzOTCS5vtsJp2IG-UDc8cdDfeoKtxSZxaznM-mhRANCAAQenCPoGgPFTdPJ7VLLKt56RxPlYT1wNXnHc54PEyBg3LxKaH0-sJkX0mL8LyPEdsfL_Oz4TxHkWLJGrXVtNhfH","urls":{"newNonce":"new-nonce","newAccount":"new-acct","newOrder":"new-order"}}"#;
+        const CREDENTIALS: &str = r#"{"id":"id","key_pkcs8":"MIGHAgEAMBMGByqGSM49AgEGCCqGSM49AwEHBG0wawIBAQQgJVWC_QzOTCS5vtsJp2IG-UDc8cdDfeoKtxSZxaznM-mhRANCAAQenCPoGgPFTdPJ7VLLKt56RxPlYT1wNXnHc54PEyBg3LxKaH0-sJkX0mL8LyPEdsfL_Oz4TxHkWLJGrXVtNhfH","urls":{"newNonce":"new-nonce","newAccount":"new-acct","newOrder":"new-order", "revokeCert": "revoke-cert"}}"#;
         Account::from_credentials(serde_json::from_str::<AccountCredentials>(CREDENTIALS)?).await?;
         Ok(())
     }
