@@ -21,7 +21,7 @@ specification.
 * Support for certificate revocation
 * Uses hyper with rustls and Tokio for HTTP requests
 * Uses *ring* for ECDSA signing
-* Minimum supported Rust version: 1.60
+* Minimum supported Rust version: 1.63
 
 ## Limitations
 
