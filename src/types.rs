@@ -108,11 +108,11 @@ pub struct Problem {
     /// One of an enumerated list of problem types
     ///
     /// See <https://datatracker.ietf.org/doc/html/rfc8555#section-6.7>
-    pub r#type: String,
+    pub r#type: Option<String>,
     /// A human-readable explanation of the problem
-    pub detail: String,
+    pub detail: Option<String>,
     /// The HTTP status code returned for this response
-    pub status: u16,
+    pub status: Option<u16>,
 }
 
 impl Problem {
@@ -136,7 +136,16 @@ impl Problem {
 
 impl fmt::Display for Problem {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "API error: {} ({})", self.detail, self.r#type)
+        f.write_str("API error")?;
+        if let Some(detail) = &self.detail {
+            write!(f, ": {detail}")?;
+        }
+
+        if let Some(r#type) = &self.r#type {
+            write!(f, " ({})", r#type)?;
+        }
+
+        Ok(())
     }
 }
 
