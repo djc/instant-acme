@@ -7,7 +7,8 @@ use ring::signature::{EcdsaKeyPair, KeyPair};
 use rustls_pki_types::CertificateDer;
 use serde::de::DeserializeOwned;
 use serde::ser::SerializeMap;
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize};
+use serde_json::Value;
 use thiserror::Error;
 
 /// Error type for instant-acme
@@ -238,7 +239,17 @@ pub struct Challenge {
     /// Current status
     pub status: ChallengeStatus,
     /// Potential error state
+    #[serde(deserialize_with = "ok_or_none")]
     pub error: Option<Problem>,
+}
+
+fn ok_or_none<'de, D, T>(deserializer: D) -> Result<Option<T>, D::Error>
+where
+    D: Deserializer<'de>,
+    T: Deserialize<'de>,
+{
+    let v = Value::deserialize(deserializer)?;
+    Ok(T::deserialize(v).ok())
 }
 
 /// Contents of an ACME order as described in RFC 8555 (section 7.1.3)
