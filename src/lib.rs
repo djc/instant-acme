@@ -366,10 +366,16 @@ impl Account {
 
     /// Revokes a previously issued certificate
     pub async fn revoke<'a>(&'a self, payload: &RevocationRequest<'a>) -> Result<(), Error> {
-        let rsp = self
-            .inner
-            .post(Some(payload), None, &self.inner.client.urls.revoke_cert)
-            .await?;
+        let revoke_url = match self.inner.client.urls.revoke_cert.as_deref() {
+            Some(url) => url,
+            // This happens because the current account credentials were deserialized from an
+            // older version which only serialized a subset of the directory URLs. You should
+            // make sure the account credentials include a `directory` field containing a
+            // string with the server's directory URL.
+            None => return Err("no revokeCert URL found".into()),
+        };
+
+        let rsp = self.inner.post(Some(payload), None, revoke_url).await?;
         // The body is empty if the request was successful
         let _ = Problem::from_response(rsp).await?;
         Ok(())

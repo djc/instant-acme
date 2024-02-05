@@ -353,7 +353,10 @@ pub(crate) struct DirectoryUrls {
     pub(crate) new_nonce: String,
     pub(crate) new_account: String,
     pub(crate) new_order: String,
-    pub(crate) revoke_cert: String,
+    // The fields below were added later and old `AccountCredentials` may not have it.
+    // Newer deserialized account credentials grab a fresh set of `DirectoryUrls` on
+    // deserialization, so they should be fine. Newer fields should be optional, too.
+    pub(crate) revoke_cert: Option<String>,
 }
 
 #[derive(Serialize)]
