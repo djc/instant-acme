@@ -60,6 +60,9 @@ pub struct AccountCredentials {
     #[serde(with = "pkcs8_serde")]
     pub(crate) key_pkcs8: Vec<u8>,
     pub(crate) directory: Option<String>,
+    /// We never serialize `urls` by default, but we support deserializing them
+    /// in order to support serialized data from older versions of the library.
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) urls: Option<DirectoryUrls>,
 }
 
