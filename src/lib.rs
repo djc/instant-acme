@@ -179,6 +179,11 @@ impl Order {
         Ok(&self.state)
     }
 
+    /// Extract the URL and last known state from the `Order`
+    pub fn into_parts(self) -> (String, OrderState) {
+        (self.url, self.state)
+    }
+
     /// Get the last known state of the order
     ///
     /// Call `refresh()` to get the latest state from the server.
