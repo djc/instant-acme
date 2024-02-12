@@ -371,6 +371,24 @@ impl Account {
         })
     }
 
+    /// Fetch the order state for an existing order based on the given `url`
+    ///
+    /// This might fail if the given URL's order belongs to a different account.
+    ///
+    /// Returns an [`Order`] instance. Use the [`Order::state`] method to inspect its state.
+    pub async fn order(&self, url: String) -> Result<Order, Error> {
+        let rsp = self.inner.post(None::<&Empty>, None, &url).await?;
+        Ok(Order {
+            account: self.inner.clone(),
+            nonce: nonce_from_response(&rsp),
+            // Order of fields matters! We return errors from Problem::check
+            // before emitting an error if there is no order url. Or the
+            // simple no url error hides the causing error in `Problem::check`.
+            state: Problem::check::<OrderState>(rsp).await?,
+            url,
+        })
+    }
+
     /// Revokes a previously issued certificate
     pub async fn revoke<'a>(&'a self, payload: &RevocationRequest<'a>) -> Result<(), Error> {
         let revoke_url = match self.inner.client.urls.revoke_cert.as_deref() {
