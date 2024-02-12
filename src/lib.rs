@@ -347,7 +347,7 @@ impl Account {
     /// Create a new order based on the given [`NewOrder`]
     ///
     /// Returns an [`Order`] instance. Use the [`Order::state()`] method to inspect its state.
-    pub async fn new_order<'a>(&'a self, order: &NewOrder<'_>) -> Result<Order, Error> {
+    pub async fn new_order(&self, order: &NewOrder<'_>) -> Result<Order, Error> {
         let rsp = self
             .inner
             .post(Some(order), None, &self.inner.client.urls.new_order)
