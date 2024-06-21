@@ -9,11 +9,14 @@ use std::pin::Pin;
 use std::sync::Arc;
 
 use base64::prelude::{Engine, BASE64_URL_SAFE_NO_PAD};
-use hyper::client::connect::Connect;
+use http_body_util::combinators::BoxBody;
+use http_body_util::Full;
+use hyper::body::Bytes;
+use hyper_util::client::legacy::connect::Connect;
 #[cfg(feature = "hyper-rustls")]
-use hyper::client::HttpConnector;
+use hyper_util::client::legacy::connect::HttpConnector;
 use hyper::header::{CONTENT_TYPE, LOCATION};
-use hyper::{Body, Method, Request, Response, StatusCode};
+use hyper::{body::Body, Method, Request, Response, StatusCode};
 use ring::digest::{digest, SHA256};
 use ring::rand::SystemRandom;
 use ring::signature::{EcdsaKeyPair, ECDSA_P256_SHA256_FIXED_SIGNING};
@@ -650,21 +653,21 @@ impl Signer for ExternalAccountKey {
     }
 }
 
-fn nonce_from_response(rsp: &Response<Body>) -> Option<String> {
+fn nonce_from_response(rsp: &Response<BoxBody<Bytes, hyper::Error>>) -> Option<String> {
     rsp.headers()
         .get(REPLAY_NONCE)
         .and_then(|hv| String::from_utf8(hv.as_ref().to_vec()).ok())
 }
 
 #[cfg(feature = "hyper-rustls")]
-struct DefaultClient(hyper::Client<hyper_rustls::HttpsConnector<HttpConnector>>);
+struct DefaultClient(hyper_util::client::legacy::Client<hyper_rustls::HttpsConnector<HttpConnector>, BoxBody<Bytes, hyper::Error>>);
 
 #[cfg(feature = "hyper-rustls")]
 impl HttpClient for DefaultClient {
     fn request(
         &self,
-        req: Request<Body>,
-    ) -> Pin<Box<dyn Future<Output = hyper::Result<Response<Body>>> + Send>> {
+        req: Request<BoxBody<Bytes, hyper::Error>>,
+    ) -> Pin<Box<dyn Future<Output = Result<Response<hyper::body::Incoming>, hyper_util::client::legacy::Error>> + Send>> {
         Box::pin(self.0.request(req))
     }
 }
@@ -673,9 +676,11 @@ impl HttpClient for DefaultClient {
 impl Default for DefaultClient {
     fn default() -> Self {
         Self(
-            hyper::Client::builder().build(
+            hyper_util::client::legacy::Client::builder(hyper_util::rt::TokioExecutor::new()).build(
                 hyper_rustls::HttpsConnectorBuilder::new()
-                    .with_native_roots()
+                    .with_native_roots().unwrap_or_else(|_| {
+                        hyper_rustls::HttpsConnectorBuilder::new().with_webpki_roots()
+                    })
                     .https_only()
                     .enable_http1()
                     .enable_http2()
@@ -690,19 +695,19 @@ pub trait HttpClient: Send + Sync + 'static {
     /// Send the given request and return the response
     fn request(
         &self,
-        req: Request<Body>,
-    ) -> Pin<Box<dyn Future<Output = hyper::Result<Response<Body>>> + Send>>;
+        req: Request<BoxBody<Bytes, hyper::Error>>,
+    ) -> Pin<Box<dyn Future<Output = Result<Response<hyper::body::Incoming>, hyper_util::client::legacy::Error>> + Send>>;
 }
 
-impl<C> HttpClient for hyper::Client<C>
+impl<C> HttpClient for hyper_util::client::legacy::Client<C, BoxBody<Bytes, hyper::Error>>
 where
     C: Connect + Clone + Send + Sync + 'static,
 {
     fn request(
         &self,
-        req: Request<Body>,
-    ) -> Pin<Box<dyn Future<Output = hyper::Result<Response<Body>>> + Send>> {
-        Box::pin(<hyper::Client<C>>::request(self, req))
+        req: Request<BoxBody<Bytes, hyper::Error>>,
+    ) -> Pin<Box<dyn Future<Output = Result<Response<hyper::body::Incoming>, hyper_util::client::legacy::Error>> + Send>> {
+        Box::pin(<hyper_util::client::legacy::Client<C, BoxBody<Bytes, hyper::Error>>>::request(self, req))
     }
 }
 

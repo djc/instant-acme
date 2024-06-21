@@ -1,7 +1,7 @@
 use std::fmt;
 
 use base64::prelude::{Engine, BASE64_URL_SAFE_NO_PAD};
-use hyper::{Body, Response};
+use hyper::Response;
 use ring::digest::{digest, Digest, SHA256};
 use ring::signature::{EcdsaKeyPair, KeyPair};
 use rustls_pki_types::CertificateDer;
