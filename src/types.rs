@@ -1,6 +1,9 @@
 use std::fmt;
 
 use base64::prelude::{Engine, BASE64_URL_SAFE_NO_PAD};
+use http_body_util::combinators::BoxBody;
+use http_body_util::BodyExt;
+use hyper::body::{Bytes, Incoming};
 use hyper::Response;
 use ring::digest::{digest, Digest, SHA256};
 use ring::signature::{EcdsaKeyPair, KeyPair};
@@ -30,6 +33,12 @@ pub enum Error {
     /// HTTP request failure
     #[error("HTTP request failure: {0}")]
     Http(#[from] hyper::Error),
+    /// HTTP request failure
+    #[error("HTTP request failure: {0}")]
+    HttpHttp(#[from] hyper::http::Error),
+    /// HTTP client request failure
+    #[error("HTTP request failure: {0}")]
+    HttpClient(#[from] hyper_util::client::legacy::Error),
     /// Invalid ACME server URL
     #[error("invalid URI: {0}")]
     InvalidUri(#[from] hyper::http::uri::InvalidUri),
@@ -119,21 +128,23 @@ pub struct Problem {
 }
 
 impl Problem {
-    pub(crate) async fn check<T: DeserializeOwned>(rsp: Response<Body>) -> Result<T, Error> {
+    pub(crate) async fn check<T: DeserializeOwned>(rsp: Response<Incoming>) -> Result<T, Error> {
         Ok(serde_json::from_slice(
-            &hyper::body::to_bytes(Self::from_response(rsp).await?).await?,
+            &Self::from_response(rsp).await?.collect().await?.to_bytes(),
         )?)
     }
 
-    pub(crate) async fn from_response(rsp: Response<Body>) -> Result<Body, Error> {
+    pub(crate) async fn from_response(
+        rsp: Response<Incoming>,
+    ) -> Result<BoxBody<Bytes, Error>, Error> {
         let status = rsp.status();
         let body = rsp.into_body();
         if status.is_informational() || status.is_success() || status.is_redirection() {
-            return Ok(body);
+            return Ok(body.map_err::<_, Error>(|_| unreachable!()).boxed());
         }
 
-        let body = hyper::body::to_bytes(body).await?;
-        Err(serde_json::from_slice::<Problem>(&body)?.into())
+        let body_bytes = body.collect().await?.to_bytes();
+        Err(serde_json::from_slice::<Problem>(&body_bytes)?.into())
     }
 }
 

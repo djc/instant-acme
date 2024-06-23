@@ -10,13 +10,13 @@ use std::sync::Arc;
 
 use base64::prelude::{Engine, BASE64_URL_SAFE_NO_PAD};
 use http_body_util::combinators::BoxBody;
-use http_body_util::Full;
-use hyper::body::Bytes;
+use http_body_util::BodyExt;
+use hyper::body::{Bytes, Incoming};
+use hyper::header::{CONTENT_TYPE, LOCATION};
+use hyper::{Method, Request, Response, StatusCode};
 use hyper_util::client::legacy::connect::Connect;
 #[cfg(feature = "hyper-rustls")]
 use hyper_util::client::legacy::connect::HttpConnector;
-use hyper::header::{CONTENT_TYPE, LOCATION};
-use hyper::{body::Body, Method, Request, Response, StatusCode};
 use ring::digest::{digest, SHA256};
 use ring::rand::SystemRandom;
 use ring::signature::{EcdsaKeyPair, ECDSA_P256_SHA256_FIXED_SIGNING};
@@ -137,9 +137,13 @@ impl Order {
             .await?;
 
         self.nonce = nonce_from_response(&rsp);
-        let body = hyper::body::to_bytes(Problem::from_response(rsp).await?).await?;
+        let body_bytes = Problem::from_response(rsp)
+            .await?
+            .collect()
+            .await?
+            .to_bytes();
         Ok(Some(
-            String::from_utf8(body.to_vec())
+            String::from_utf8(body_bytes.to_vec())
                 .map_err(|_| "unable to decode certificate as UTF-8")?,
         ))
     }
@@ -422,7 +426,7 @@ impl AccountInner {
         payload: Option<&impl Serialize>,
         nonce: Option<String>,
         url: &str,
-    ) -> Result<Response<Body>, Error> {
+    ) -> Result<Response<Incoming>, Error> {
         self.client.post(payload, nonce, self, url).await
     }
 }
@@ -451,16 +455,20 @@ struct Client {
 }
 
 impl Client {
-    async fn new(server_url: &str, http: Box<dyn HttpClient>) -> Result<Self, Error> {
+    async fn new(directory_url: &str, http: Box<dyn HttpClient>) -> Result<Self, Error> {
         let req = Request::builder()
-            .uri(server_url)
-            .body(Body::empty())
-            .unwrap();
+            .uri(directory_url)
+            .body(
+                http_body_util::Empty::new()
+                    .map_err::<_, Error>(|_| unreachable!("Should be Infallible"))
+                    .boxed(),
+            )
+            .expect("Infallible error should not occur");
         let rsp = http.request(req).await?;
-        let body = hyper::body::to_bytes(rsp.into_body()).await?;
+        let body_bytes = rsp.into_body().collect().await?.to_bytes();
         Ok(Client {
             http,
-            urls: serde_json::from_slice(&body)?,
+            urls: serde_json::from_slice(&body_bytes)?,
         })
     }
 
@@ -470,15 +478,18 @@ impl Client {
         nonce: Option<String>,
         signer: &impl Signer,
         url: &str,
-    ) -> Result<Response<Body>, Error> {
+    ) -> Result<Response<hyper::body::Incoming>, Error> {
         let nonce = self.nonce(nonce).await?;
         let body = JoseJson::new(payload, signer.header(Some(&nonce), url), signer)?;
         let request = Request::builder()
             .method(Method::POST)
             .uri(url)
             .header(CONTENT_TYPE, JOSE_JSON)
-            .body(Body::from(serde_json::to_vec(&body)?))
-            .unwrap();
+            .body(
+                http_body_util::Full::from(serde_json::to_vec(&body)?)
+                    .map_err::<_, Error>(|_| unreachable!("Should be Infallible"))
+                    .boxed(),
+            )?;
 
         Ok(self.http.request(request).await?)
     }
@@ -491,8 +502,12 @@ impl Client {
         let request = Request::builder()
             .method(Method::HEAD)
             .uri(&self.urls.new_nonce)
-            .body(Body::empty())
-            .unwrap();
+            .body(
+                http_body_util::Empty::new()
+                    .map_err::<_, Error>(|_| unreachable!("Should be Infallible"))
+                    .boxed(),
+            )
+            .expect("Should be Infallible");
 
         let rsp = self.http.request(request).await?;
         // https://datatracker.ietf.org/doc/html/rfc8555#section-7.2
@@ -653,21 +668,35 @@ impl Signer for ExternalAccountKey {
     }
 }
 
-fn nonce_from_response(rsp: &Response<BoxBody<Bytes, hyper::Error>>) -> Option<String> {
+fn nonce_from_response(rsp: &Response<Incoming>) -> Option<String> {
     rsp.headers()
         .get(REPLAY_NONCE)
         .and_then(|hv| String::from_utf8(hv.as_ref().to_vec()).ok())
 }
 
 #[cfg(feature = "hyper-rustls")]
-struct DefaultClient(hyper_util::client::legacy::Client<hyper_rustls::HttpsConnector<HttpConnector>, BoxBody<Bytes, hyper::Error>>);
+struct DefaultClient(
+    hyper_util::client::legacy::Client<
+        hyper_rustls::HttpsConnector<HttpConnector>,
+        BoxBody<Bytes, Error>,
+    >,
+);
 
 #[cfg(feature = "hyper-rustls")]
 impl HttpClient for DefaultClient {
     fn request(
         &self,
-        req: Request<BoxBody<Bytes, hyper::Error>>,
-    ) -> Pin<Box<dyn Future<Output = Result<Response<hyper::body::Incoming>, hyper_util::client::legacy::Error>> + Send>> {
+        req: Request<BoxBody<Bytes, Error>>,
+    ) -> Pin<
+        Box<
+            dyn Future<
+                    Output = Result<
+                        Response<hyper::body::Incoming>,
+                        hyper_util::client::legacy::Error,
+                    >,
+                > + Send,
+        >,
+    > {
         Box::pin(self.0.request(req))
     }
 }
@@ -676,16 +705,18 @@ impl HttpClient for DefaultClient {
 impl Default for DefaultClient {
     fn default() -> Self {
         Self(
-            hyper_util::client::legacy::Client::builder(hyper_util::rt::TokioExecutor::new()).build(
-                hyper_rustls::HttpsConnectorBuilder::new()
-                    .with_native_roots().unwrap_or_else(|_| {
-                        hyper_rustls::HttpsConnectorBuilder::new().with_webpki_roots()
-                    })
-                    .https_only()
-                    .enable_http1()
-                    .enable_http2()
-                    .build(),
-            ),
+            hyper_util::client::legacy::Client::builder(hyper_util::rt::TokioExecutor::new())
+                .build(
+                    hyper_rustls::HttpsConnectorBuilder::new()
+                        .with_native_roots()
+                        .unwrap_or_else(|_| {
+                            hyper_rustls::HttpsConnectorBuilder::new().with_webpki_roots()
+                        })
+                        .https_only()
+                        .enable_http1()
+                        .enable_http2()
+                        .build(),
+                ),
         )
     }
 }
@@ -695,19 +726,37 @@ pub trait HttpClient: Send + Sync + 'static {
     /// Send the given request and return the response
     fn request(
         &self,
-        req: Request<BoxBody<Bytes, hyper::Error>>,
-    ) -> Pin<Box<dyn Future<Output = Result<Response<hyper::body::Incoming>, hyper_util::client::legacy::Error>> + Send>>;
+        req: Request<BoxBody<Bytes, Error>>,
+    ) -> Pin<
+        Box<
+            dyn Future<
+                    Output = Result<
+                        Response<hyper::body::Incoming>,
+                        hyper_util::client::legacy::Error,
+                    >,
+                > + Send,
+        >,
+    >;
 }
 
-impl<C> HttpClient for hyper_util::client::legacy::Client<C, BoxBody<Bytes, hyper::Error>>
+impl<C> HttpClient for hyper_util::client::legacy::Client<C, BoxBody<Bytes, Error>>
 where
     C: Connect + Clone + Send + Sync + 'static,
 {
     fn request(
         &self,
-        req: Request<BoxBody<Bytes, hyper::Error>>,
-    ) -> Pin<Box<dyn Future<Output = Result<Response<hyper::body::Incoming>, hyper_util::client::legacy::Error>> + Send>> {
-        Box::pin(<hyper_util::client::legacy::Client<C, BoxBody<Bytes, hyper::Error>>>::request(self, req))
+        req: Request<BoxBody<Bytes, Error>>,
+    ) -> Pin<
+        Box<
+            dyn Future<
+                    Output = Result<
+                        Response<hyper::body::Incoming>,
+                        hyper_util::client::legacy::Error,
+                    >,
+                > + Send,
+        >,
+    > {
+        Box::pin(<hyper_util::client::legacy::Client<C, BoxBody<Bytes, Error>>>::request(self, req))
     }
 }
 
