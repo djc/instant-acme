@@ -137,13 +137,13 @@ impl Order {
             .await?;
 
         self.nonce = nonce_from_response(&rsp);
-        let body_bytes = Problem::from_response(rsp)
+        let body = Problem::from_response(rsp)
             .await?
             .collect()
             .await?
             .to_bytes();
         Ok(Some(
-            String::from_utf8(body_bytes.to_vec())
+            String::from_utf8(body.to_vec())
                 .map_err(|_| "unable to decode certificate as UTF-8")?,
         ))
     }
@@ -455,9 +455,9 @@ struct Client {
 }
 
 impl Client {
-    async fn new(directory_url: &str, http: Box<dyn HttpClient>) -> Result<Self, Error> {
+    async fn new(server_url: &str, http: Box<dyn HttpClient>) -> Result<Self, Error> {
         let req = Request::builder()
-            .uri(directory_url)
+            .uri(server_url)
             .body(
                 http_body_util::Empty::new()
                     .map_err::<_, Error>(|_| unreachable!("Should be Infallible"))
@@ -465,10 +465,10 @@ impl Client {
             )
             .expect("Infallible error should not occur");
         let rsp = http.request(req).await?;
-        let body_bytes = rsp.into_body().collect().await?.to_bytes();
+        let body = rsp.into_body().collect().await?.to_bytes();
         Ok(Client {
             http,
-            urls: serde_json::from_slice(&body_bytes)?,
+            urls: serde_json::from_slice(&body)?,
         })
     }
 
@@ -478,7 +478,7 @@ impl Client {
         nonce: Option<String>,
         signer: &impl Signer,
         url: &str,
-    ) -> Result<Response<hyper::body::Incoming>, Error> {
+    ) -> Result<Response<Incoming>, Error> {
         let nonce = self.nonce(nonce).await?;
         let body = JoseJson::new(payload, signer.header(Some(&nonce), url), signer)?;
         let request = Request::builder()
