@@ -9,8 +9,7 @@ use std::pin::Pin;
 use std::sync::Arc;
 
 use base64::prelude::{Engine, BASE64_URL_SAFE_NO_PAD};
-use http_body_util::combinators::BoxBody;
-use http_body_util::BodyExt;
+use http_body_util::{BodyExt, Full};
 use hyper::body::{Bytes, Incoming};
 use hyper::header::{CONTENT_TYPE, LOCATION};
 use hyper::{Method, Request, Response, StatusCode};
@@ -458,11 +457,7 @@ impl Client {
     async fn new(server_url: &str, http: Box<dyn HttpClient>) -> Result<Self, Error> {
         let req = Request::builder()
             .uri(server_url)
-            .body(
-                http_body_util::Empty::new()
-                    .map_err::<_, Error>(|_| unreachable!("Should be Infallible"))
-                    .boxed(),
-            )
+            .body(http_body_util::Full::default())
             .expect("Infallible error should not occur");
         let rsp = http.request(req).await?;
         let body = rsp.into_body().collect().await?.to_bytes();
@@ -485,11 +480,7 @@ impl Client {
             .method(Method::POST)
             .uri(url)
             .header(CONTENT_TYPE, JOSE_JSON)
-            .body(
-                http_body_util::Full::from(serde_json::to_vec(&body)?)
-                    .map_err::<_, Error>(|_| unreachable!("Should be Infallible"))
-                    .boxed(),
-            )?;
+            .body(http_body_util::Full::from(serde_json::to_vec(&body)?))?;
 
         Ok(self.http.request(request).await?)
     }
@@ -502,11 +493,7 @@ impl Client {
         let request = Request::builder()
             .method(Method::HEAD)
             .uri(&self.urls.new_nonce)
-            .body(
-                http_body_util::Empty::new()
-                    .map_err::<_, Error>(|_| unreachable!("Should be Infallible"))
-                    .boxed(),
-            )
+            .body(http_body_util::Full::default())
             .expect("Should be Infallible");
 
         let rsp = self.http.request(request).await?;
@@ -676,25 +663,18 @@ fn nonce_from_response(rsp: &Response<Incoming>) -> Option<String> {
 
 #[cfg(feature = "hyper-rustls")]
 struct DefaultClient(
-    hyper_util::client::legacy::Client<
-        hyper_rustls::HttpsConnector<HttpConnector>,
-        BoxBody<Bytes, Error>,
-    >,
+    hyper_util::client::legacy::Client<hyper_rustls::HttpsConnector<HttpConnector>, Full<Bytes>>,
 );
 
 #[cfg(feature = "hyper-rustls")]
 impl HttpClient for DefaultClient {
     fn request(
         &self,
-        req: Request<BoxBody<Bytes, Error>>,
+        req: Request<Full<Bytes>>,
     ) -> Pin<
         Box<
-            dyn Future<
-                    Output = Result<
-                        Response<Incoming>,
-                        hyper_util::client::legacy::Error,
-                    >,
-                > + Send,
+            dyn Future<Output = Result<Response<Incoming>, hyper_util::client::legacy::Error>>
+                + Send,
         >,
     > {
         Box::pin(self.0.request(req))
@@ -726,26 +706,22 @@ pub trait HttpClient: Send + Sync + 'static {
     /// Send the given request and return the response
     fn request(
         &self,
-        req: Request<BoxBody<Bytes, Error>>,
+        req: Request<Full<Bytes>>,
     ) -> Pin<
         Box<
-            dyn Future<
-                    Output = Result<
-                        Response<Incoming>,
-                        hyper_util::client::legacy::Error,
-                    >,
-                > + Send,
+            dyn Future<Output = Result<Response<Incoming>, hyper_util::client::legacy::Error>>
+                + Send,
         >,
     >;
 }
 
-impl<C> HttpClient for hyper_util::client::legacy::Client<C, BoxBody<Bytes, Error>>
+impl<C> HttpClient for hyper_util::client::legacy::Client<C, Full<Bytes>>
 where
     C: Connect + Clone + Send + Sync + 'static,
 {
     fn request(
         &self,
-        req: Request<BoxBody<Bytes, Error>>,
+        req: Request<Full<Bytes>>,
     ) -> Pin<
         Box<
             dyn Future<
@@ -756,7 +732,7 @@ where
                 > + Send,
         >,
     > {
-        Box::pin(<hyper_util::client::legacy::Client<C, BoxBody<Bytes, Error>>>::request(self, req))
+        Box::pin(<hyper_util::client::legacy::Client<C, Full<Bytes>>>::request(self, req))
     }
 }
 
