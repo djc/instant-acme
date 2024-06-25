@@ -691,7 +691,7 @@ impl HttpClient for DefaultClient {
         Box<
             dyn Future<
                     Output = Result<
-                        Response<hyper::body::Incoming>,
+                        Response<Incoming>,
                         hyper_util::client::legacy::Error,
                     >,
                 > + Send,
@@ -731,7 +731,7 @@ pub trait HttpClient: Send + Sync + 'static {
         Box<
             dyn Future<
                     Output = Result<
-                        Response<hyper::body::Incoming>,
+                        Response<Incoming>,
                         hyper_util::client::legacy::Error,
                     >,
                 > + Send,
