@@ -29,15 +29,12 @@ pub enum Error {
     /// Failed to instantiate a private key
     #[error("invalid key bytes: {0}")]
     CryptoKey(#[from] ring::error::KeyRejected),
-    /// HTTP request failure
+    /// Hyper request failure
     #[error("HTTP request failure: {0}")]
-    Http(#[from] hyper::Error),
-    /// HTTP request failure
+    Hyper(#[from] hyper::Error),
+    /// HTTP failure
     #[error("HTTP request failure: {0}")]
-    HttpHttp(#[from] hyper::http::Error),
-    /// HTTP client request failure
-    #[error("HTTP request failure: {0}")]
-    HttpClient(#[from] hyper_util::client::legacy::Error),
+    Http(#[from] hyper::http::Error),
     /// Invalid ACME server URL
     #[error("invalid URI: {0}")]
     InvalidUri(#[from] hyper::http::uri::InvalidUri),
@@ -47,11 +44,20 @@ pub enum Error {
     /// Miscellaneous errors
     #[error("missing data: {0}")]
     Str(&'static str),
+    /// Other kind of error
+    #[error(transparent)]
+    Other(Box<dyn std::error::Error + Send + Sync + 'static>),
 }
 
 impl From<&'static str> for Error {
     fn from(s: &'static str) -> Self {
         Error::Str(s)
+    }
+}
+
+impl From<hyper_util::client::legacy::Error> for Error {
+    fn from(value: hyper_util::client::legacy::Error) -> Self {
+        Self::Other(Box::new(value))
     }
 }
 
