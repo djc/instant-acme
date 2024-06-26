@@ -669,13 +669,9 @@ impl HttpClient for DefaultClient {
     fn request(
         &self,
         req: Request<Full<Bytes>>,
-    ) -> Pin<
-        Box<
-            dyn Future<Output = Result<Response<Incoming>, hyper_util::client::legacy::Error>>
-                + Send,
-        >,
-    > {
-        Box::pin(self.0.request(req))
+    ) -> Pin<Box<dyn Future<Output = Result<Response<Incoming>, Error>> + Send>> {
+        let fut = self.0.request(req);
+        Box::pin(async move { fut.await.map_err(Error::from) })
     }
 }
 
@@ -704,12 +700,7 @@ pub trait HttpClient: Send + Sync + 'static {
     fn request(
         &self,
         req: Request<Full<Bytes>>,
-    ) -> Pin<
-        Box<
-            dyn Future<Output = Result<Response<Incoming>, hyper_util::client::legacy::Error>>
-                + Send,
-        >,
-    >;
+    ) -> Pin<Box<dyn Future<Output = Result<Response<Incoming>, Error>> + Send>>;
 }
 
 impl<C> HttpClient for HyperClient<C, Full<Bytes>>
@@ -719,17 +710,9 @@ where
     fn request(
         &self,
         req: Request<Full<Bytes>>,
-    ) -> Pin<
-        Box<
-            dyn Future<
-                    Output = Result<
-                        Response<hyper::body::Incoming>,
-                        hyper_util::client::legacy::Error,
-                    >,
-                > + Send,
-        >,
-    > {
-        Box::pin(<HyperClient<C, Full<Bytes>>>::request(self, req))
+    ) -> Pin<Box<dyn Future<Output = Result<Response<hyper::body::Incoming>, Error>> + Send>> {
+        let fut = <HyperClient<C, Full<Bytes>>>::request(self, req);
+        Box::pin(async move { fut.await.map_err(Error::from) })
     }
 }
 
