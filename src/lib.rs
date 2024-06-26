@@ -483,7 +483,7 @@ impl Client {
             .header(CONTENT_TYPE, JOSE_JSON)
             .body(Full::from(serde_json::to_vec(&body)?))?;
 
-        Ok(self.http.request(request).await?)
+        self.http.request(request).await
     }
 
     async fn nonce(&self, nonce: Option<String>) -> Result<String, Error> {
