@@ -13,7 +13,7 @@ use http_body_util::{BodyExt, Full};
 use hyper::body::{Bytes, Incoming};
 use hyper::header::{CONTENT_TYPE, LOCATION};
 use hyper::{Method, Request, Response, StatusCode};
-use hyper_util::client::legacy::connect::Connect;
+use hyper_util::client::legacy::{Client as HyperClient, connect::Connect};
 #[cfg(feature = "hyper-rustls")]
 use hyper_util::client::legacy::connect::HttpConnector;
 use ring::digest::{digest, SHA256};
@@ -457,7 +457,7 @@ impl Client {
     async fn new(server_url: &str, http: Box<dyn HttpClient>) -> Result<Self, Error> {
         let req = Request::builder()
             .uri(server_url)
-            .body(http_body_util::Full::default())
+            .body(Full::default())
             .expect("Infallible error should not occur");
         let rsp = http.request(req).await?;
         let body = rsp.into_body().collect().await?.to_bytes();
@@ -480,7 +480,7 @@ impl Client {
             .method(Method::POST)
             .uri(url)
             .header(CONTENT_TYPE, JOSE_JSON)
-            .body(http_body_util::Full::from(serde_json::to_vec(&body)?))?;
+            .body(Full::from(serde_json::to_vec(&body)?))?;
 
         Ok(self.http.request(request).await?)
     }
@@ -493,7 +493,7 @@ impl Client {
         let request = Request::builder()
             .method(Method::HEAD)
             .uri(&self.urls.new_nonce)
-            .body(http_body_util::Full::default())
+            .body(Full::default())
             .expect("Should be Infallible");
 
         let rsp = self.http.request(request).await?;
@@ -663,7 +663,7 @@ fn nonce_from_response(rsp: &Response<Incoming>) -> Option<String> {
 
 #[cfg(feature = "hyper-rustls")]
 struct DefaultClient(
-    hyper_util::client::legacy::Client<hyper_rustls::HttpsConnector<HttpConnector>, Full<Bytes>>,
+    HyperClient<hyper_rustls::HttpsConnector<HttpConnector>, Full<Bytes>>,
 );
 
 #[cfg(feature = "hyper-rustls")]
@@ -685,7 +685,7 @@ impl HttpClient for DefaultClient {
 impl Default for DefaultClient {
     fn default() -> Self {
         Self(
-            hyper_util::client::legacy::Client::builder(hyper_util::rt::TokioExecutor::new())
+            HyperClient::builder(hyper_util::rt::TokioExecutor::new())
                 .build(
                     hyper_rustls::HttpsConnectorBuilder::new()
                         .with_native_roots()
@@ -715,7 +715,7 @@ pub trait HttpClient: Send + Sync + 'static {
     >;
 }
 
-impl<C> HttpClient for hyper_util::client::legacy::Client<C, Full<Bytes>>
+impl<C> HttpClient for HyperClient<C, Full<Bytes>>
 where
     C: Connect + Clone + Send + Sync + 'static,
 {
@@ -732,7 +732,7 @@ where
                 > + Send,
         >,
     > {
-        Box::pin(<hyper_util::client::legacy::Client<C, Full<Bytes>>>::request(self, req))
+        Box::pin(<HyperClient<C, Full<Bytes>>>::request(self, req))
     }
 }
 
