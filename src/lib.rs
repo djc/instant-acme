@@ -212,7 +212,7 @@ impl Account {
     pub async fn from_credentials(credentials: AccountCredentials) -> Result<Self, Error> {
         Ok(Self {
             inner: Arc::new(
-                AccountInner::from_credentials(credentials, Box::<DefaultClient>::default())
+                AccountInner::from_credentials(credentials, Box::new(DefaultClient::try_new()?))
                     .await?,
             ),
         })
@@ -262,7 +262,7 @@ impl Account {
         Self::create_inner(
             account,
             external_account,
-            Client::new(server_url, Box::<DefaultClient>::default()).await?,
+            Client::new(server_url, Box::new(DefaultClient::try_new()?)).await?,
             server_url,
         )
         .await
@@ -665,6 +665,23 @@ fn nonce_from_response(rsp: &Response<Incoming>) -> Option<String> {
 struct DefaultClient(HyperClient<hyper_rustls::HttpsConnector<HttpConnector>, Full<Bytes>>);
 
 #[cfg(feature = "hyper-rustls")]
+impl DefaultClient {
+    fn try_new() -> Result<Self, Error> {
+        Ok(Self(
+            HyperClient::builder(hyper_util::rt::TokioExecutor::new()).build(
+                hyper_rustls::HttpsConnectorBuilder::new()
+                    .with_native_roots()
+                    .map_err(|e| Error::Other(Box::new(e)))?
+                    .https_only()
+                    .enable_http1()
+                    .enable_http2()
+                    .build(),
+            ),
+        ))
+    }
+}
+
+#[cfg(feature = "hyper-rustls")]
 impl HttpClient for DefaultClient {
     fn request(
         &self,
@@ -672,25 +689,6 @@ impl HttpClient for DefaultClient {
     ) -> Pin<Box<dyn Future<Output = Result<Response<Incoming>, Error>> + Send>> {
         let fut = self.0.request(req);
         Box::pin(async move { fut.await.map_err(Error::from) })
-    }
-}
-
-#[cfg(feature = "hyper-rustls")]
-impl Default for DefaultClient {
-    fn default() -> Self {
-        Self(
-            HyperClient::builder(hyper_util::rt::TokioExecutor::new()).build(
-                hyper_rustls::HttpsConnectorBuilder::new()
-                    .with_native_roots()
-                    .unwrap_or_else(|_| {
-                        hyper_rustls::HttpsConnectorBuilder::new().with_webpki_roots()
-                    })
-                    .https_only()
-                    .enable_http1()
-                    .enable_http2()
-                    .build(),
-            ),
-        )
     }
 }
 
