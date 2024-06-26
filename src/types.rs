@@ -1,9 +1,8 @@
 use std::fmt;
 
 use base64::prelude::{Engine, BASE64_URL_SAFE_NO_PAD};
-use http_body_util::combinators::BoxBody;
 use http_body_util::BodyExt;
-use hyper::body::{Bytes, Incoming};
+use hyper::body::Incoming;
 use hyper::Response;
 use ring::digest::{digest, Digest, SHA256};
 use ring::signature::{EcdsaKeyPair, KeyPair};
@@ -134,17 +133,15 @@ impl Problem {
         )?)
     }
 
-    pub(crate) async fn from_response(
-        rsp: Response<Incoming>,
-    ) -> Result<BoxBody<Bytes, Error>, Error> {
+    pub(crate) async fn from_response(rsp: Response<Incoming>) -> Result<Incoming, Error> {
         let status = rsp.status();
         let body = rsp.into_body();
         if status.is_informational() || status.is_success() || status.is_redirection() {
-            return Ok(body.map_err::<_, Error>(|_| unreachable!()).boxed());
+            return Ok(body);
         }
 
-        let body_bytes = body.collect().await?.to_bytes();
-        Err(serde_json::from_slice::<Problem>(&body_bytes)?.into())
+        let body = body.collect().await?.to_bytes();
+        Err(serde_json::from_slice::<Problem>(&body)?.into())
     }
 }
 

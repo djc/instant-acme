@@ -13,9 +13,9 @@ use http_body_util::{BodyExt, Full};
 use hyper::body::{Bytes, Incoming};
 use hyper::header::{CONTENT_TYPE, LOCATION};
 use hyper::{Method, Request, Response, StatusCode};
-use hyper_util::client::legacy::{Client as HyperClient, connect::Connect};
 #[cfg(feature = "hyper-rustls")]
 use hyper_util::client::legacy::connect::HttpConnector;
+use hyper_util::client::legacy::{connect::Connect, Client as HyperClient};
 use ring::digest::{digest, SHA256};
 use ring::rand::SystemRandom;
 use ring::signature::{EcdsaKeyPair, ECDSA_P256_SHA256_FIXED_SIGNING};
@@ -662,9 +662,7 @@ fn nonce_from_response(rsp: &Response<Incoming>) -> Option<String> {
 }
 
 #[cfg(feature = "hyper-rustls")]
-struct DefaultClient(
-    HyperClient<hyper_rustls::HttpsConnector<HttpConnector>, Full<Bytes>>,
-);
+struct DefaultClient(HyperClient<hyper_rustls::HttpsConnector<HttpConnector>, Full<Bytes>>);
 
 #[cfg(feature = "hyper-rustls")]
 impl HttpClient for DefaultClient {
@@ -685,18 +683,17 @@ impl HttpClient for DefaultClient {
 impl Default for DefaultClient {
     fn default() -> Self {
         Self(
-            HyperClient::builder(hyper_util::rt::TokioExecutor::new())
-                .build(
-                    hyper_rustls::HttpsConnectorBuilder::new()
-                        .with_native_roots()
-                        .unwrap_or_else(|_| {
-                            hyper_rustls::HttpsConnectorBuilder::new().with_webpki_roots()
-                        })
-                        .https_only()
-                        .enable_http1()
-                        .enable_http2()
-                        .build(),
-                ),
+            HyperClient::builder(hyper_util::rt::TokioExecutor::new()).build(
+                hyper_rustls::HttpsConnectorBuilder::new()
+                    .with_native_roots()
+                    .unwrap_or_else(|_| {
+                        hyper_rustls::HttpsConnectorBuilder::new().with_webpki_roots()
+                    })
+                    .https_only()
+                    .enable_http1()
+                    .enable_http2()
+                    .build(),
+            ),
         )
     }
 }
