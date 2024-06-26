@@ -29,24 +29,24 @@ pub enum Error {
     /// Failed to instantiate a private key
     #[error("invalid key bytes: {0}")]
     CryptoKey(#[from] ring::error::KeyRejected),
-    /// Hyper request failure
-    #[error("HTTP request failure: {0}")]
-    Hyper(#[from] hyper::Error),
     /// HTTP failure
     #[error("HTTP request failure: {0}")]
     Http(#[from] hyper::http::Error),
+    /// Hyper request failure
+    #[error("HTTP request failure: {0}")]
+    Hyper(#[from] hyper::Error),
     /// Invalid ACME server URL
     #[error("invalid URI: {0}")]
     InvalidUri(#[from] hyper::http::uri::InvalidUri),
     /// Failed to (de)serialize a JSON object
     #[error("failed to (de)serialize JSON: {0}")]
     Json(#[from] serde_json::Error),
-    /// Miscellaneous errors
-    #[error("missing data: {0}")]
-    Str(&'static str),
     /// Other kind of error
     #[error(transparent)]
     Other(Box<dyn std::error::Error + Send + Sync + 'static>),
+    /// Miscellaneous errors
+    #[error("missing data: {0}")]
+    Str(&'static str),
 }
 
 impl From<&'static str> for Error {

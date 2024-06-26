@@ -14,8 +14,9 @@ use hyper::body::{Bytes, Incoming};
 use hyper::header::{CONTENT_TYPE, LOCATION};
 use hyper::{Method, Request, Response, StatusCode};
 #[cfg(feature = "hyper-rustls")]
-use hyper_util::client::legacy::connect::HttpConnector;
-use hyper_util::client::legacy::{connect::Connect, Client as HyperClient};
+use hyper_util::client::legacy::connect::{Connect, HttpConnector};
+use hyper_util::client::legacy::Client as HyperClient;
+use hyper_util::rt::TokioExecutor;
 use ring::digest::{digest, SHA256};
 use ring::rand::SystemRandom;
 use ring::signature::{EcdsaKeyPair, ECDSA_P256_SHA256_FIXED_SIGNING};
@@ -458,7 +459,7 @@ impl Client {
         let req = Request::builder()
             .uri(server_url)
             .body(Full::default())
-            .expect("Infallible error should not occur");
+            .expect("infallible error should not occur");
         let rsp = http.request(req).await?;
         let body = rsp.into_body().collect().await?.to_bytes();
         Ok(Client {
@@ -494,7 +495,7 @@ impl Client {
             .method(Method::HEAD)
             .uri(&self.urls.new_nonce)
             .body(Full::default())
-            .expect("Should be Infallible");
+            .expect("infallible error should not occur");
 
         let rsp = self.http.request(request).await?;
         // https://datatracker.ietf.org/doc/html/rfc8555#section-7.2
@@ -668,7 +669,7 @@ struct DefaultClient(HyperClient<hyper_rustls::HttpsConnector<HttpConnector>, Fu
 impl DefaultClient {
     fn try_new() -> Result<Self, Error> {
         Ok(Self(
-            HyperClient::builder(hyper_util::rt::TokioExecutor::new()).build(
+            HyperClient::builder(TokioExecutor::new()).build(
                 hyper_rustls::HttpsConnectorBuilder::new()
                     .with_native_roots()
                     .map_err(|e| Error::Other(Box::new(e)))?
