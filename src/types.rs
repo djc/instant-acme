@@ -1,7 +1,9 @@
 use std::fmt;
 
 use base64::prelude::{Engine, BASE64_URL_SAFE_NO_PAD};
-use hyper::{Body, Response};
+use http_body_util::BodyExt;
+use hyper::body::Incoming;
+use hyper::Response;
 use ring::digest::{digest, Digest, SHA256};
 use ring::signature::{EcdsaKeyPair, KeyPair};
 use rustls_pki_types::CertificateDer;
@@ -27,15 +29,21 @@ pub enum Error {
     /// Failed to instantiate a private key
     #[error("invalid key bytes: {0}")]
     CryptoKey(#[from] ring::error::KeyRejected),
-    /// HTTP request failure
+    /// HTTP failure
     #[error("HTTP request failure: {0}")]
-    Http(#[from] hyper::Error),
+    Http(#[from] hyper::http::Error),
+    /// Hyper request failure
+    #[error("HTTP request failure: {0}")]
+    Hyper(#[from] hyper::Error),
     /// Invalid ACME server URL
     #[error("invalid URI: {0}")]
     InvalidUri(#[from] hyper::http::uri::InvalidUri),
     /// Failed to (de)serialize a JSON object
     #[error("failed to (de)serialize JSON: {0}")]
     Json(#[from] serde_json::Error),
+    /// Other kind of error
+    #[error(transparent)]
+    Other(Box<dyn std::error::Error + Send + Sync + 'static>),
     /// Miscellaneous errors
     #[error("missing data: {0}")]
     Str(&'static str),
@@ -44,6 +52,12 @@ pub enum Error {
 impl From<&'static str> for Error {
     fn from(s: &'static str) -> Self {
         Error::Str(s)
+    }
+}
+
+impl From<hyper_util::client::legacy::Error> for Error {
+    fn from(value: hyper_util::client::legacy::Error) -> Self {
+        Self::Other(Box::new(value))
     }
 }
 
@@ -119,20 +133,20 @@ pub struct Problem {
 }
 
 impl Problem {
-    pub(crate) async fn check<T: DeserializeOwned>(rsp: Response<Body>) -> Result<T, Error> {
+    pub(crate) async fn check<T: DeserializeOwned>(rsp: Response<Incoming>) -> Result<T, Error> {
         Ok(serde_json::from_slice(
-            &hyper::body::to_bytes(Self::from_response(rsp).await?).await?,
+            &Self::from_response(rsp).await?.collect().await?.to_bytes(),
         )?)
     }
 
-    pub(crate) async fn from_response(rsp: Response<Body>) -> Result<Body, Error> {
+    pub(crate) async fn from_response(rsp: Response<Incoming>) -> Result<Incoming, Error> {
         let status = rsp.status();
         let body = rsp.into_body();
         if status.is_informational() || status.is_success() || status.is_redirection() {
             return Ok(body);
         }
 
-        let body = hyper::body::to_bytes(body).await?;
+        let body = body.collect().await?.to_bytes();
         Err(serde_json::from_slice::<Problem>(&body)?.into())
     }
 }
