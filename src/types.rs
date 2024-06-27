@@ -458,7 +458,7 @@ pub enum Identifier {
 }
 
 /// The challenge type
-#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq)]
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq)]
 #[allow(missing_docs)]
 pub enum ChallengeType {
     #[serde(rename = "http-01")]
@@ -467,6 +467,8 @@ pub enum ChallengeType {
     Dns01,
     #[serde(rename = "tls-alpn-01")]
     TlsAlpn01,
+    #[serde(untagged)]
+    Unknown(String),
 }
 
 #[derive(Clone, Copy, Debug, Deserialize)]
