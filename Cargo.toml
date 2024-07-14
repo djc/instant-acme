@@ -13,8 +13,9 @@ categories = ["web-programming", "api-bindings"]
 
 [features]
 default = ["hyper-rustls", "aws_lc_rs"]
-ring = ["dep:ring", "hyper-rustls/ring", "rcgen/ring"]
-aws_lc_rs = ["dep:aws-lc-rs", "hyper-rustls/aws-lc-rs", "rcgen/aws_lc_rs"]
+ring = ["dep:ring", "hyper-rustls?/ring", "rcgen/ring"]
+aws_lc_rs = ["dep:aws-lc-rs", "hyper-rustls?/aws-lc-rs", "rcgen/aws_lc_rs"]
+fips = ["aws_lc_rs", "aws-lc-rs?/fips"]
 
 [dependencies]
 base64 = "0.22.1"
