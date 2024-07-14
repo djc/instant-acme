@@ -17,10 +17,9 @@ use http_body_util::{BodyExt, Full};
 use hyper::body::{Bytes, Incoming};
 use hyper::header::{CONTENT_TYPE, LOCATION};
 use hyper::{Method, Request, Response, StatusCode};
+use hyper_util::client::legacy::{connect::Connect, Client as HyperClient};
 #[cfg(feature = "hyper-rustls")]
-use hyper_util::client::legacy::connect::{Connect, HttpConnector};
-use hyper_util::client::legacy::Client as HyperClient;
-use hyper_util::rt::TokioExecutor;
+use hyper_util::{client::legacy::connect::HttpConnector, rt::TokioExecutor};
 use ring_like::digest::{digest, SHA256};
 use ring_like::rand::SystemRandom;
 use ring_like::signature::{EcdsaKeyPair, ECDSA_P256_SHA256_FIXED_SIGNING};
@@ -752,7 +751,13 @@ where
 const JOSE_JSON: &str = "application/jose+json";
 const REPLAY_NONCE: &str = "Replay-Nonce";
 
-#[cfg(test)]
+#[cfg(all(
+    test,
+    any(
+        all(feature = "hyper-rustls", feature = "ring", not(feature = "aws_lc_rs")),
+        all(feature = "hyper-rustls", feature = "aws_lc_rs", not(feature = "ring"))
+    )
+))]
 mod tests {
     use super::*;
 
