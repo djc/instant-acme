@@ -1,15 +1,18 @@
-use std::fmt;
-
+#[cfg(feature = "aws_lc_rs")]
+pub(crate) use aws_lc_rs as ring_like;
 use base64::prelude::{Engine, BASE64_URL_SAFE_NO_PAD};
 use http_body_util::BodyExt;
 use hyper::body::Incoming;
 use hyper::Response;
-use ring::digest::{digest, Digest, SHA256};
-use ring::signature::{EcdsaKeyPair, KeyPair};
+#[cfg(all(feature = "ring", not(feature = "aws_lc_rs")))]
+pub(crate) use ring as ring_like;
+use ring_like::digest::{digest, Digest, SHA256};
+use ring_like::signature::{EcdsaKeyPair, KeyPair};
 use rustls_pki_types::CertificateDer;
 use serde::de::DeserializeOwned;
 use serde::ser::SerializeMap;
 use serde::{Deserialize, Serialize};
+use std::fmt;
 use thiserror::Error;
 
 /// Error type for instant-acme
@@ -25,10 +28,10 @@ pub enum Error {
     Base64(#[from] base64::DecodeError),
     /// Failed from cryptographic operations
     #[error("cryptographic operation failed: {0}")]
-    Crypto(#[from] ring::error::Unspecified),
+    Crypto(#[from] ring_like::error::Unspecified),
     /// Failed to instantiate a private key
     #[error("invalid key bytes: {0}")]
-    CryptoKey(#[from] ring::error::KeyRejected),
+    CryptoKey(#[from] ring_like::error::KeyRejected),
     /// HTTP failure
     #[error("HTTP request failure: {0}")]
     Http(#[from] hyper::http::Error),
