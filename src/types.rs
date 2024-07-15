@@ -1,3 +1,5 @@
+use std::fmt;
+
 #[cfg(feature = "aws_lc_rs")]
 pub(crate) use aws_lc_rs as ring_like;
 use base64::prelude::{Engine, BASE64_URL_SAFE_NO_PAD};
@@ -12,7 +14,6 @@ use rustls_pki_types::CertificateDer;
 use serde::de::DeserializeOwned;
 use serde::ser::SerializeMap;
 use serde::{Deserialize, Serialize};
-use std::fmt;
 use thiserror::Error;
 
 /// Error type for instant-acme
