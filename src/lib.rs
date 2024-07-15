@@ -3,9 +3,9 @@
 #![warn(unreachable_pub)]
 #![warn(missing_docs)]
 
-#[cfg(feature = "aws_lc_rs")]
+#[cfg(feature = "aws-lc-rs")]
 pub(crate) use aws_lc_rs as ring_like;
-#[cfg(all(feature = "ring", not(feature = "aws_lc_rs")))]
+#[cfg(all(feature = "ring", not(feature = "aws-lc-rs")))]
 pub(crate) use ring as ring_like;
 use std::fmt;
 use std::future::Future;
@@ -559,9 +559,9 @@ impl Key {
     fn generate() -> Result<(Self, pkcs8::Document), Error> {
         let rng = SystemRandom::new();
         let pkcs8 = EcdsaKeyPair::generate_pkcs8(&ECDSA_P256_SHA256_FIXED_SIGNING, &rng)?;
-        #[cfg(all(feature = "ring", not(feature = "aws_lc_rs")))]
+        #[cfg(all(feature = "ring", not(feature = "aws-lc-rs")))]
         let key = EcdsaKeyPair::from_pkcs8(&ECDSA_P256_SHA256_FIXED_SIGNING, pkcs8.as_ref(), &rng)?;
-        #[cfg(feature = "aws_lc_rs")]
+        #[cfg(feature = "aws-lc-rs")]
         let key = EcdsaKeyPair::from_pkcs8(&ECDSA_P256_SHA256_FIXED_SIGNING, pkcs8.as_ref())?;
         let thumb = BASE64_URL_SAFE_NO_PAD.encode(Jwk::thumb_sha256(&key)?);
 
@@ -578,9 +578,9 @@ impl Key {
 
     fn from_pkcs8_der(pkcs8_der: &[u8]) -> Result<Self, Error> {
         let rng = SystemRandom::new();
-        #[cfg(all(feature = "ring", not(feature = "aws_lc_rs")))]
+        #[cfg(all(feature = "ring", not(feature = "aws-lc-rs")))]
         let key = EcdsaKeyPair::from_pkcs8(&ECDSA_P256_SHA256_FIXED_SIGNING, pkcs8_der, &rng)?;
-        #[cfg(feature = "aws_lc_rs")]
+        #[cfg(feature = "aws-lc-rs")]
         let key = EcdsaKeyPair::from_pkcs8(&ECDSA_P256_SHA256_FIXED_SIGNING, pkcs8_der)?;
 
         let thumb = BASE64_URL_SAFE_NO_PAD.encode(Jwk::thumb_sha256(&key)?);
