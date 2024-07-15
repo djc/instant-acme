@@ -21,6 +21,9 @@ jobs:
 
     runs-on: ${{ matrix.os }}
 
+    env:
+      AWS_LC_SYS_NO_ASM: 1
+
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@master
