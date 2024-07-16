@@ -450,15 +450,15 @@ pub enum AuthorizationStatus {
 
 /// Represent an identifier in an ACME [Order](crate::Order)
 #[allow(missing_docs)]
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize, Eq, PartialEq)]
 #[serde(tag = "type", content = "value", rename_all = "camelCase")]
 pub enum Identifier {
     Dns(String),
 }
 
 /// The challenge type
-#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq)]
 #[allow(missing_docs)]
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq)]
 pub enum ChallengeType {
     #[serde(rename = "http-01")]
     Http01,
@@ -466,6 +466,8 @@ pub enum ChallengeType {
     Dns01,
     #[serde(rename = "tls-alpn-01")]
     TlsAlpn01,
+    #[serde(untagged)]
+    Unknown(String),
 }
 
 #[derive(Clone, Copy, Debug, Deserialize)]
