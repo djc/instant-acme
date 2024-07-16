@@ -552,25 +552,16 @@ impl Key {
         let rng = crypto::SystemRandom::new();
         let pkcs8 =
             crypto::EcdsaKeyPair::generate_pkcs8(&crypto::ECDSA_P256_SHA256_FIXED_SIGNING, &rng)?;
-        let inner = crypto::p256_key_pair_from_pkcs8(pkcs8.as_ref(), &rng)?;
-        let thumb = BASE64_URL_SAFE_NO_PAD.encode(Jwk::thumb_sha256(&inner)?);
-
-        Ok((
-            Self {
-                rng,
-                signing_algorithm: SigningAlgorithm::Es256,
-                inner,
-                thumb,
-            },
-            pkcs8,
-        ))
+        Self::new(pkcs8.as_ref(), rng).map(|key| (key, pkcs8))
     }
 
     fn from_pkcs8_der(pkcs8_der: &[u8]) -> Result<Self, Error> {
-        let rng = crypto::SystemRandom::new();
+        Self::new(pkcs8_der, crypto::SystemRandom::new())
+    }
+
+    fn new(pkcs8_der: &[u8], rng: crypto::SystemRandom) -> Result<Self, Error> {
         let inner = crypto::p256_key_pair_from_pkcs8(pkcs8_der, &rng)?;
         let thumb = BASE64_URL_SAFE_NO_PAD.encode(Jwk::thumb_sha256(&inner)?);
-
         Ok(Self {
             rng,
             signing_algorithm: SigningAlgorithm::Es256,
