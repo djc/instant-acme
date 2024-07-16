@@ -1,21 +1,16 @@
 use std::fmt;
 
-#[cfg(feature = "aws-lc-rs")]
-pub(crate) use aws_lc_rs as ring_like;
-#[cfg(all(feature = "ring", not(feature = "aws-lc-rs")))]
-pub(crate) use ring as ring_like;
-
 use base64::prelude::{Engine, BASE64_URL_SAFE_NO_PAD};
 use http_body_util::BodyExt;
 use hyper::body::Incoming;
 use hyper::Response;
-use ring_like::digest::{digest, Digest, SHA256};
-use ring_like::signature::{EcdsaKeyPair, KeyPair};
 use rustls_pki_types::CertificateDer;
 use serde::de::DeserializeOwned;
 use serde::ser::SerializeMap;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
+
+use crate::crypto::{self, KeyPair};
 
 /// Error type for instant-acme
 #[derive(Debug, Error)]
@@ -30,10 +25,10 @@ pub enum Error {
     Base64(#[from] base64::DecodeError),
     /// Failed from cryptographic operations
     #[error("cryptographic operation failed: {0}")]
-    Crypto(#[from] ring_like::error::Unspecified),
+    Crypto(#[from] crypto::Unspecified),
     /// Failed to instantiate a private key
     #[error("invalid key bytes: {0}")]
-    CryptoKey(#[from] ring_like::error::KeyRejected),
+    CryptoKey(#[from] crypto::KeyRejected),
     /// HTTP failure
     #[error("HTTP request failure: {0}")]
     Http(#[from] hyper::http::Error),
@@ -205,7 +200,7 @@ pub(crate) enum KeyOrKeyId<'a> {
 }
 
 impl<'a> KeyOrKeyId<'a> {
-    pub(crate) fn from_key(key: &EcdsaKeyPair) -> KeyOrKeyId<'static> {
+    pub(crate) fn from_key(key: &crypto::EcdsaKeyPair) -> KeyOrKeyId<'static> {
         KeyOrKeyId::Key(Jwk::new(key))
     }
 }
@@ -221,7 +216,7 @@ pub(crate) struct Jwk {
 }
 
 impl Jwk {
-    pub(crate) fn new(key: &EcdsaKeyPair) -> Self {
+    pub(crate) fn new(key: &crypto::EcdsaKeyPair) -> Self {
         let (x, y) = key.public_key().as_ref()[1..].split_at(32);
         Self {
             alg: SigningAlgorithm::Es256,
@@ -233,10 +228,12 @@ impl Jwk {
         }
     }
 
-    pub(crate) fn thumb_sha256(key: &EcdsaKeyPair) -> Result<Digest, serde_json::Error> {
+    pub(crate) fn thumb_sha256(
+        key: &crypto::EcdsaKeyPair,
+    ) -> Result<crypto::Digest, serde_json::Error> {
         let jwk = Self::new(key);
-        Ok(digest(
-            &SHA256,
+        Ok(crypto::digest(
+            &crypto::SHA256,
             &serde_json::to_vec(&JwkThumb {
                 crv: jwk.crv,
                 kty: jwk.kty,

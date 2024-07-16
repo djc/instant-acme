@@ -8,11 +8,6 @@ use std::future::Future;
 use std::pin::Pin;
 use std::sync::Arc;
 
-#[cfg(feature = "aws-lc-rs")]
-pub(crate) use aws_lc_rs as ring_like;
-#[cfg(all(feature = "ring", not(feature = "aws-lc-rs")))]
-pub(crate) use ring as ring_like;
-
 use base64::prelude::{Engine, BASE64_URL_SAFE_NO_PAD};
 use http_body_util::{BodyExt, Full};
 use hyper::body::{Bytes, Incoming};
@@ -22,10 +17,6 @@ use hyper_util::client::legacy::connect::Connect;
 use hyper_util::client::legacy::Client as HyperClient;
 #[cfg(feature = "hyper-rustls")]
 use hyper_util::{client::legacy::connect::HttpConnector, rt::TokioExecutor};
-use ring_like::digest::{digest, SHA256};
-use ring_like::rand::SystemRandom;
-use ring_like::signature::{EcdsaKeyPair, ECDSA_P256_SHA256_FIXED_SIGNING};
-use ring_like::{hmac, pkcs8};
 use serde::de::DeserializeOwned;
 use serde::Serialize;
 
@@ -550,20 +541,28 @@ impl fmt::Debug for Client {
 }
 
 struct Key {
-    rng: SystemRandom,
+    rng: crypto::SystemRandom,
     signing_algorithm: SigningAlgorithm,
-    inner: EcdsaKeyPair,
+    inner: crypto::EcdsaKeyPair,
     thumb: String,
 }
 
 impl Key {
-    fn generate() -> Result<(Self, pkcs8::Document), Error> {
-        let rng = SystemRandom::new();
-        let pkcs8 = EcdsaKeyPair::generate_pkcs8(&ECDSA_P256_SHA256_FIXED_SIGNING, &rng)?;
+    fn generate() -> Result<(Self, crypto::pkcs8::Document), Error> {
+        let rng = crypto::SystemRandom::new();
+        let pkcs8 =
+            crypto::EcdsaKeyPair::generate_pkcs8(&crypto::ECDSA_P256_SHA256_FIXED_SIGNING, &rng)?;
         #[cfg(all(feature = "ring", not(feature = "aws-lc-rs")))]
-        let key = EcdsaKeyPair::from_pkcs8(&ECDSA_P256_SHA256_FIXED_SIGNING, pkcs8.as_ref(), &rng)?;
+        let key = crypto::EcdsaKeyPair::from_pkcs8(
+            &crypto::ECDSA_P256_SHA256_FIXED_SIGNING,
+            pkcs8.as_ref(),
+            &rng,
+        )?;
         #[cfg(feature = "aws-lc-rs")]
-        let key = EcdsaKeyPair::from_pkcs8(&ECDSA_P256_SHA256_FIXED_SIGNING, pkcs8.as_ref())?;
+        let key = crypto::EcdsaKeyPair::from_pkcs8(
+            &crypto::ECDSA_P256_SHA256_FIXED_SIGNING,
+            pkcs8.as_ref(),
+        )?;
         let thumb = BASE64_URL_SAFE_NO_PAD.encode(Jwk::thumb_sha256(&key)?);
 
         Ok((
@@ -578,11 +577,16 @@ impl Key {
     }
 
     fn from_pkcs8_der(pkcs8_der: &[u8]) -> Result<Self, Error> {
-        let rng = SystemRandom::new();
+        let rng = crypto::SystemRandom::new();
         #[cfg(all(feature = "ring", not(feature = "aws-lc-rs")))]
-        let key = EcdsaKeyPair::from_pkcs8(&ECDSA_P256_SHA256_FIXED_SIGNING, pkcs8_der, &rng)?;
+        let key = crypto::EcdsaKeyPair::from_pkcs8(
+            &crypto::ECDSA_P256_SHA256_FIXED_SIGNING,
+            pkcs8_der,
+            &rng,
+        )?;
         #[cfg(feature = "aws-lc-rs")]
-        let key = EcdsaKeyPair::from_pkcs8(&ECDSA_P256_SHA256_FIXED_SIGNING, pkcs8_der)?;
+        let key =
+            crypto::EcdsaKeyPair::from_pkcs8(&crypto::ECDSA_P256_SHA256_FIXED_SIGNING, pkcs8_der)?;
 
         let thumb = BASE64_URL_SAFE_NO_PAD.encode(Jwk::thumb_sha256(&key)?);
 
@@ -596,7 +600,7 @@ impl Key {
 }
 
 impl Signer for Key {
-    type Signature = ring_like::signature::Signature;
+    type Signature = crypto::Signature;
 
     fn header<'n, 'u: 'n, 's: 'u>(&'s self, nonce: Option<&'n str>, url: &'u str) -> Header<'n> {
         debug_assert!(nonce.is_some());
@@ -638,7 +642,7 @@ impl KeyAuthorization {
     ///
     /// <https://datatracker.ietf.org/doc/html/rfc8737#section-3>
     pub fn digest(&self) -> impl AsRef<[u8]> {
-        digest(&SHA256, self.0.as_bytes())
+        crypto::digest(&crypto::SHA256, self.0.as_bytes())
     }
 
     /// Get the base64-encoded SHA256 digest of the key authorization
@@ -660,7 +664,7 @@ impl fmt::Debug for KeyAuthorization {
 /// See RFC 8555 section 7.3.4 for more information.
 pub struct ExternalAccountKey {
     id: String,
-    key: hmac::Key,
+    key: crypto::hmac::Key,
 }
 
 impl ExternalAccountKey {
@@ -668,13 +672,13 @@ impl ExternalAccountKey {
     pub fn new(id: String, key_value: &[u8]) -> Self {
         Self {
             id,
-            key: hmac::Key::new(hmac::HMAC_SHA256, key_value),
+            key: crypto::hmac::Key::new(crypto::hmac::HMAC_SHA256, key_value),
         }
     }
 }
 
 impl Signer for ExternalAccountKey {
-    type Signature = hmac::Tag;
+    type Signature = crypto::hmac::Tag;
 
     fn header<'n, 'u: 'n, 's: 'u>(&'s self, nonce: Option<&'n str>, url: &'u str) -> Header<'n> {
         debug_assert_eq!(nonce, None);
@@ -687,7 +691,7 @@ impl Signer for ExternalAccountKey {
     }
 
     fn sign(&self, payload: &[u8]) -> Result<Self::Signature, Error> {
-        Ok(hmac::sign(&self.key, payload))
+        Ok(crypto::hmac::sign(&self.key, payload))
     }
 }
 
@@ -748,6 +752,20 @@ where
         let fut = <HyperClient<C, Full<Bytes>>>::request(self, req);
         Box::pin(async move { fut.await.map_err(Error::from) })
     }
+}
+
+mod crypto {
+    #[cfg(feature = "aws-lc-rs")]
+    pub(crate) use aws_lc_rs as ring_like;
+    #[cfg(all(feature = "ring", not(feature = "aws-lc-rs")))]
+    pub(crate) use ring as ring_like;
+
+    pub(crate) use ring_like::digest::{digest, Digest, SHA256};
+    pub(crate) use ring_like::error::{KeyRejected, Unspecified};
+    pub(crate) use ring_like::rand::SystemRandom;
+    pub(crate) use ring_like::signature::{EcdsaKeyPair, ECDSA_P256_SHA256_FIXED_SIGNING};
+    pub(crate) use ring_like::signature::{KeyPair, Signature};
+    pub(crate) use ring_like::{hmac, pkcs8};
 }
 
 const JOSE_JSON: &str = "application/jose+json";
