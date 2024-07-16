@@ -9,10 +9,10 @@ use std::pin::Pin;
 use std::sync::Arc;
 
 use base64::prelude::{Engine, BASE64_URL_SAFE_NO_PAD};
+use http::header::{CONTENT_TYPE, LOCATION};
+use http::{Method, Request, Response, StatusCode};
 use http_body_util::{BodyExt, Full};
 use hyper::body::{Bytes, Incoming};
-use hyper::header::{CONTENT_TYPE, LOCATION};
-use hyper::{Method, Request, Response, StatusCode};
 use hyper_util::client::legacy::connect::Connect;
 use hyper_util::client::legacy::Client as HyperClient;
 #[cfg(feature = "hyper-rustls")]

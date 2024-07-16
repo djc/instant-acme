@@ -31,13 +31,13 @@ pub enum Error {
     CryptoKey(#[from] crypto::KeyRejected),
     /// HTTP failure
     #[error("HTTP request failure: {0}")]
-    Http(#[from] hyper::http::Error),
+    Http(#[from] http::Error),
     /// Hyper request failure
     #[error("HTTP request failure: {0}")]
     Hyper(#[from] hyper::Error),
     /// Invalid ACME server URL
     #[error("invalid URI: {0}")]
-    InvalidUri(#[from] hyper::http::uri::InvalidUri),
+    InvalidUri(#[from] http::uri::InvalidUri),
     /// Failed to (de)serialize a JSON object
     #[error("failed to (de)serialize JSON: {0}")]
     Json(#[from] serde_json::Error),
