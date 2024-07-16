@@ -1,6 +1,6 @@
 [package]
 name = "instant-acme"
-version = "0.7.0"
+version = "0.7.1"
 edition = "2021"
 rust-version = "1.67"
 license = "Apache-2.0"
