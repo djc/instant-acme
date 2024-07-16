@@ -13,9 +13,9 @@ categories = ["web-programming", "api-bindings"]
 
 [features]
 default = ["hyper-rustls", "ring"]
-ring = ["dep:ring", "hyper-rustls?/ring", "rcgen/ring"]
 aws-lc-rs = ["dep:aws-lc-rs", "hyper-rustls?/aws-lc-rs", "rcgen/aws_lc_rs"]
 fips = ["aws-lc-rs", "aws-lc-rs?/fips"]
+ring = ["dep:ring", "hyper-rustls?/ring", "rcgen/ring"]
 
 [dependencies]
 aws-lc-rs = { version = "1.8.0", optional = true }
