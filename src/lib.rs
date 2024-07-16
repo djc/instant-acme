@@ -3,14 +3,15 @@
 #![warn(unreachable_pub)]
 #![warn(missing_docs)]
 
-#[cfg(feature = "aws-lc-rs")]
-pub(crate) use aws_lc_rs as ring_like;
-#[cfg(all(feature = "ring", not(feature = "aws-lc-rs")))]
-pub(crate) use ring as ring_like;
 use std::fmt;
 use std::future::Future;
 use std::pin::Pin;
 use std::sync::Arc;
+
+#[cfg(feature = "aws-lc-rs")]
+pub(crate) use aws_lc_rs as ring_like;
+#[cfg(all(feature = "ring", not(feature = "aws-lc-rs")))]
+pub(crate) use ring as ring_like;
 
 use base64::prelude::{Engine, BASE64_URL_SAFE_NO_PAD};
 use http_body_util::{BodyExt, Full};

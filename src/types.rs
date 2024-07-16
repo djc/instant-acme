@@ -2,12 +2,13 @@ use std::fmt;
 
 #[cfg(feature = "aws-lc-rs")]
 pub(crate) use aws_lc_rs as ring_like;
+#[cfg(all(feature = "ring", not(feature = "aws-lc-rs")))]
+pub(crate) use ring as ring_like;
+
 use base64::prelude::{Engine, BASE64_URL_SAFE_NO_PAD};
 use http_body_util::BodyExt;
 use hyper::body::Incoming;
 use hyper::Response;
-#[cfg(all(feature = "ring", not(feature = "aws-lc-rs")))]
-pub(crate) use ring as ring_like;
 use ring_like::digest::{digest, Digest, SHA256};
 use ring_like::signature::{EcdsaKeyPair, KeyPair};
 use rustls_pki_types::CertificateDer;
