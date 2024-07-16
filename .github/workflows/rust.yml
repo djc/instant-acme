@@ -21,12 +21,17 @@ jobs:
 
     runs-on: ${{ matrix.os }}
 
+    env:
+      AWS_LC_SYS_NO_ASM: 1
+
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@master
         with:
           toolchain: ${{ matrix.rust }}
-      - run: cargo test --all-features --all-targets
+      - run: cargo check
+      - run: cargo test
+      - run: cargo test --no-default-features --features hyper-rustls,aws-lc-rs
 
   msrv:
     runs-on: ubuntu-latest

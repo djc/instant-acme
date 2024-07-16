@@ -3,6 +3,10 @@
 #![warn(unreachable_pub)]
 #![warn(missing_docs)]
 
+#[cfg(feature = "aws-lc-rs")]
+pub(crate) use aws_lc_rs as ring_like;
+#[cfg(all(feature = "ring", not(feature = "aws-lc-rs")))]
+pub(crate) use ring as ring_like;
 use std::fmt;
 use std::future::Future;
 use std::pin::Pin;
@@ -13,14 +17,14 @@ use http_body_util::{BodyExt, Full};
 use hyper::body::{Bytes, Incoming};
 use hyper::header::{CONTENT_TYPE, LOCATION};
 use hyper::{Method, Request, Response, StatusCode};
-#[cfg(feature = "hyper-rustls")]
-use hyper_util::client::legacy::connect::{Connect, HttpConnector};
+use hyper_util::client::legacy::connect::Connect;
 use hyper_util::client::legacy::Client as HyperClient;
-use hyper_util::rt::TokioExecutor;
-use ring::digest::{digest, SHA256};
-use ring::rand::SystemRandom;
-use ring::signature::{EcdsaKeyPair, ECDSA_P256_SHA256_FIXED_SIGNING};
-use ring::{hmac, pkcs8};
+#[cfg(feature = "hyper-rustls")]
+use hyper_util::{client::legacy::connect::HttpConnector, rt::TokioExecutor};
+use ring_like::digest::{digest, SHA256};
+use ring_like::rand::SystemRandom;
+use ring_like::signature::{EcdsaKeyPair, ECDSA_P256_SHA256_FIXED_SIGNING};
+use ring_like::{hmac, pkcs8};
 use serde::de::DeserializeOwned;
 use serde::Serialize;
 
@@ -555,7 +559,10 @@ impl Key {
     fn generate() -> Result<(Self, pkcs8::Document), Error> {
         let rng = SystemRandom::new();
         let pkcs8 = EcdsaKeyPair::generate_pkcs8(&ECDSA_P256_SHA256_FIXED_SIGNING, &rng)?;
+        #[cfg(all(feature = "ring", not(feature = "aws-lc-rs")))]
         let key = EcdsaKeyPair::from_pkcs8(&ECDSA_P256_SHA256_FIXED_SIGNING, pkcs8.as_ref(), &rng)?;
+        #[cfg(feature = "aws-lc-rs")]
+        let key = EcdsaKeyPair::from_pkcs8(&ECDSA_P256_SHA256_FIXED_SIGNING, pkcs8.as_ref())?;
         let thumb = BASE64_URL_SAFE_NO_PAD.encode(Jwk::thumb_sha256(&key)?);
 
         Ok((
@@ -571,7 +578,11 @@ impl Key {
 
     fn from_pkcs8_der(pkcs8_der: &[u8]) -> Result<Self, Error> {
         let rng = SystemRandom::new();
+        #[cfg(all(feature = "ring", not(feature = "aws-lc-rs")))]
         let key = EcdsaKeyPair::from_pkcs8(&ECDSA_P256_SHA256_FIXED_SIGNING, pkcs8_der, &rng)?;
+        #[cfg(feature = "aws-lc-rs")]
+        let key = EcdsaKeyPair::from_pkcs8(&ECDSA_P256_SHA256_FIXED_SIGNING, pkcs8_der)?;
+
         let thumb = BASE64_URL_SAFE_NO_PAD.encode(Jwk::thumb_sha256(&key)?);
 
         Ok(Self {
@@ -584,7 +595,7 @@ impl Key {
 }
 
 impl Signer for Key {
-    type Signature = ring::signature::Signature;
+    type Signature = ring_like::signature::Signature;
 
     fn header<'n, 'u: 'n, 's: 'u>(&'s self, nonce: Option<&'n str>, url: &'u str) -> Header<'n> {
         debug_assert!(nonce.is_some());
