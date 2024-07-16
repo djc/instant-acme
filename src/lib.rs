@@ -133,11 +133,7 @@ impl Order {
             .await?;
 
         self.nonce = nonce_from_response(&rsp);
-        let body = Problem::from_response(rsp)
-            .await?
-            .collect()
-            .await?
-            .to_bytes();
+        let body = Problem::from_response(rsp).await?;
         Ok(Some(
             String::from_utf8(body.to_vec())
                 .map_err(|_| "unable to decode certificate as UTF-8")?,

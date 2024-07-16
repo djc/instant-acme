@@ -1,6 +1,7 @@
 use std::fmt;
 
 use base64::prelude::{Engine, BASE64_URL_SAFE_NO_PAD};
+use bytes::Bytes;
 use http_body_util::BodyExt;
 use hyper::body::Incoming;
 use hyper::Response;
@@ -134,20 +135,16 @@ pub struct Problem {
 
 impl Problem {
     pub(crate) async fn check<T: DeserializeOwned>(rsp: Response<Incoming>) -> Result<T, Error> {
-        Ok(serde_json::from_slice(
-            &Self::from_response(rsp).await?.collect().await?.to_bytes(),
-        )?)
+        Ok(serde_json::from_slice(&Self::from_response(rsp).await?)?)
     }
 
-    pub(crate) async fn from_response(rsp: Response<Incoming>) -> Result<Incoming, Error> {
+    pub(crate) async fn from_response(rsp: Response<Incoming>) -> Result<Bytes, Error> {
         let status = rsp.status();
-        let body = rsp.into_body();
-        if status.is_informational() || status.is_success() || status.is_redirection() {
-            return Ok(body);
+        let body = rsp.into_body().collect().await?.to_bytes();
+        match status.is_informational() || status.is_success() || status.is_redirection() {
+            true => Ok(body),
+            false => Err(serde_json::from_slice::<Problem>(&body)?.into()),
         }
-
-        let body = body.collect().await?.to_bytes();
-        Err(serde_json::from_slice::<Problem>(&body)?.into())
     }
 }
 
