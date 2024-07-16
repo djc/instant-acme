@@ -20,8 +20,18 @@ specification.
 * Support for external account binding
 * Support for certificate revocation
 * Uses hyper with rustls and Tokio for HTTP requests
-* Uses *ring* for ECDSA signing
+* Uses *ring* or aws-lc-rs for ECDSA signing
 * Minimum supported Rust version: 1.63
+
+## Cargo features
+
+* `hyper-rustls` (default): use a hyper client with rustls
+* `ring` (default): use the *ring* crate as the crypto backend
+* `aws-lc-rs`: use the aws-lc-rs crate as the crypto backend
+* `fips`: enable the aws-lc-rs crate's FIPS-compliant mode
+
+If both `ring` and `aws-lc-rs` are enabled, which backend is used depends on the `fips` feature.
+If `fips` is enabled, `aws-lc-rs` is used; otherwise, `ring` is used.
 
 ## Limitations
 
