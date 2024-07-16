@@ -3,17 +3,21 @@
 #![warn(unreachable_pub)]
 #![warn(missing_docs)]
 
+use std::error::Error as StdError;
 use std::fmt;
 use std::future::Future;
 use std::pin::Pin;
 use std::sync::Arc;
 
+use async_trait::async_trait;
 use base64::prelude::{Engine, BASE64_URL_SAFE_NO_PAD};
+use bytes::Bytes;
 use http::header::{CONTENT_TYPE, LOCATION};
 use http::{Method, Request, Response, StatusCode};
 use http_body_util::{BodyExt, Full};
-use hyper::body::{Bytes, Incoming};
+#[cfg(feature = "hyper-rustls")]
 use hyper_util::client::legacy::connect::Connect;
+#[cfg(feature = "hyper-rustls")]
 use hyper_util::client::legacy::Client as HyperClient;
 #[cfg(feature = "hyper-rustls")]
 use hyper_util::{client::legacy::connect::HttpConnector, rt::TokioExecutor};
@@ -310,7 +314,8 @@ impl Account {
             .await?;
 
         let account_url = rsp
-            .headers()
+            .parts
+            .headers
             .get(LOCATION)
             .and_then(|hv| hv.to_str().ok())
             .map(|s| s.to_owned());
@@ -352,7 +357,8 @@ impl Account {
 
         let nonce = nonce_from_response(&rsp);
         let order_url = rsp
-            .headers()
+            .parts
+            .headers
             .get(LOCATION)
             .and_then(|hv| hv.to_str().ok())
             .map(|s| s.to_owned());
@@ -441,7 +447,7 @@ impl AccountInner {
         payload: Option<&impl Serialize>,
         nonce: Option<String>,
         url: &str,
-    ) -> Result<Response<Incoming>, Error> {
+    ) -> Result<BytesResponse, Error> {
         self.client.post(payload, nonce, self, url).await
     }
 }
@@ -476,7 +482,7 @@ impl Client {
             .body(Full::default())
             .expect("infallible error should not occur");
         let rsp = http.request(req).await?;
-        let body = rsp.into_body().collect().await?.to_bytes();
+        let body = rsp.body().await.map_err(Error::Other)?;
         Ok(Client {
             http,
             urls: serde_json::from_slice(&body)?,
@@ -489,7 +495,7 @@ impl Client {
         nonce: Option<String>,
         signer: &impl Signer,
         url: &str,
-    ) -> Result<Response<Incoming>, Error> {
+    ) -> Result<BytesResponse, Error> {
         let nonce = self.nonce(nonce).await?;
         let body = JoseJson::new(payload, signer.header(Some(&nonce), url), signer)?;
         let request = Request::builder()
@@ -516,7 +522,7 @@ impl Client {
         // https://datatracker.ietf.org/doc/html/rfc8555#section-7.2
         // "The server's response MUST include a Replay-Nonce header field containing a fresh
         // nonce and SHOULD have status code 200 (OK)."
-        if rsp.status() != StatusCode::OK {
+        if rsp.parts.status != StatusCode::OK {
             return Err("error response from newNonce resource".into());
         }
 
@@ -663,8 +669,9 @@ impl Signer for ExternalAccountKey {
     }
 }
 
-fn nonce_from_response(rsp: &Response<Incoming>) -> Option<String> {
-    rsp.headers()
+fn nonce_from_response(rsp: &BytesResponse) -> Option<String> {
+    rsp.parts
+        .headers
         .get(REPLAY_NONCE)
         .and_then(|hv| String::from_utf8(hv.as_ref().to_vec()).ok())
 }
@@ -694,32 +701,102 @@ impl HttpClient for DefaultClient {
     fn request(
         &self,
         req: Request<Full<Bytes>>,
-    ) -> Pin<Box<dyn Future<Output = Result<Response<Incoming>, Error>> + Send>> {
+    ) -> Pin<Box<dyn Future<Output = Result<BytesResponse, Error>> + Send>> {
         let fut = self.0.request(req);
-        Box::pin(async move { fut.await.map_err(Error::from) })
+        Box::pin(async move {
+            match fut.await {
+                Ok(rsp) => Ok(BytesResponse::from(rsp)),
+                Err(e) => Err(e.into()),
+            }
+        })
     }
 }
 
-/// A HTTP client based on [`hyper::Client`]
+/// A HTTP client abstraction
 pub trait HttpClient: Send + Sync + 'static {
     /// Send the given request and return the response
     fn request(
         &self,
         req: Request<Full<Bytes>>,
-    ) -> Pin<Box<dyn Future<Output = Result<Response<Incoming>, Error>> + Send>>;
+    ) -> Pin<Box<dyn Future<Output = Result<BytesResponse, Error>> + Send>>;
 }
 
-impl<C> HttpClient for HyperClient<C, Full<Bytes>>
-where
-    C: Connect + Clone + Send + Sync + 'static,
-{
+#[cfg(feature = "hyper-rustls")]
+impl<C: Connect + Clone + Send + Sync + 'static> HttpClient for HyperClient<C, Full<Bytes>> {
     fn request(
         &self,
         req: Request<Full<Bytes>>,
-    ) -> Pin<Box<dyn Future<Output = Result<Response<hyper::body::Incoming>, Error>> + Send>> {
-        let fut = <HyperClient<C, Full<Bytes>>>::request(self, req);
-        Box::pin(async move { fut.await.map_err(Error::from) })
+    ) -> Pin<Box<dyn Future<Output = Result<BytesResponse, Error>> + Send>> {
+        let fut = self.request(req);
+        Box::pin(async move {
+            match fut.await {
+                Ok(rsp) => Ok(BytesResponse::from(rsp)),
+                Err(e) => Err(e.into()),
+            }
+        })
     }
+}
+
+/// Response with object safe body type
+pub struct BytesResponse {
+    /// Response status and header
+    pub parts: http::response::Parts,
+    /// Response body
+    pub body: Box<dyn BytesBody>,
+}
+
+impl BytesResponse {
+    pub(crate) async fn body(mut self) -> Result<Bytes, Box<dyn StdError + Send + Sync + 'static>> {
+        self.body.into_bytes().await
+    }
+}
+
+impl<B> From<Response<B>> for BytesResponse
+where
+    B: http_body::Body + Send + Unpin + 'static,
+    B::Data: Send,
+    B::Error: Into<Box<dyn StdError + Send + Sync + 'static>>,
+{
+    fn from(rsp: Response<B>) -> Self {
+        let (parts, body) = rsp.into_parts();
+        Self {
+            parts,
+            body: Box::new(BodyWrapper { inner: Some(body) }),
+        }
+    }
+}
+
+struct BodyWrapper<B> {
+    inner: Option<B>,
+}
+
+#[async_trait]
+impl<B> BytesBody for BodyWrapper<B>
+where
+    B: http_body::Body + Send + Unpin + 'static,
+    B::Data: Send,
+    B::Error: Into<Box<dyn StdError + Send + Sync + 'static>>,
+{
+    async fn into_bytes(&mut self) -> Result<Bytes, Box<dyn StdError + Send + Sync + 'static>> {
+        let Some(body) = self.inner.take() else {
+            return Ok(Bytes::new());
+        };
+
+        match body.collect().await {
+            Ok(body) => Ok(body.to_bytes()),
+            Err(e) => Err(e.into()),
+        }
+    }
+}
+
+/// Object safe body trait
+#[async_trait]
+pub trait BytesBody {
+    /// Convert the body into [`Bytes`]
+    ///
+    /// This consumes the body. The behavior for calling this method multiple times is undefined.
+    #[allow(clippy::wrong_self_convention)] // async_trait doesn't support taking `self`
+    async fn into_bytes(&mut self) -> Result<Bytes, Box<dyn StdError + Send + Sync + 'static>>;
 }
 
 mod crypto {

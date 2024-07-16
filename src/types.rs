@@ -2,9 +2,6 @@ use std::fmt;
 
 use base64::prelude::{Engine, BASE64_URL_SAFE_NO_PAD};
 use bytes::Bytes;
-use http_body_util::BodyExt;
-use hyper::body::Incoming;
-use hyper::Response;
 use rustls_pki_types::CertificateDer;
 use serde::de::DeserializeOwned;
 use serde::ser::SerializeMap;
@@ -12,6 +9,7 @@ use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 use crate::crypto::{self, KeyPair};
+use crate::BytesResponse;
 
 /// Error type for instant-acme
 #[derive(Debug, Error)]
@@ -34,6 +32,7 @@ pub enum Error {
     #[error("HTTP request failure: {0}")]
     Http(#[from] http::Error),
     /// Hyper request failure
+    #[cfg(feature = "hyper-rustls")]
     #[error("HTTP request failure: {0}")]
     Hyper(#[from] hyper::Error),
     /// Invalid ACME server URL
@@ -56,6 +55,7 @@ impl From<&'static str> for Error {
     }
 }
 
+#[cfg(feature = "hyper-rustls")]
 impl From<hyper_util::client::legacy::Error> for Error {
     fn from(value: hyper_util::client::legacy::Error) -> Self {
         Self::Other(Box::new(value))
@@ -134,13 +134,13 @@ pub struct Problem {
 }
 
 impl Problem {
-    pub(crate) async fn check<T: DeserializeOwned>(rsp: Response<Incoming>) -> Result<T, Error> {
+    pub(crate) async fn check<T: DeserializeOwned>(rsp: BytesResponse) -> Result<T, Error> {
         Ok(serde_json::from_slice(&Self::from_response(rsp).await?)?)
     }
 
-    pub(crate) async fn from_response(rsp: Response<Incoming>) -> Result<Bytes, Error> {
-        let status = rsp.status();
-        let body = rsp.into_body().collect().await?.to_bytes();
+    pub(crate) async fn from_response(rsp: BytesResponse) -> Result<Bytes, Error> {
+        let status = rsp.parts.status;
+        let body = rsp.body().await.map_err(Error::Other)?;
         match status.is_informational() || status.is_success() || status.is_redirection() {
             true => Ok(body),
             false => Err(serde_json::from_slice::<Problem>(&body)?.into()),
