@@ -438,7 +438,7 @@ pub struct Authorization {
 
 /// Status for an [`Authorization`]
 #[allow(missing_docs)]
-#[derive(Clone, Copy, Debug, Deserialize)]
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub enum AuthorizationStatus {
     Pending,
@@ -470,7 +470,7 @@ pub enum ChallengeType {
     Unknown(String),
 }
 
-#[derive(Clone, Copy, Debug, Deserialize)]
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub enum ChallengeStatus {
     Pending,
@@ -536,3 +536,105 @@ pub(crate) enum SigningAlgorithm {
 
 #[derive(Debug, Serialize)]
 pub(crate) struct Empty {}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // https://datatracker.ietf.org/doc/html/rfc8555#section-7.4
+    #[test]
+    fn order() {
+        const ORDER: &str = r#"{
+          "status": "pending",
+          "expires": "2016-01-05T14:09:07.99Z",
+
+          "notBefore": "2016-01-01T00:00:00Z",
+          "notAfter": "2016-01-08T00:00:00Z",
+
+          "identifiers": [
+            { "type": "dns", "value": "www.example.org" },
+            { "type": "dns", "value": "example.org" }
+          ],
+
+          "authorizations": [
+            "https://example.com/acme/authz/PAniVnsZcis",
+            "https://example.com/acme/authz/r4HqLzrSrpI"
+          ],
+
+          "finalize": "https://example.com/acme/order/TOlocE8rfgo/finalize"
+        }"#;
+
+        let obj = serde_json::from_str::<OrderState>(ORDER).unwrap();
+        assert_eq!(obj.status, OrderStatus::Pending);
+        assert_eq!(obj.authorizations.len(), 2);
+        assert_eq!(
+            obj.finalize,
+            "https://example.com/acme/order/TOlocE8rfgo/finalize"
+        );
+    }
+
+    // https://datatracker.ietf.org/doc/html/rfc8555#section-7.5.1
+    #[test]
+    fn authorization() {
+        const AUTHORIZATION: &str = r#"{
+          "status": "valid",
+          "expires": "2018-09-09T14:09:01.13Z",
+
+          "identifier": {
+            "type": "dns",
+            "value": "www.example.org"
+          },
+
+          "challenges": [
+            {
+              "type": "http-01",
+              "url": "https://example.com/acme/chall/prV_B7yEyA4",
+              "status": "valid",
+              "validated": "2014-12-01T12:05:13.72Z",
+              "token": "IlirfxKKXAsHtmzK29Pj8A"
+            }
+          ]
+        }"#;
+
+        let obj = serde_json::from_str::<Authorization>(AUTHORIZATION).unwrap();
+        assert_eq!(obj.status, AuthorizationStatus::Valid);
+        assert_eq!(obj.identifier, Identifier::Dns("www.example.org".into()));
+        assert_eq!(obj.challenges.len(), 1);
+    }
+
+    // https://datatracker.ietf.org/doc/html/rfc8555#section-8.4
+    #[test]
+    fn challenge() {
+        const CHALLENGE: &str = r#"{
+          "type": "dns-01",
+          "url": "https://example.com/acme/chall/Rg5dV14Gh1Q",
+          "status": "pending",
+          "token": "evaGxfADs6pSRb2LAv9IZf17Dt3juxGJ-PCt92wr-oA"
+        }"#;
+
+        let obj = serde_json::from_str::<Challenge>(CHALLENGE).unwrap();
+        assert_eq!(obj.r#type, ChallengeType::Dns01);
+        assert_eq!(obj.url, "https://example.com/acme/chall/Rg5dV14Gh1Q");
+        assert_eq!(obj.status, ChallengeStatus::Pending);
+        assert_eq!(obj.token, "evaGxfADs6pSRb2LAv9IZf17Dt3juxGJ-PCt92wr-oA");
+    }
+
+    // https://datatracker.ietf.org/doc/html/rfc8555#section-7.6
+    #[test]
+    fn problem() {
+        const PROBLEM: &str = r#"{
+          "type": "urn:ietf:params:acme:error:unauthorized",
+          "detail": "No authorization provided for name example.org"
+        }"#;
+
+        let obj = serde_json::from_str::<Problem>(PROBLEM).unwrap();
+        assert_eq!(
+            obj.r#type,
+            Some("urn:ietf:params:acme:error:unauthorized".into())
+        );
+        assert_eq!(
+            obj.detail,
+            Some("No authorization provided for name example.org".into())
+        );
+    }
+}
