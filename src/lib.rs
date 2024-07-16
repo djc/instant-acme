@@ -791,7 +791,7 @@ where
 
 /// Object safe body trait
 #[async_trait]
-pub trait BytesBody {
+pub trait BytesBody: Send {
     /// Convert the body into [`Bytes`]
     ///
     /// This consumes the body. The behavior for calling this method multiple times is undefined.
