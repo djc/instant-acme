@@ -552,24 +552,14 @@ impl Key {
         let rng = crypto::SystemRandom::new();
         let pkcs8 =
             crypto::EcdsaKeyPair::generate_pkcs8(&crypto::ECDSA_P256_SHA256_FIXED_SIGNING, &rng)?;
-        #[cfg(all(feature = "ring", not(feature = "aws-lc-rs")))]
-        let key = crypto::EcdsaKeyPair::from_pkcs8(
-            &crypto::ECDSA_P256_SHA256_FIXED_SIGNING,
-            pkcs8.as_ref(),
-            &rng,
-        )?;
-        #[cfg(feature = "aws-lc-rs")]
-        let key = crypto::EcdsaKeyPair::from_pkcs8(
-            &crypto::ECDSA_P256_SHA256_FIXED_SIGNING,
-            pkcs8.as_ref(),
-        )?;
-        let thumb = BASE64_URL_SAFE_NO_PAD.encode(Jwk::thumb_sha256(&key)?);
+        let inner = crypto::p256_key_pair_from_pkcs8(pkcs8.as_ref(), &rng)?;
+        let thumb = BASE64_URL_SAFE_NO_PAD.encode(Jwk::thumb_sha256(&inner)?);
 
         Ok((
             Self {
                 rng,
                 signing_algorithm: SigningAlgorithm::Es256,
-                inner: key,
+                inner,
                 thumb,
             },
             pkcs8,
@@ -578,22 +568,13 @@ impl Key {
 
     fn from_pkcs8_der(pkcs8_der: &[u8]) -> Result<Self, Error> {
         let rng = crypto::SystemRandom::new();
-        #[cfg(all(feature = "ring", not(feature = "aws-lc-rs")))]
-        let key = crypto::EcdsaKeyPair::from_pkcs8(
-            &crypto::ECDSA_P256_SHA256_FIXED_SIGNING,
-            pkcs8_der,
-            &rng,
-        )?;
-        #[cfg(feature = "aws-lc-rs")]
-        let key =
-            crypto::EcdsaKeyPair::from_pkcs8(&crypto::ECDSA_P256_SHA256_FIXED_SIGNING, pkcs8_der)?;
-
-        let thumb = BASE64_URL_SAFE_NO_PAD.encode(Jwk::thumb_sha256(&key)?);
+        let inner = crypto::p256_key_pair_from_pkcs8(pkcs8_der, &rng)?;
+        let thumb = BASE64_URL_SAFE_NO_PAD.encode(Jwk::thumb_sha256(&inner)?);
 
         Ok(Self {
             rng,
             signing_algorithm: SigningAlgorithm::Es256,
-            inner: key,
+            inner,
             thumb,
         })
     }
@@ -766,6 +747,22 @@ mod crypto {
     pub(crate) use ring_like::signature::{EcdsaKeyPair, ECDSA_P256_SHA256_FIXED_SIGNING};
     pub(crate) use ring_like::signature::{KeyPair, Signature};
     pub(crate) use ring_like::{hmac, pkcs8};
+
+    #[cfg(feature = "aws-lc-rs")]
+    pub(crate) fn p256_key_pair_from_pkcs8(
+        pkcs8: &[u8],
+        _: &SystemRandom,
+    ) -> Result<EcdsaKeyPair, KeyRejected> {
+        EcdsaKeyPair::from_pkcs8(&ECDSA_P256_SHA256_FIXED_SIGNING, pkcs8)
+    }
+
+    #[cfg(all(feature = "ring", not(feature = "aws-lc-rs")))]
+    pub(crate) fn p256_key_pair_from_pkcs8(
+        pkcs8: &[u8],
+        rng: &SystemRandom,
+    ) -> Result<EcdsaKeyPair, KeyRejected> {
+        EcdsaKeyPair::from_pkcs8(&ECDSA_P256_SHA256_FIXED_SIGNING, pkcs8, rng)
+    }
 }
 
 const JOSE_JSON: &str = "application/jose+json";
