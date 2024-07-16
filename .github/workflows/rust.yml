@@ -21,14 +21,14 @@ jobs:
 
     runs-on: ${{ matrix.os }}
 
-    env:
-      AWS_LC_SYS_NO_ASM: 1
-
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@master
         with:
           toolchain: ${{ matrix.rust }}
+      - name: Install NASM for aws-lc-rs on Windows
+        if: runner.os == 'Windows'
+        uses: ilammy/setup-nasm@v1
       - run: cargo check --no-default-features --features aws-lc-rs
       - run: cargo check --no-default-features --features ring
       - run: cargo check # hyper-rustls, ring
