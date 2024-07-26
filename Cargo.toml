@@ -2,7 +2,7 @@
 name = "instant-acme"
 version = "0.7.1"
 edition = "2021"
-rust-version = "1.67"
+rust-version = "1.70"
 license = "Apache-2.0"
 description = "Async pure-Rust ACME client"
 homepage = "https://github.com/instant-labs/instant-acme"
