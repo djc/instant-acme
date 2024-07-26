@@ -38,7 +38,7 @@ thiserror = "1.0.30"
 [dev-dependencies]
 anyhow = "1.0.66"
 clap = { version = "4.0.29", features = ["derive"] }
-rcgen = { version = "0.12", default-features = false, features = ["pem"] }
+rcgen = { version = "0.13", default-features = false, features = ["pem"] }
 tokio = { version = "1.22.0", features = ["macros", "rt", "rt-multi-thread", "time"] }
 tracing = "0.1.37"
 tracing-subscriber = "0.3.16"

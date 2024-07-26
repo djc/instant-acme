@@ -1,7 +1,7 @@
 use std::{io, time::Duration};
 
 use clap::Parser;
-use rcgen::{Certificate, CertificateParams, DistinguishedName};
+use rcgen::{CertificateParams, DistinguishedName, KeyPair};
 use tokio::time::sleep;
 use tracing::{error, info};
 
@@ -128,14 +128,14 @@ async fn main() -> anyhow::Result<()> {
     // If the order is ready, we can provision the certificate.
     // Use the rcgen library to create a Certificate Signing Request.
 
-    let mut params = CertificateParams::new(names.clone());
+    let mut params = CertificateParams::new(names.clone())?;
     params.distinguished_name = DistinguishedName::new();
-    let cert = Certificate::from_params(params).unwrap();
-    let csr = cert.serialize_request_der()?;
+    let private_key = KeyPair::generate()?;
+    let csr = params.serialize_request(&private_key)?;
 
     // Finalize the order and print certificate chain, private key and account credentials.
 
-    order.finalize(&csr).await.unwrap();
+    order.finalize(csr.der()).await.unwrap();
     let cert_chain_pem = loop {
         match order.certificate().await.unwrap() {
             Some(cert_chain_pem) => break cert_chain_pem,
@@ -144,7 +144,7 @@ async fn main() -> anyhow::Result<()> {
     };
 
     info!("certficate chain:\n\n{}", cert_chain_pem);
-    info!("private key:\n\n{}", cert.serialize_private_key_pem());
+    info!("private key:\n\n{}", private_key.serialize_pem());
     Ok(())
 }
 
