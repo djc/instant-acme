@@ -2,7 +2,7 @@
 
 [![Documentation](https://docs.rs/instant-acme/badge.svg)](https://docs.rs/instant-acme/)
 [![Crates.io](https://img.shields.io/crates/v/instant-acme.svg)](https://crates.io/crates/instant-acme)
-[![Build status](https://github.com/InstantDomain/instant-acme/workflows/CI/badge.svg)](https://github.com/InstantDomain/instant-acme/actions?query=workflow%3ACI)
+[![Build status](https://github.com/djc/instant-acme/workflows/CI/badge.svg)](https://github.com/djc/instant-acme/actions?query=workflow%3ACI)
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE-APACHE)
 
 instant-acme is an async, pure-Rust ACME (RFC 8555) client.
