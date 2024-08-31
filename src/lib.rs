@@ -720,14 +720,16 @@ impl<C: Connect + Clone + Send + Sync + 'static> HttpClient for HyperClient<C, F
     }
 }
 
-async fn _response_future(
-    fut: impl Future<Output = Result<Response<hyper::body::Incoming>, impl Into<Error>>>,
+async fn _response_future<B: http_body::Body<Error = impl Into<Error>>>(
+    fut: impl Future<Output = Result<Response<B>, impl Into<Error>>>,
 ) -> Result<Response<Bytes>, Error> {
     match fut.await {
         Ok(rsp) => {
             let (parts, body) = rsp.into_parts();
-            let body = body.collect().await?.to_bytes();
-            Ok(Response::from_parts(parts, body))
+            match body.collect().await {
+                Ok(body) => Ok(Response::from_parts(parts, body.to_bytes())),
+                Err(e) => Err(e.into()),
+            }
         }
         Err(e) => Err(e.into()),
     }
