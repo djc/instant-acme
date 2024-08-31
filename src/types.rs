@@ -139,8 +139,8 @@ impl Problem {
     }
 
     pub(crate) async fn from_response(rsp: BytesResponse) -> Result<Bytes, Error> {
-        let status = rsp.parts.status;
-        let body = rsp.body().await.map_err(Error::Other)?;
+        let status = rsp.status();
+        let body = rsp.into_body();
         match status.is_informational() || status.is_success() || status.is_redirection() {
             true => Ok(body),
             false => Err(serde_json::from_slice::<Problem>(&body)?.into()),

@@ -3,13 +3,11 @@
 #![warn(unreachable_pub)]
 #![warn(missing_docs)]
 
-use std::error::Error as StdError;
 use std::fmt;
 use std::future::Future;
 use std::pin::Pin;
 use std::sync::Arc;
 
-use async_trait::async_trait;
 use base64::prelude::{Engine, BASE64_URL_SAFE_NO_PAD};
 use bytes::Bytes;
 use http::header::{CONTENT_TYPE, LOCATION};
@@ -314,8 +312,7 @@ impl Account {
             .await?;
 
         let account_url = rsp
-            .parts
-            .headers
+            .headers()
             .get(LOCATION)
             .and_then(|hv| hv.to_str().ok())
             .map(|s| s.to_owned());
@@ -357,8 +354,7 @@ impl Account {
 
         let nonce = nonce_from_response(&rsp);
         let order_url = rsp
-            .parts
-            .headers
+            .headers()
             .get(LOCATION)
             .and_then(|hv| hv.to_str().ok())
             .map(|s| s.to_owned());
@@ -482,7 +478,7 @@ impl Client {
             .body(Full::default())
             .expect("infallible error should not occur");
         let rsp = http.request(req).await?;
-        let body = rsp.body().await.map_err(Error::Other)?;
+        let body = rsp.into_body();
         Ok(Client {
             http,
             urls: serde_json::from_slice(&body)?,
@@ -522,7 +518,7 @@ impl Client {
         // https://datatracker.ietf.org/doc/html/rfc8555#section-7.2
         // "The server's response MUST include a Replay-Nonce header field containing a fresh
         // nonce and SHOULD have status code 200 (OK)."
-        if rsp.parts.status != StatusCode::OK {
+        if rsp.status() != StatusCode::OK {
             return Err("error response from newNonce resource".into());
         }
 
@@ -670,8 +666,7 @@ impl Signer for ExternalAccountKey {
 }
 
 fn nonce_from_response(rsp: &BytesResponse) -> Option<String> {
-    rsp.parts
-        .headers
+    rsp.headers()
         .get(REPLAY_NONCE)
         .and_then(|hv| String::from_utf8(hv.as_ref().to_vec()).ok())
 }
@@ -705,7 +700,7 @@ impl HttpClient for DefaultClient {
         let fut = self.0.request(req);
         Box::pin(async move {
             match fut.await {
-                Ok(rsp) => Ok(BytesResponse::from(rsp)),
+                Ok(rsp) => Ok(_bytes_response_from(rsp).await?),
                 Err(e) => Err(e.into()),
             }
         })
@@ -730,74 +725,20 @@ impl<C: Connect + Clone + Send + Sync + 'static> HttpClient for HyperClient<C, F
         let fut = self.request(req);
         Box::pin(async move {
             match fut.await {
-                Ok(rsp) => Ok(BytesResponse::from(rsp)),
+                Ok(rsp) => Ok(_bytes_response_from(rsp).await?),
                 Err(e) => Err(e.into()),
             }
         })
     }
 }
 
-/// Response with object safe body type
-pub struct BytesResponse {
-    /// Response status and header
-    pub parts: http::response::Parts,
-    /// Response body
-    pub body: Box<dyn BytesBody>,
+async fn _bytes_response_from(rsp: Response<hyper::body::Incoming>) -> Result<BytesResponse, Error> {
+    let (parts, body) = rsp.into_parts();
+    let body = body.collect().await?.to_bytes();
+    Ok(Response::from_parts(parts, body))
 }
 
-impl BytesResponse {
-    pub(crate) async fn body(mut self) -> Result<Bytes, Box<dyn StdError + Send + Sync + 'static>> {
-        self.body.into_bytes().await
-    }
-}
-
-impl<B> From<Response<B>> for BytesResponse
-where
-    B: http_body::Body + Send + Unpin + 'static,
-    B::Data: Send,
-    B::Error: Into<Box<dyn StdError + Send + Sync + 'static>>,
-{
-    fn from(rsp: Response<B>) -> Self {
-        let (parts, body) = rsp.into_parts();
-        Self {
-            parts,
-            body: Box::new(BodyWrapper { inner: Some(body) }),
-        }
-    }
-}
-
-struct BodyWrapper<B> {
-    inner: Option<B>,
-}
-
-#[async_trait]
-impl<B> BytesBody for BodyWrapper<B>
-where
-    B: http_body::Body + Send + Unpin + 'static,
-    B::Data: Send,
-    B::Error: Into<Box<dyn StdError + Send + Sync + 'static>>,
-{
-    async fn into_bytes(&mut self) -> Result<Bytes, Box<dyn StdError + Send + Sync + 'static>> {
-        let Some(body) = self.inner.take() else {
-            return Ok(Bytes::new());
-        };
-
-        match body.collect().await {
-            Ok(body) => Ok(body.to_bytes()),
-            Err(e) => Err(e.into()),
-        }
-    }
-}
-
-/// Object safe body trait
-#[async_trait]
-pub trait BytesBody: Send {
-    /// Convert the body into [`Bytes`]
-    ///
-    /// This consumes the body. The behavior for calling this method multiple times is undefined.
-    #[allow(clippy::wrong_self_convention)] // async_trait doesn't support taking `self`
-    async fn into_bytes(&mut self) -> Result<Bytes, Box<dyn StdError + Send + Sync + 'static>>;
-}
+type BytesResponse = Response<Bytes>;
 
 mod crypto {
     #[cfg(all(feature = "aws-lc-rs", any(feature = "fips", not(feature = "ring"))))]
