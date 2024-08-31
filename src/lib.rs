@@ -642,7 +642,7 @@ pub trait HttpClient: Send + Sync + 'static {
     ) -> Pin<Box<dyn Future<Output = Result<Response<Bytes>, Error>> + Send>>;
 }
 
-async fn _response_future<B: http_body::Body<Error = impl Into<Error>>>(
+async fn handle_response_future<B: http_body::Body<Error = impl Into<Error>>>(
     fut: impl Future<Output = Result<Response<B>, impl Into<Error>>>,
 ) -> Result<Response<Bytes>, Error> {
     match fut.await {

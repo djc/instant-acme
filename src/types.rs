@@ -55,13 +55,6 @@ impl From<&'static str> for Error {
     }
 }
 
-#[cfg(feature = "hyper-rustls")]
-impl From<hyper_util::client::legacy::Error> for Error {
-    fn from(value: hyper_util::client::legacy::Error) -> Self {
-        Self::Other(Box::new(value))
-    }
-}
-
 /// ACME account credentials
 ///
 /// This opaque type contains the account ID, the private key data and the

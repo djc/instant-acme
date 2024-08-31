@@ -4,6 +4,12 @@ use hyper_util::client::legacy::connect::Connect;
 use hyper_util::client::legacy::Client as HyperClient;
 use hyper_util::{client::legacy::connect::HttpConnector, rt::TokioExecutor};
 
+impl From<hyper_util::client::legacy::Error> for Error {
+    fn from(value: hyper_util::client::legacy::Error) -> Self {
+        Self::Other(Box::new(value))
+    }
+}
+
 struct DefaultClient(HyperClient<hyper_rustls::HttpsConnector<HttpConnector>, Full<Bytes>>);
 
 impl DefaultClient {
@@ -27,7 +33,7 @@ impl HttpClient for DefaultClient {
         &self,
         req: Request<Full<Bytes>>,
     ) -> Pin<Box<dyn Future<Output = Result<Response<Bytes>, Error>> + Send>> {
-        Box::pin(_response_future(self.0.request(req)))
+        Box::pin(handle_response_future(self.0.request(req)))
     }
 }
 
@@ -36,7 +42,7 @@ impl<C: Connect + Clone + Send + Sync + 'static> HttpClient for HyperClient<C, F
         &self,
         req: Request<Full<Bytes>>,
     ) -> Pin<Box<dyn Future<Output = Result<Response<Bytes>, Error>> + Send>> {
-        Box::pin(_response_future(self.request(req)))
+        Box::pin(handle_response_future(self.request(req)))
     }
 }
 
@@ -44,7 +50,7 @@ impl Account {
     /// Restore an existing account from the given credentials
     ///
     /// The [`AccountCredentials`] type is opaque, but supports deserialization.
-        pub async fn from_credentials(credentials: AccountCredentials) -> Result<Self, Error> {
+    pub async fn from_credentials(credentials: AccountCredentials) -> Result<Self, Error> {
         Ok(Self {
             inner: Arc::new(
                 AccountInner::from_credentials(credentials, Box::new(DefaultClient::try_new()?))
@@ -57,7 +63,7 @@ impl Account {
     ///
     /// The returned [`AccountCredentials`] can be serialized and stored for later use.
     /// Use [`Account::from_credentials()`] to restore the account from the credentials.
-        pub async fn create(
+    pub async fn create(
         account: &NewAccount<'_>,
         server_url: &str,
         external_account: Option<&ExternalAccountKey>,
