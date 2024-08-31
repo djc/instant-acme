@@ -2,6 +2,7 @@ use std::fmt;
 
 use base64::prelude::{Engine, BASE64_URL_SAFE_NO_PAD};
 use bytes::Bytes;
+use http::Response;
 use rustls_pki_types::CertificateDer;
 use serde::de::DeserializeOwned;
 use serde::ser::SerializeMap;
@@ -9,7 +10,6 @@ use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 use crate::crypto::{self, KeyPair};
-use crate::BytesResponse;
 
 /// Error type for instant-acme
 #[derive(Debug, Error)]
@@ -134,11 +134,11 @@ pub struct Problem {
 }
 
 impl Problem {
-    pub(crate) async fn check<T: DeserializeOwned>(rsp: BytesResponse) -> Result<T, Error> {
+    pub(crate) async fn check<T: DeserializeOwned>(rsp: Response<Bytes>) -> Result<T, Error> {
         Ok(serde_json::from_slice(&Self::from_response(rsp).await?)?)
     }
 
-    pub(crate) async fn from_response(rsp: BytesResponse) -> Result<Bytes, Error> {
+    pub(crate) async fn from_response(rsp: Response<Bytes>) -> Result<Bytes, Error> {
         let status = rsp.status();
         let body = rsp.into_body();
         match status.is_informational() || status.is_success() || status.is_redirection() {

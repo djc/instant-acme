@@ -443,7 +443,7 @@ impl AccountInner {
         payload: Option<&impl Serialize>,
         nonce: Option<String>,
         url: &str,
-    ) -> Result<BytesResponse, Error> {
+    ) -> Result<Response<Bytes>, Error> {
         self.client.post(payload, nonce, self, url).await
     }
 }
@@ -491,7 +491,7 @@ impl Client {
         nonce: Option<String>,
         signer: &impl Signer,
         url: &str,
-    ) -> Result<BytesResponse, Error> {
+    ) -> Result<Response<Bytes>, Error> {
         let nonce = self.nonce(nonce).await?;
         let body = JoseJson::new(payload, signer.header(Some(&nonce), url), signer)?;
         let request = Request::builder()
@@ -665,7 +665,7 @@ impl Signer for ExternalAccountKey {
     }
 }
 
-fn nonce_from_response(rsp: &BytesResponse) -> Option<String> {
+fn nonce_from_response(rsp: &Response<Bytes>) -> Option<String> {
     rsp.headers()
         .get(REPLAY_NONCE)
         .and_then(|hv| String::from_utf8(hv.as_ref().to_vec()).ok())
@@ -696,7 +696,7 @@ impl HttpClient for DefaultClient {
     fn request(
         &self,
         req: Request<Full<Bytes>>,
-    ) -> Pin<Box<dyn Future<Output = Result<BytesResponse, Error>> + Send>> {
+    ) -> Pin<Box<dyn Future<Output = Result<Response<Bytes>, Error>> + Send>> {
         let fut = self.0.request(req);
         Box::pin(_response_future(fut))
     }
@@ -708,7 +708,7 @@ pub trait HttpClient: Send + Sync + 'static {
     fn request(
         &self,
         req: Request<Full<Bytes>>,
-    ) -> Pin<Box<dyn Future<Output = Result<BytesResponse, Error>> + Send>>;
+    ) -> Pin<Box<dyn Future<Output = Result<Response<Bytes>, Error>> + Send>>;
 }
 
 #[cfg(feature = "hyper-rustls")]
@@ -716,13 +716,13 @@ impl<C: Connect + Clone + Send + Sync + 'static> HttpClient for HyperClient<C, F
     fn request(
         &self,
         req: Request<Full<Bytes>>,
-    ) -> Pin<Box<dyn Future<Output = Result<BytesResponse, Error>> + Send>> {
+    ) -> Pin<Box<dyn Future<Output = Result<Response<Bytes>, Error>> + Send>> {
         let fut = self.request(req);
         Box::pin(_response_future(fut))
     }
 }
 
-async fn _response_future(fut: impl Future<Output = Result<Response<hyper::body::Incoming>, impl Into<Error>>>) -> Result<BytesResponse, Error> {
+async fn _response_future(fut: impl Future<Output = Result<Response<hyper::body::Incoming>, impl Into<Error>>>) -> Result<Response<Bytes>, Error> {
     match fut.await {
         Ok(rsp) => {
             let (parts, body) = rsp.into_parts();
@@ -732,8 +732,6 @@ async fn _response_future(fut: impl Future<Output = Result<Response<hyper::body:
         Err(e) => Err(e.into()),
     }
 }
-
-type BytesResponse = Response<Bytes>;
 
 mod crypto {
     #[cfg(all(feature = "aws-lc-rs", any(feature = "fips", not(feature = "ring"))))]
