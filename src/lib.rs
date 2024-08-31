@@ -13,12 +13,6 @@ use bytes::Bytes;
 use http::header::{CONTENT_TYPE, LOCATION};
 use http::{Method, Request, Response, StatusCode};
 use http_body_util::{BodyExt, Full};
-#[cfg(feature = "hyper-rustls")]
-use hyper_util::client::legacy::connect::Connect;
-#[cfg(feature = "hyper-rustls")]
-use hyper_util::client::legacy::Client as HyperClient;
-#[cfg(feature = "hyper-rustls")]
-use hyper_util::{client::legacy::connect::HttpConnector, rt::TokioExecutor};
 use serde::de::DeserializeOwned;
 use serde::Serialize;
 
@@ -205,19 +199,6 @@ pub struct Account {
 }
 
 impl Account {
-    /// Restore an existing account from the given credentials
-    ///
-    /// The [`AccountCredentials`] type is opaque, but supports deserialization.
-    #[cfg(feature = "hyper-rustls")]
-    pub async fn from_credentials(credentials: AccountCredentials) -> Result<Self, Error> {
-        Ok(Self {
-            inner: Arc::new(
-                AccountInner::from_credentials(credentials, Box::new(DefaultClient::try_new()?))
-                    .await?,
-            ),
-        })
-    }
-
     /// Restore an existing account from the given credentials and HTTP client
     ///
     /// The [`AccountCredentials`] type is opaque, but supports deserialization.
@@ -247,25 +228,6 @@ impl Account {
                 client: Client::new(directory_url, http).await?,
             }),
         })
-    }
-
-    /// Create a new account on the `server_url` with the information in [`NewAccount`]
-    ///
-    /// The returned [`AccountCredentials`] can be serialized and stored for later use.
-    /// Use [`Account::from_credentials()`] to restore the account from the credentials.
-    #[cfg(feature = "hyper-rustls")]
-    pub async fn create(
-        account: &NewAccount<'_>,
-        server_url: &str,
-        external_account: Option<&ExternalAccountKey>,
-    ) -> Result<(Account, AccountCredentials), Error> {
-        Self::create_inner(
-            account,
-            external_account,
-            Client::new(server_url, Box::new(DefaultClient::try_new()?)).await?,
-            server_url,
-        )
-        .await
     }
 
     /// Create a new account with a custom HTTP client
@@ -671,36 +633,6 @@ fn nonce_from_response(rsp: &Response<Bytes>) -> Option<String> {
         .and_then(|hv| String::from_utf8(hv.as_ref().to_vec()).ok())
 }
 
-#[cfg(feature = "hyper-rustls")]
-struct DefaultClient(HyperClient<hyper_rustls::HttpsConnector<HttpConnector>, Full<Bytes>>);
-
-#[cfg(feature = "hyper-rustls")]
-impl DefaultClient {
-    fn try_new() -> Result<Self, Error> {
-        Ok(Self(
-            HyperClient::builder(TokioExecutor::new()).build(
-                hyper_rustls::HttpsConnectorBuilder::new()
-                    .with_native_roots()
-                    .map_err(|e| Error::Other(Box::new(e)))?
-                    .https_only()
-                    .enable_http1()
-                    .enable_http2()
-                    .build(),
-            ),
-        ))
-    }
-}
-
-#[cfg(feature = "hyper-rustls")]
-impl HttpClient for DefaultClient {
-    fn request(
-        &self,
-        req: Request<Full<Bytes>>,
-    ) -> Pin<Box<dyn Future<Output = Result<Response<Bytes>, Error>> + Send>> {
-        Box::pin(_response_future(self.0.request(req)))
-    }
-}
-
 /// A HTTP client abstraction
 pub trait HttpClient: Send + Sync + 'static {
     /// Send the given request and return the response
@@ -708,16 +640,6 @@ pub trait HttpClient: Send + Sync + 'static {
         &self,
         req: Request<Full<Bytes>>,
     ) -> Pin<Box<dyn Future<Output = Result<Response<Bytes>, Error>> + Send>>;
-}
-
-#[cfg(feature = "hyper-rustls")]
-impl<C: Connect + Clone + Send + Sync + 'static> HttpClient for HyperClient<C, Full<Bytes>> {
-    fn request(
-        &self,
-        req: Request<Full<Bytes>>,
-    ) -> Pin<Box<dyn Future<Output = Result<Response<Bytes>, Error>> + Send>> {
-        Box::pin(_response_future(self.request(req)))
-    }
 }
 
 async fn _response_future<B: http_body::Body<Error = impl Into<Error>>>(
@@ -768,21 +690,5 @@ mod crypto {
 const JOSE_JSON: &str = "application/jose+json";
 const REPLAY_NONCE: &str = "Replay-Nonce";
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[tokio::test]
-    async fn deserialize_old_credentials() -> Result<(), Error> {
-        const CREDENTIALS: &str = r#"{"id":"id","key_pkcs8":"MIGHAgEAMBMGByqGSM49AgEGCCqGSM49AwEHBG0wawIBAQQgJVWC_QzOTCS5vtsJp2IG-UDc8cdDfeoKtxSZxaznM-mhRANCAAQenCPoGgPFTdPJ7VLLKt56RxPlYT1wNXnHc54PEyBg3LxKaH0-sJkX0mL8LyPEdsfL_Oz4TxHkWLJGrXVtNhfH","urls":{"newNonce":"new-nonce","newAccount":"new-acct","newOrder":"new-order", "revokeCert": "revoke-cert"}}"#;
-        Account::from_credentials(serde_json::from_str::<AccountCredentials>(CREDENTIALS)?).await?;
-        Ok(())
-    }
-
-    #[tokio::test]
-    async fn deserialize_new_credentials() -> Result<(), Error> {
-        const CREDENTIALS: &str = r#"{"id":"id","key_pkcs8":"MIGHAgEAMBMGByqGSM49AgEGCCqGSM49AwEHBG0wawIBAQQgJVWC_QzOTCS5vtsJp2IG-UDc8cdDfeoKtxSZxaznM-mhRANCAAQenCPoGgPFTdPJ7VLLKt56RxPlYT1wNXnHc54PEyBg3LxKaH0-sJkX0mL8LyPEdsfL_Oz4TxHkWLJGrXVtNhfH","directory":"https://acme-staging-v02.api.letsencrypt.org/directory"}"#;
-        Account::from_credentials(serde_json::from_str::<AccountCredentials>(CREDENTIALS)?).await?;
-        Ok(())
-    }
-}
+#[cfg(feature = "hyper-rustls")]
+mod hyper_rustls_impl;
