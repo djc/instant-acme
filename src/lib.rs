@@ -698,12 +698,7 @@ impl HttpClient for DefaultClient {
         req: Request<Full<Bytes>>,
     ) -> Pin<Box<dyn Future<Output = Result<BytesResponse, Error>> + Send>> {
         let fut = self.0.request(req);
-        Box::pin(async move {
-            match fut.await {
-                Ok(rsp) => Ok(_bytes_response_from(rsp).await?),
-                Err(e) => Err(e.into()),
-            }
-        })
+        Box::pin(_response_future(fut))
     }
 }
 
@@ -723,19 +718,19 @@ impl<C: Connect + Clone + Send + Sync + 'static> HttpClient for HyperClient<C, F
         req: Request<Full<Bytes>>,
     ) -> Pin<Box<dyn Future<Output = Result<BytesResponse, Error>> + Send>> {
         let fut = self.request(req);
-        Box::pin(async move {
-            match fut.await {
-                Ok(rsp) => Ok(_bytes_response_from(rsp).await?),
-                Err(e) => Err(e.into()),
-            }
-        })
+        Box::pin(_response_future(fut))
     }
 }
 
-async fn _bytes_response_from(rsp: Response<hyper::body::Incoming>) -> Result<BytesResponse, Error> {
-    let (parts, body) = rsp.into_parts();
-    let body = body.collect().await?.to_bytes();
-    Ok(Response::from_parts(parts, body))
+async fn _response_future(fut: impl Future<Output = Result<Response<hyper::body::Incoming>, impl Into<Error>>>) -> Result<BytesResponse, Error> {
+    match fut.await {
+        Ok(rsp) => {
+            let (parts, body) = rsp.into_parts();
+            let body = body.collect().await?.to_bytes();
+            Ok(Response::from_parts(parts, body))
+        },
+        Err(e) => Err(e.into()),
+    }
 }
 
 type BytesResponse = Response<Bytes>;
