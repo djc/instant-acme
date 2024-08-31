@@ -697,8 +697,7 @@ impl HttpClient for DefaultClient {
         &self,
         req: Request<Full<Bytes>>,
     ) -> Pin<Box<dyn Future<Output = Result<Response<Bytes>, Error>> + Send>> {
-        let fut = self.0.request(req);
-        Box::pin(_response_future(fut))
+        Box::pin(_response_future(self.0.request(req)))
     }
 }
 
@@ -717,18 +716,19 @@ impl<C: Connect + Clone + Send + Sync + 'static> HttpClient for HyperClient<C, F
         &self,
         req: Request<Full<Bytes>>,
     ) -> Pin<Box<dyn Future<Output = Result<Response<Bytes>, Error>> + Send>> {
-        let fut = self.request(req);
-        Box::pin(_response_future(fut))
+        Box::pin(_response_future(self.request(req)))
     }
 }
 
-async fn _response_future(fut: impl Future<Output = Result<Response<hyper::body::Incoming>, impl Into<Error>>>) -> Result<Response<Bytes>, Error> {
+async fn _response_future(
+    fut: impl Future<Output = Result<Response<hyper::body::Incoming>, impl Into<Error>>>,
+) -> Result<Response<Bytes>, Error> {
     match fut.await {
         Ok(rsp) => {
             let (parts, body) = rsp.into_parts();
             let body = body.collect().await?.to_bytes();
             Ok(Response::from_parts(parts, body))
-        },
+        }
         Err(e) => Err(e.into()),
     }
 }
