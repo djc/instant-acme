@@ -492,6 +492,43 @@ impl Client {
     async fn post(
         &self,
         payload: Option<&impl Serialize>,
+        mut nonce: Option<String>,
+        signer: &impl Signer,
+        url: &str,
+    ) -> Result<BytesResponse, Error> {
+        let mut retries = 3;
+        loop {
+            let mut response = self
+                .post_attempt(payload, nonce.clone(), signer, url)
+                .await?;
+            if response.parts.status != StatusCode::BAD_REQUEST {
+                return Ok(response);
+            }
+            let body = response.body.into_bytes().await.map_err(Error::Other)?;
+            let problem = serde_json::from_slice::<Problem>(&body)?;
+            if let Some("urn:ietf:params:acme:error:badNonce") = problem.r#type.as_deref() {
+                retries -= 1;
+                if retries != 0 {
+                    // Retrieve the new nonce. If it isn't there (it
+                    // should be, the spec requires it) then we will
+                    // manually refresh a new one in `post_attempt`
+                    // due to `nonce` being `None` but getting it from
+                    // the response saves us making that request.
+                    nonce = nonce_from_response(&response);
+                    continue;
+                }
+            }
+
+            return Ok(BytesResponse {
+                parts: response.parts,
+                body: Box::new(body),
+            });
+        }
+    }
+
+    async fn post_attempt(
+        &self,
+        payload: Option<&impl Serialize>,
         nonce: Option<String>,
         signer: &impl Signer,
         url: &str,
@@ -786,6 +823,13 @@ where
             Ok(body) => Ok(body.to_bytes()),
             Err(e) => Err(e.into()),
         }
+    }
+}
+
+#[async_trait]
+impl BytesBody for Bytes {
+    async fn into_bytes(&mut self) -> Result<Bytes, Box<dyn StdError + Send + Sync + 'static>> {
+        Ok(self.to_owned())
     }
 }
 
