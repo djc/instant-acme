@@ -408,6 +408,11 @@ impl Account {
         let _ = Problem::from_response(rsp).await?;
         Ok(())
     }
+
+    /// Get the account ID
+    pub fn id(&self) -> &str {
+        &self.inner.id
+    }
 }
 
 struct AccountInner {
