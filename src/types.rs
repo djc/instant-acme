@@ -100,7 +100,7 @@ mod pkcs8_serde {
     ) -> Result<Vec<u8>, D::Error> {
         struct Visitor;
 
-        impl<'de> de::Visitor<'de> for Visitor {
+        impl de::Visitor<'_> for Visitor {
             type Value = Vec<u8>;
 
             fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -196,7 +196,7 @@ pub(crate) enum KeyOrKeyId<'a> {
     KeyId(&'a str),
 }
 
-impl<'a> KeyOrKeyId<'a> {
+impl KeyOrKeyId<'_> {
     pub(crate) fn from_key(key: &crypto::EcdsaKeyPair) -> KeyOrKeyId<'static> {
         KeyOrKeyId::Key(Jwk::new(key))
     }
@@ -308,7 +308,7 @@ pub struct RevocationRequest<'a> {
     pub reason: Option<RevocationReason>,
 }
 
-impl<'a> Serialize for RevocationRequest<'a> {
+impl Serialize for RevocationRequest<'_> {
     fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
         let base64 = BASE64_URL_SAFE_NO_PAD.encode(self.certificate);
         let mut map = serializer.serialize_map(Some(2))?;
