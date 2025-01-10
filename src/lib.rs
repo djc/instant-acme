@@ -685,6 +685,9 @@ pub struct ExternalAccountKey {
 
 impl ExternalAccountKey {
     /// Create a new external account key
+    ///
+    /// Note that the `key_value` argument represents the raw key value, so if the caller holds
+    /// an encoded key value (for example, using base64), decode it before passing it in.
     pub fn new(id: String, key_value: &[u8]) -> Self {
         Self {
             id,
