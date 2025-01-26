@@ -39,10 +39,22 @@ thiserror = "2.0.3"
 anyhow = "1.0.66"
 clap = { version = "4.0.29", features = ["derive"] }
 rcgen = { version = "0.13", default-features = false, features = ["pem"] }
+rustls = { version = "0.23", default-features = false }
+tempfile = "3"
 tokio = { version = "1.22.0", features = ["macros", "rt", "rt-multi-thread", "time"] }
 tracing = "0.1.37"
-tracing-subscriber = "0.3.16"
+tracing-subscriber =  { version = "0.3.16", features = ["env-filter"] }
 
 [[example]]
 name = "provision"
+required-features = ["hyper-rustls"]
+
+# Pebble integration test.
+# Disabled by default because it requires pebble & pebble-challtestsrv.
+# Run with:
+#  PEBBLE=path/to/pebble CHALLTESTSRV=path/to/pebble-challtestsrv cargo test --test integration
+[[test]]
+name = "integration"
+harness = false
+test = false
 required-features = ["hyper-rustls"]
