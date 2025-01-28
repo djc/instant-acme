@@ -427,10 +427,12 @@ fn serialize_profiles<S: Serializer>(
 
 #[derive(Clone, Serialize)]
 struct RetryConfig {
-    /// number of seconds to add to pending authorization retry-after headers.
-    authz: u32,
-    /// number of seconds to add to pending order authorization retry-after headers.
-    order: u32,
+    /// Duration to add to pending authorization retry-after headers.
+    #[serde(serialize_with = "duration_as_secs")]
+    authz: Duration,
+    /// Duration to add to pending order authorization retry-after headers.
+    #[serde(serialize_with = "duration_as_secs")]
+    order: Duration,
 }
 
 #[derive(Clone, Serialize)]
@@ -438,8 +440,12 @@ struct RetryConfig {
 struct Profile {
     description: &'static str,
     /// lifetime of issued end entity certificates, expressed in seconds.
-    #[serde(rename = "validityPeriod")]
-    validity_period_seconds: u32,
+    #[serde(serialize_with = "duration_as_secs")]
+    validity_period: Duration,
+}
+
+fn duration_as_secs<S: Serializer>(duration: &Duration, serializer: S) -> Result<S::Ok, S::Error> {
+    serializer.serialize_u64(duration.as_secs())
 }
 
 /// A wrapper type for a subprocess that ensures it is killed and waited on drop.
@@ -473,20 +479,23 @@ const DEFAULT_CONFIG: Config = Config {
     ocsp_responder_url: "",
     external_account_binding_required: false,
     domain_blocklist: &["blocked-domain.example"],
-    retry_after: RetryConfig { authz: 3, order: 5 },
+    retry_after: RetryConfig {
+        authz: Duration::from_secs(3),
+        order: Duration::from_secs(5),
+    },
     profiles: &[
         (
             "default",
             Profile {
                 description: "The profile you know and love",
-                validity_period_seconds: 7776000,
+                validity_period: Duration::from_secs(7776000),
             },
         ),
         (
             "shortlived",
             Profile {
                 description: "A short-lived cert profile, without actual enforcement",
-                validity_period_seconds: 518400,
+                validity_period: Duration::from_secs(518400),
             },
         ),
     ],
