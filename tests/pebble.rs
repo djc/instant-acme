@@ -1,6 +1,7 @@
 use std::error::Error as StdError;
 use std::io::{self, Read};
 use std::process::{Child, Command};
+use std::sync::atomic::AtomicUsize;
 use std::time::Duration;
 use std::{env, fs};
 
@@ -44,9 +45,9 @@ async fn http_01() -> Result<(), Box<dyn StdError>> {
         .with(EnvFilter::from_default_env())
         .init();
 
-    // Spawn a Pebble CA and a challenge response server.
-    debug!("starting Pebble CA environment");
-    let pebble = PebbleEnvironment::new(&DEFAULT_CONFIG)?;
+    let pebble = pebble_env::PebbleGuard::new();
+    let pebble = pebble.get();
+    let pebble = pebble.as_ref().unwrap();
     wait_for_server(DEFAULT_CONFIG.listen_address).await;
 
     // Create a test account with the Pebble CA.
@@ -111,6 +112,8 @@ impl PebbleEnvironment {
     /// Set the PEBBLE and CHALLTESTSRV to pebble and pebble-challtestsrv binaries
     /// respectively. If unset "./pebble" and "./pebble-challtestsrv" are used.
     fn new(config: &'static Config) -> io::Result<Self> {
+        debug!("starting Pebble CA environment");
+
         #[derive(Clone, Serialize)]
         struct ConfigWrapper {
             pebble: &'static Config,
@@ -500,3 +503,39 @@ const DEFAULT_CONFIG: Config = Config {
         ),
     ],
 };
+
+mod pebble_env {
+    use std::sync::atomic::Ordering;
+    use std::sync::{LazyLock, RwLock, RwLockReadGuard};
+
+    use super::*;
+
+    pub(super) struct PebbleGuard {
+        _priv: (),
+    }
+
+    impl PebbleGuard {
+        pub(super) fn new() -> Self {
+            RUNNING_TESTS.fetch_add(1, Ordering::Relaxed);
+            Self { _priv: () }
+        }
+
+        pub(super) fn get(&self) -> RwLockReadGuard<'_, Option<PebbleEnvironment>> {
+            DEFAULT_ENV.read().unwrap()
+        }
+    }
+
+    impl Drop for PebbleGuard {
+        fn drop(&mut self) {
+            let running = RUNNING_TESTS.fetch_sub(1, Ordering::Relaxed);
+            if running == 1 {
+                DEFAULT_ENV.write().unwrap().take().unwrap();
+            }
+        }
+    }
+
+    static DEFAULT_ENV: LazyLock<RwLock<Option<PebbleEnvironment>>> =
+        LazyLock::new(|| RwLock::new(Some(PebbleEnvironment::new(&DEFAULT_CONFIG).unwrap())));
+
+    static RUNNING_TESTS: AtomicUsize = AtomicUsize::new(0);
+}
