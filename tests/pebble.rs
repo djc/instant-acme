@@ -308,7 +308,10 @@ impl PebbleEnvironment {
     async fn issuer_roots(&self) -> Result<RootCertStore, Box<dyn StdError>> {
         let req = Request::builder()
             .method(Method::GET)
-            .uri(format!("{}/roots/0", self.pebble_management_url()))
+            .uri(format!(
+                "https://{}/roots/0",
+                &self.config.management_listen_address
+            ))
             .header(CONTENT_TYPE, "application/json")
             .body(Full::default())?;
 
@@ -330,10 +333,6 @@ impl PebbleEnvironment {
 
     fn challenge_management_url(&self) -> &str {
         "http://127.0.0.1:8055" // Default.
-    }
-
-    fn pebble_management_url(&self) -> String {
-        format!("https://{}", &self.config.management_listen_address)
     }
 
     fn directory_url(&self) -> String {
