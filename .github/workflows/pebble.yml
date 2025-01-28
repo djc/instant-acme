@@ -23,4 +23,4 @@ jobs:
           curl -L "https://github.com/letsencrypt/pebble/releases/latest/download/pebble-challtestsrv-linux-amd64.tar.gz" | tar xz --strip-components=3
           chmod +x pebble-challtestsrv
       - name: Run integration test
-        run: RUST_LOG=pebble=info cargo test --test pebble
+        run: RUST_LOG=pebble=info cargo test -- --ignored
