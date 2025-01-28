@@ -46,7 +46,8 @@ async fn http_01() -> Result<(), Box<dyn StdError>> {
 
     // Spawn a Pebble CA and a challenge response server.
     debug!("starting Pebble CA environment");
-    let pebble = PebbleEnvironment::new(&DEFAULT_CONFIG).await?;
+    let pebble = PebbleEnvironment::new(&DEFAULT_CONFIG)?;
+    wait_for_server(DEFAULT_CONFIG.listen_address).await;
 
     // Create a test account with the Pebble CA.
     debug!("creating test account");
@@ -109,9 +110,7 @@ impl PebbleEnvironment {
     ///
     /// Set the PEBBLE and CHALLTESTSRV to pebble and pebble-challtestsrv binaries
     /// respectively. If unset "./pebble" and "./pebble-challtestsrv" are used.
-    ///
-    /// Returns only once the Pebble CA server interface is responding.
-    async fn new(config: &'static Config) -> io::Result<Self> {
+    fn new(config: &'static Config) -> io::Result<Self> {
         #[derive(Clone, Serialize)]
         struct ConfigWrapper {
             pebble: &'static Config,
@@ -142,8 +141,6 @@ impl PebbleEnvironment {
                 .arg("-doh-cert-key")
                 .arg("tests/testdata/server.key"),
         )?;
-
-        wait_for_server(config.listen_address).await;
 
         // Trust the Pebble management interface root CA.
         let mut roots = RootCertStore::empty();
