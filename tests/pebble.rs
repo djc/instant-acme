@@ -1,10 +1,3 @@
-use std::error::Error as StdError;
-use std::io::{self, Read};
-use std::process::{Child, Command};
-use std::sync::atomic::AtomicUsize;
-use std::time::Duration;
-use std::{env, fs};
-
 use bytes::{Buf, Bytes};
 use http::header::CONTENT_TYPE;
 use http::{Method, Request};
@@ -13,8 +6,8 @@ use hyper_util::client::legacy::connect::HttpConnector;
 use hyper_util::client::legacy::Client as HyperClient;
 use hyper_util::rt::TokioExecutor;
 use instant_acme::{
-    Account, AuthorizationStatus, ChallengeType, Identifier, NewAccount, NewOrder, Order,
-    OrderStatus,
+    Account, AuthorizationStatus, Challenge, ChallengeType, Identifier, KeyAuthorization,
+    NewAccount, NewOrder, Order, OrderStatus,
 };
 use rcgen::{CertificateParams, DistinguishedName, KeyPair};
 use rustls::client::{verify_server_cert_signed_by_trust_anchor, verify_server_name};
@@ -26,6 +19,14 @@ use rustls::RootCertStore;
 use rustls_pki_types::UnixTime;
 use serde::ser::SerializeMap;
 use serde::{Serialize, Serializer};
+use std::error::Error as StdError;
+use std::future::Future;
+use std::io::{self, Read};
+use std::pin::Pin;
+use std::process::{Child, Command};
+use std::sync::atomic::AtomicUsize;
+use std::time::Duration;
+use std::{env, fs};
 use tempfile::NamedTempFile;
 use tokio::net::TcpStream;
 use tokio::time::sleep;
@@ -40,10 +41,10 @@ use tracing_subscriber::{fmt, EnvFilter};
 #[tokio::test]
 #[ignore]
 async fn http_01() -> Result<(), Box<dyn StdError>> {
-    tracing_subscriber::registry()
+    let _ = tracing_subscriber::registry()
         .with(fmt::layer())
         .with(EnvFilter::from_default_env())
-        .init();
+        .try_init();
 
     let pebble = pebble_env::PebbleGuard::new();
     let pebble = pebble.get();
@@ -51,23 +52,42 @@ async fn http_01() -> Result<(), Box<dyn StdError>> {
     wait_for_server(DEFAULT_CONFIG.listen_address).await;
 
     // Create a test account with the Pebble CA.
-    debug!("creating test account");
-    let (mut account, _) = Account::create_with_http(
-        &NewAccount {
-            contact: &[],
-            terms_of_service_agreed: true,
-            only_return_existing: false,
-        },
-        &pebble.directory_url(),
-        None,
-        Box::new(pebble.client.clone()),
-    )
-    .await?;
-    info!(account_id = account.id(), "created ACME account");
+    let mut account = pebble.new_account().await?;
 
     // Issue a certificate w/ HTTP-01 challenge.
     let (identifiers, cert_chain) = pebble.test_http1(&mut account).await?;
+    verify_cert(&pebble.issuer_roots().await?, identifiers, cert_chain)
+}
 
+/// Ignored by default because it requires `pebble` and `pebble-challtestsrv` binaries.
+///
+/// See documentation for [`PebbleEnvironment`].
+#[tokio::test]
+#[ignore]
+async fn dns_01() -> Result<(), Box<dyn StdError>> {
+    let _ = tracing_subscriber::registry()
+        .with(fmt::layer())
+        .with(EnvFilter::from_default_env())
+        .try_init();
+
+    let pebble = pebble_env::PebbleGuard::new();
+    let pebble = pebble.get();
+    let pebble = pebble.as_ref().unwrap();
+    wait_for_server(DEFAULT_CONFIG.listen_address).await;
+
+    // Create a test account with the Pebble CA.
+    let mut account = pebble.new_account().await?;
+
+    // Issue a certificate w/ DNS-01 challenge.
+    let (identifiers, cert_chain) = pebble.test_dns1(&mut account).await?;
+    verify_cert(&pebble.issuer_roots().await?, identifiers, cert_chain)
+}
+
+fn verify_cert(
+    issuer_roots: &RootCertStore,
+    identifiers: Vec<String>,
+    cert_chain: Vec<CertificateDer<'static>>,
+) -> Result<(), Box<dyn StdError>> {
     // Split off and parse the EE cert, save the intermediates that follow.
     let (ee_cert, intermediates) = cert_chain.split_first().unwrap();
     let ee_cert = ParsedCertificate::try_from(ee_cert).unwrap();
@@ -76,7 +96,7 @@ async fn http_01() -> Result<(), Box<dyn StdError>> {
     let crypto_provider = CryptoProvider::get_default().unwrap();
     verify_server_cert_signed_by_trust_anchor(
         &ee_cert,
-        &pebble.issuer_roots().await?,
+        &issuer_roots,
         intermediates,
         UnixTime::now(),
         crypto_provider.signature_verification_algorithms.all,
@@ -175,69 +195,46 @@ impl PebbleEnvironment {
         })
     }
 
+    async fn new_account(&self) -> Result<Account, Box<dyn StdError>> {
+        debug!("creating test account");
+        let (account, _) = Account::create_with_http(
+            &NewAccount {
+                contact: &[],
+                terms_of_service_agreed: true,
+                only_return_existing: false,
+            },
+            &self.directory_url(),
+            None,
+            Box::new(self.client.clone()),
+        )
+        .await?;
+        info!(account_id = account.id(), "created ACME account");
+        Ok(account)
+    }
+
     async fn test_http1(
         &self,
         account: &mut Account,
     ) -> Result<(Vec<String>, Vec<CertificateDer<'static>>), Box<dyn StdError>> {
         info!("testing HTTP-01 challenge");
 
-        // Create an order.
-        let identifier = Identifier::Dns("example.com".to_owned());
-        debug!(?identifier, "creating order");
-        let mut order = account
-            .new_order(&NewOrder {
-                identifiers: &[identifier],
-            })
-            .await?;
-        info!(order_url = order.url(), "created order");
-
-        let authorizations = order.authorizations().await?;
-        let mut challenges = Vec::with_capacity(authorizations.len());
-        let mut names = Vec::with_capacity(authorizations.len());
-
-        // Collect up the relevant challenges, provisioning the expected responses as we go.
-        for authz in &authorizations {
-            match authz.status {
-                AuthorizationStatus::Pending => {}
-                AuthorizationStatus::Valid => continue,
-                _ => unreachable!("unexpected authz state: {:?}", authz.status),
-            }
-
-            let challenge = authz
-                .challenges
-                .iter()
-                .find(|c| c.r#type == ChallengeType::Http01)
-                .ok_or("no http01 challenge found")?;
-
-            let Identifier::Dns(identifier) = &authz.identifier;
-
-            // Provision the HTTP-01 challenge response with the Pebble challenge test server.
-            let key_auth = order.key_authorization(challenge);
-            debug!(
-                token = challenge.token,
-                key_auth = key_auth.as_str(),
-                "provisioning HTTP-01 response",
-            );
-            self.add_http01_response(&challenge.token, key_auth.as_str())
-                .await?;
-
-            challenges.push((identifier, &challenge.url));
-            names.push(identifier.clone());
-        }
-
-        // Tell the CA we have provisioned the response for each challenge.
-        for (_, url) in &challenges {
-            debug!(challenge_url = url, "marking challenge ready");
-            order.set_challenge_ready(url).await?;
-        }
-
-        // Poll until the order is ready.
-        poll_until_ready(&mut order).await?;
-
-        // Issue a certificate for the names and test the chain validates to the issuer root.
-        let cert_chain = self.certificate(&mut order, &names).await?;
-
-        Ok((names, cert_chain))
+        self.complete_order(
+            account,
+            vec![Identifier::Dns("http01.example.com".to_owned())],
+            ChallengeType::Http01,
+            |_identifier, challenge, key_auth| {
+                let token = challenge.token.clone();
+                Box::pin(async move {
+                    debug!(
+                        token,
+                        key_auth = key_auth.as_str(),
+                        "provisioning HTTP-01 response",
+                    );
+                    self.add_http01_response(&token, key_auth.as_str()).await
+                })
+            },
+        )
+        .await
     }
 
     /// Provision an HTTP-01 challenge response for the given token and key authorization.
@@ -267,6 +264,124 @@ impl PebbleEnvironment {
         self.client.request(req).await?;
 
         Ok(())
+    }
+
+    async fn test_dns1<'a>(
+        &'a self,
+        account: &mut Account,
+    ) -> Result<(Vec<String>, Vec<CertificateDer<'static>>), Box<dyn StdError + 'static>> {
+        info!("testing DNS-01 challenge");
+
+        self.complete_order(
+            account,
+            vec![Identifier::Dns("dns01.example.com".to_owned())],
+            ChallengeType::Dns01,
+            |identifier, _challenge, key_auth| {
+                Box::pin(async move {
+                    let host = format!("_acme-challenge.{}.", identifier);
+                    debug!(
+                        host,
+                        key_auth = key_auth.as_str(),
+                        "provisioning DNS-01 response",
+                    );
+                    self.add_dns01_response(&host, &key_auth.dns_value()).await
+                })
+            },
+        )
+        .await
+    }
+
+    /// Provision an DNS-01 challenge response for the given host and value.
+    ///
+    /// The Pebble challenge test server will be configured to respond to TXT
+    /// requests for the provided host by returning the expected DNS-01 challenge
+    /// response value.
+    async fn add_dns01_response(&self, host: &str, value: &str) -> Result<(), Box<dyn StdError>> {
+        #[derive(Serialize)]
+        struct AddDns01Request<'a> {
+            host: &'a str,
+            value: &'a str,
+        }
+
+        let req = Request::builder()
+            .method(Method::POST)
+            .uri(format!("{}/set-txt", self.challenge_management_url()))
+            .header(CONTENT_TYPE, "application/json")
+            .body(Full::from(serde_json::to_vec(&AddDns01Request {
+                host,
+                value,
+            })?))?;
+
+        self.client.request(req).await?;
+
+        Ok(())
+    }
+
+    async fn complete_order<'a>(
+        &'a self,
+        account: &mut Account,
+        identifiers: Vec<Identifier>,
+        chal_type: ChallengeType,
+        provision_fn: impl Fn(
+            String,
+            &Challenge,
+            KeyAuthorization,
+        ) -> Pin<
+            Box<dyn Future<Output = Result<(), Box<dyn StdError + 'static>>> + Send + 'a>,
+        >,
+    ) -> Result<(Vec<String>, Vec<CertificateDer<'static>>), Box<dyn StdError + 'static>> {
+        debug!(?identifiers, "creating order");
+        let mut order = account
+            .new_order(&NewOrder {
+                identifiers: &identifiers,
+            })
+            .await?;
+        info!(order_url = order.url(), "created order");
+
+        let authorizations = order.authorizations().await?;
+        let mut challenges = Vec::with_capacity(authorizations.len());
+        let mut names = Vec::with_capacity(authorizations.len());
+
+        // Collect up the relevant challenges, provisioning the expected responses as we go.
+        for authz in &authorizations {
+            match authz.status {
+                AuthorizationStatus::Pending => {}
+                AuthorizationStatus::Valid => continue,
+                _ => unreachable!("unexpected authz state: {:?}", authz.status),
+            }
+
+            let challenge = authz
+                .challenges
+                .iter()
+                .find(|c| c.r#type == chal_type)
+                .ok_or(format!("no {chal_type:?} challenge found"))?;
+
+            let Identifier::Dns(identifier) = &authz.identifier;
+
+            provision_fn(
+                identifier.to_owned(),
+                challenge,
+                order.key_authorization(challenge),
+            )
+            .await?;
+
+            challenges.push((identifier, &challenge.url));
+            names.push(identifier.clone());
+        }
+
+        // Tell the CA we have provisioned the response for each challenge.
+        for (_, url) in &challenges {
+            debug!(challenge_url = url, "marking challenge ready");
+            order.set_challenge_ready(url).await?;
+        }
+
+        // Poll until the order is ready.
+        poll_until_ready(&mut order).await?;
+
+        // Issue a certificate for the names and test the chain validates to the issuer root.
+        let cert_chain = self.certificate(&mut order, &names).await?;
+
+        Ok((names, cert_chain))
     }
 
     /// Issue a certificate for the given order, and identifiers.
