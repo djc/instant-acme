@@ -50,9 +50,9 @@ name = "provision"
 required-features = ["hyper-rustls"]
 
 # Pebble integration test.
-# Disabled by default because it requires pebble & pebble-challtestsrv.
+# Ignored by default because it requires pebble & pebble-challtestsrv.
 # Run with:
-#  PEBBLE=path/to/pebble CHALLTESTSRV=path/to/pebble-challtestsrv cargo test --test pebble
+#  PEBBLE=path/to/pebble CHALLTESTSRV=path/to/pebble-challtestsrv cargo test -- --ignored
 [[test]]
 name = "pebble"
 required-features = ["hyper-rustls"]
