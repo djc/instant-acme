@@ -92,9 +92,9 @@ impl PebbleEnvironment {
         trace!(config = config_json, "using static config");
         fs::write(&config_file, config_json)?;
 
-        let pebble_path = env::var("PEBBLE").unwrap_or("./pebble".to_owned());
+        let pebble_path = env::var("PEBBLE").unwrap_or_else(|_| "./pebble".to_owned());
         let challtestsrv_path =
-            env::var("CHALLTESTSRV").unwrap_or("./pebble-challtestsrv".to_owned());
+            env::var("CHALLTESTSRV").unwrap_or_else(|_| "./pebble-challtestsrv".to_owned());
 
         let pebble = Subprocess::new(
             Command::new(&pebble_path)
