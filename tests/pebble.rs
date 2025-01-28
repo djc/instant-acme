@@ -83,6 +83,30 @@ async fn dns_01() -> Result<(), Box<dyn StdError>> {
     verify_cert(&pebble.issuer_roots().await?, identifiers, cert_chain)
 }
 
+/// Ignored by default because it requires `pebble` and `pebble-challtestsrv` binaries.
+///
+/// See documentation for [`PebbleEnvironment`].
+#[tokio::test]
+#[ignore]
+async fn tls_alpn_01() -> Result<(), Box<dyn StdError>> {
+    let _ = tracing_subscriber::registry()
+        .with(fmt::layer())
+        .with(EnvFilter::from_default_env())
+        .try_init();
+
+    let pebble = pebble_env::PebbleGuard::new();
+    let pebble = pebble.get();
+    let pebble = pebble.as_ref().unwrap();
+    wait_for_server(DEFAULT_CONFIG.listen_address).await;
+
+    // Create a test account with the Pebble CA.
+    let mut account = pebble.new_account().await?;
+
+    // Issue a certificate w/ DNS-01 challenge.
+    let (identifiers, cert_chain) = pebble.test_alpn1(&mut account).await?;
+    verify_cert(&pebble.issuer_roots().await?, identifiers, cert_chain)
+}
+
 fn verify_cert(
     issuer_roots: &RootCertStore,
     identifiers: Vec<String>,
@@ -310,6 +334,63 @@ impl PebbleEnvironment {
             .body(Full::from(serde_json::to_vec(&AddDns01Request {
                 host,
                 value,
+            })?))?;
+
+        self.client.request(req).await?;
+
+        Ok(())
+    }
+
+    async fn test_alpn1<'a>(
+        &'a self,
+        account: &mut Account,
+    ) -> Result<(Vec<String>, Vec<CertificateDer<'static>>), Box<dyn StdError + 'static>> {
+        info!("testing TLS-ALPN-01 challenge");
+
+        self.complete_order(
+            account,
+            vec![Identifier::Dns("alpn.example.com".to_owned())],
+            ChallengeType::TlsAlpn01,
+            |identifier, _challenge, key_auth| {
+                Box::pin(async move {
+                    debug!(
+                        identifier,
+                        key_auth = key_auth.as_str(),
+                        "provisioning TLS-ALPN-01 response",
+                    );
+                    // Note: pebble-challtestsrv wants to hash the key auth itself, so we
+                    // don't use key_auth.digest() here.
+                    self.add_tls_alpn_response(&identifier, &key_auth.as_str())
+                        .await
+                })
+            },
+        )
+        .await
+    }
+
+    /// Provision a TLS-ALPN-01 challenge response for the given token and key authorization
+    /// value.
+    ///
+    /// The Pebble challenge test server will be configured to respond to TLS-ALPN-01 challenge
+    /// requests for the provided host by returning digest of the key authorization value.
+    async fn add_tls_alpn_response(
+        &self,
+        host: &str,
+        key_auth: &str,
+    ) -> Result<(), Box<dyn StdError>> {
+        #[derive(Serialize)]
+        struct AddDns01Request<'a> {
+            host: &'a str,
+            content: &'a str,
+        }
+
+        let req = Request::builder()
+            .method(Method::POST)
+            .uri(format!("{}/add-tlsalpn01", self.challenge_management_url()))
+            .header(CONTENT_TYPE, "application/json")
+            .body(Full::from(serde_json::to_vec(&AddDns01Request {
+                host,
+                content: key_auth,
             })?))?;
 
         self.client.request(req).await?;
