@@ -113,7 +113,7 @@ impl PebbleEnvironment {
                 .arg("tests/testdata/server.key"),
         )?;
 
-        wait_for_server(&config.pebble.listen_address).await;
+        wait_for_server(config.pebble.listen_address).await;
 
         Ok(Self {
             config,
@@ -152,7 +152,7 @@ impl PebbleEnvironment {
                 .challenges
                 .iter()
                 .find(|c| c.r#type == ChallengeType::Http01)
-                .ok_or_else(|| "no http01 challenge found")?;
+                .ok_or("no http01 challenge found")?;
 
             let Identifier::Dns(identifier) = &authz.identifier;
 
@@ -187,15 +187,15 @@ impl PebbleEnvironment {
     ///
     /// The Pebble challenge test server will be configured to respond to HTTP-01 challenge
     /// requests for the provided token by returning the expected key auth.
-    async fn add_http01_response<'token, 'key_auth>(
+    async fn add_http01_response(
         &self,
-        token: &'token str,
-        key_auth: &'key_auth str,
+        token: &str,
+        key_auth: &str,
     ) -> Result<(), Box<dyn StdError>> {
         #[derive(Serialize)]
-        struct AddHttp01Request<'token, 'key_auth> {
-            token: &'token str,
-            content: &'key_auth str,
+        struct AddHttp01Request<'a> {
+            token: &'a str,
+            content: &'a str,
         }
 
         let req = Request::builder()
