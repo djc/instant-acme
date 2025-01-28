@@ -414,13 +414,10 @@ struct Config {
     profiles: &'static [(&'static str, Profile)],
 }
 
-fn serialize_profiles<S>(
+fn serialize_profiles<S: Serializer>(
     profiles: &'static [(&'static str, Profile)],
     serializer: S,
-) -> Result<S::Ok, S::Error>
-where
-    S: Serializer,
-{
+) -> Result<S::Ok, S::Error> {
     let mut map = serializer.serialize_map(Some(profiles.len()))?;
     for (k, v) in profiles {
         map.serialize_entry(k, v)?;
