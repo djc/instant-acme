@@ -55,6 +55,4 @@ required-features = ["hyper-rustls"]
 #  PEBBLE=path/to/pebble CHALLTESTSRV=path/to/pebble-challtestsrv cargo test --test pebble
 [[test]]
 name = "pebble"
-harness = false
-test = false
 required-features = ["hyper-rustls"]

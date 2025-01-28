@@ -33,8 +33,12 @@ use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::util::SubscriberInitExt;
 use tracing_subscriber::{fmt, EnvFilter};
 
-#[tokio::main]
-async fn main() -> Result<(), Box<dyn StdError>> {
+/// Ignored by default because it requires `pebble` and `pebble-challtestsrv` binaries.
+///
+/// See documentation for [`PebbleEnvironment`].
+#[tokio::test]
+#[ignore]
+async fn http_01() -> Result<(), Box<dyn StdError>> {
     tracing_subscriber::registry()
         .with(fmt::layer())
         .with(EnvFilter::from_default_env())
