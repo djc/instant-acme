@@ -87,8 +87,13 @@ impl PebbleEnvironment {
     ///
     /// Returns only once the Pebble CA server interface is responding.
     async fn new(config: &'static Config) -> io::Result<Self> {
+        #[derive(Clone, Serialize)]
+        struct ConfigWrapper {
+            pebble: &'static Config,
+        }
+
         let config_file = NamedTempFile::new()?;
-        let config_json = serde_json::to_string_pretty(&config)?;
+        let config_json = serde_json::to_string_pretty(&ConfigWrapper { pebble: config })?;
         trace!(config = config_json, "using static config");
         fs::write(&config_file, config_json)?;
 
@@ -113,7 +118,7 @@ impl PebbleEnvironment {
                 .arg("tests/testdata/server.key"),
         )?;
 
-        wait_for_server(config.pebble.listen_address).await;
+        wait_for_server(config.listen_address).await;
 
         Ok(Self {
             config,
@@ -328,11 +333,11 @@ impl PebbleEnvironment {
     }
 
     fn pebble_management_url(&self) -> String {
-        format!("https://{}", &self.config.pebble.management_listen_address)
+        format!("https://{}", &self.config.management_listen_address)
     }
 
     fn directory_url(&self) -> String {
-        format!("https://{}/dir", &self.config.pebble.listen_address)
+        format!("https://{}/dir", &self.config.listen_address)
     }
 }
 
@@ -394,13 +399,8 @@ async fn wait_for_server(addr: &str) {
 }
 
 #[derive(Clone, Serialize)]
-struct Config {
-    pebble: PebbleConfig,
-}
-
-#[derive(Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
-struct PebbleConfig {
+struct Config {
     listen_address: &'static str,
     management_listen_address: &'static str,
     certificate: &'static str,
@@ -468,32 +468,30 @@ impl Drop for Subprocess {
 }
 
 const DEFAULT_CONFIG: Config = Config {
-    pebble: PebbleConfig {
-        listen_address: "127.0.0.1:14000",
-        management_listen_address: "127.0.0.1:15000",
-        certificate: "tests/testdata/server.pem",
-        private_key: "tests/testdata/server.key",
-        http_port: 5002,
-        tls_port: 5001,
-        ocsp_responder_url: "",
-        external_account_binding_required: false,
-        domain_blocklist: &["blocked-domain.example"],
-        retry_after: RetryConfig { authz: 3, order: 5 },
-        profiles: &[
-            (
-                "default",
-                Profile {
-                    description: "The profile you know and love",
-                    validity_period_seconds: 7776000,
-                },
-            ),
-            (
-                "shortlived",
-                Profile {
-                    description: "A short-lived cert profile, without actual enforcement",
-                    validity_period_seconds: 518400,
-                },
-            ),
-        ],
-    },
+    listen_address: "127.0.0.1:14000",
+    management_listen_address: "127.0.0.1:15000",
+    certificate: "tests/testdata/server.pem",
+    private_key: "tests/testdata/server.key",
+    http_port: 5002,
+    tls_port: 5001,
+    ocsp_responder_url: "",
+    external_account_binding_required: false,
+    domain_blocklist: &["blocked-domain.example"],
+    retry_after: RetryConfig { authz: 3, order: 5 },
+    profiles: &[
+        (
+            "default",
+            Profile {
+                description: "The profile you know and love",
+                validity_period_seconds: 7776000,
+            },
+        ),
+        (
+            "shortlived",
+            Profile {
+                description: "A short-lived cert profile, without actual enforcement",
+                validity_period_seconds: 518400,
+            },
+        ),
+    ],
 };
