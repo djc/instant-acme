@@ -58,7 +58,7 @@ async fn http_01() -> Result<(), Box<dyn StdError>> {
         },
         &pebble.directory_url(),
         None,
-        Box::new(pebble.http_client()),
+        Box::new(pebble.client.clone()),
     )
     .await?;
     info!(account_id = account.id(), "created ACME account");
@@ -81,6 +81,7 @@ struct PebbleEnvironment {
     pebble: Subprocess,
     #[allow(dead_code)] // Held for the lifetime of the environment.
     challtestsrv: Subprocess,
+    client: HyperClient<hyper_rustls::HttpsConnector<HttpConnector>, Full<Bytes>>,
 }
 
 impl PebbleEnvironment {
@@ -124,11 +125,33 @@ impl PebbleEnvironment {
 
         wait_for_server(config.listen_address).await;
 
+        // Trust the Pebble management interface root CA.
+        let mut roots = RootCertStore::empty();
+        roots.add_parsable_certificates(
+            CertificateDer::pem_file_iter("tests/testdata/ca.pem")
+                .unwrap()
+                .map(|result| result.unwrap()),
+        );
+
+        let client = HyperClient::builder(TokioExecutor::new()).build(
+            hyper_rustls::HttpsConnectorBuilder::new()
+                .with_tls_config(
+                    rustls::ClientConfig::builder()
+                        .with_root_certificates(roots)
+                        .with_no_client_auth(),
+                )
+                .https_or_http()
+                .enable_http1()
+                .enable_http2()
+                .build(),
+        );
+
         Ok(Self {
             config,
             config_file,
             pebble,
             challtestsrv,
+            client,
         })
     }
 
@@ -216,7 +239,7 @@ impl PebbleEnvironment {
                 content: key_auth,
             })?))?;
 
-        self.http_client().request(req).await?;
+        self.client.request(req).await?;
 
         Ok(())
     }
@@ -283,15 +306,13 @@ impl PebbleEnvironment {
     /// time that Pebble starts up. This is the issuer that signs the randomly generated
     /// intermediate certificate returned as part of ACME issued certificate chains.
     async fn issuer_roots(&self) -> Result<RootCertStore, Box<dyn StdError>> {
-        let client = self.http_client();
-
         let req = Request::builder()
             .method(Method::GET)
             .uri(format!("{}/roots/0", self.pebble_management_url()))
             .header(CONTENT_TYPE, "application/json")
             .body(Full::default())?;
 
-        let resp = client.request(req).await?;
+        let resp = self.client.request(req).await?;
         if resp.status() != 200 {
             return Err(format!("unexpected /roots/0 response status: {}", resp.status()).into());
         }
@@ -305,31 +326,6 @@ impl PebbleEnvironment {
         roots.add_parsable_certificates(vec![root]);
         assert_eq!(roots.len(), 1);
         Ok(roots)
-    }
-
-    /// Return an HTTP client configured to trust the Pebble management interface root CA.
-    ///
-    /// Note: this is distinct from the CA issuer.
-    fn http_client(&self) -> HyperClient<hyper_rustls::HttpsConnector<HttpConnector>, Full<Bytes>> {
-        let mut roots = RootCertStore::empty();
-        roots.add_parsable_certificates(
-            CertificateDer::pem_file_iter("tests/testdata/ca.pem")
-                .unwrap()
-                .map(|result| result.unwrap()),
-        );
-
-        HyperClient::builder(TokioExecutor::new()).build(
-            hyper_rustls::HttpsConnectorBuilder::new()
-                .with_tls_config(
-                    rustls::ClientConfig::builder()
-                        .with_root_certificates(roots)
-                        .with_no_client_auth(),
-                )
-                .https_or_http()
-                .enable_http1()
-                .enable_http2()
-                .build(),
-        )
     }
 
     fn challenge_management_url(&self) -> &str {
