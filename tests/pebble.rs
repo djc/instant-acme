@@ -42,7 +42,7 @@ async fn main() -> Result<(), Box<dyn StdError>> {
 
     // Spawn a Pebble CA and a challenge response server.
     debug!("starting Pebble CA environment");
-    let pebble = PebbleEnvironment::new(DEFAULT_CONFIG.clone()).await?;
+    let pebble = PebbleEnvironment::new(&DEFAULT_CONFIG).await?;
 
     // Create a test account with the Pebble CA.
     debug!("creating test account");
@@ -70,7 +70,7 @@ async fn main() -> Result<(), Box<dyn StdError>> {
 /// Subprocesses are torn down cleanly on drop to avoid leaving
 /// stray child processes.
 struct PebbleEnvironment {
-    config: Config,
+    config: &'static Config,
     #[allow(dead_code)] // Held for the lifetime of the environment.
     config_file: NamedTempFile,
     #[allow(dead_code)] // Held for the lifetime of the environment.
@@ -86,7 +86,7 @@ impl PebbleEnvironment {
     /// respectively. If unset "./pebble" and "./pebble-challtestsrv" are used.
     ///
     /// Returns only once the Pebble CA server interface is responding.
-    async fn new(config: Config) -> io::Result<Self> {
+    async fn new(config: &'static Config) -> io::Result<Self> {
         let config_file = NamedTempFile::new()?;
         let config_json = serde_json::to_string_pretty(&config)?;
         trace!(config = config_json, "using static config");
