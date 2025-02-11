@@ -51,19 +51,7 @@ async fn http_01() -> Result<(), Box<dyn StdError>> {
     let pebble = EnvironmentConfig::default().run().await?;
 
     // Create a test account with the Pebble CA.
-    debug!("creating test account");
-    let (mut account, _) = Account::create_with_http(
-        &NewAccount {
-            contact: &[],
-            terms_of_service_agreed: true,
-            only_return_existing: false,
-        },
-        &pebble.directory_url(),
-        None,
-        Box::new(pebble.client.clone()),
-    )
-    .await?;
-    info!(account_id = account.id(), "created ACME account");
+    let mut account = pebble.new_account().await?;
 
     // Issue a certificate w/ HTTP-01 challenge.
     let (identifiers, cert_chain) = pebble.test_http1(&mut account).await?;
@@ -170,6 +158,24 @@ impl Environment {
         let cert_chain = self.certificate(&mut order, &names).await?;
 
         Ok((names, cert_chain))
+    }
+
+    /// Create a new `Account` with the ACME server.
+    async fn new_account(&self) -> Result<Account, Box<dyn StdError>> {
+        debug!("creating test account");
+        let (account, _) = Account::create_with_http(
+            &NewAccount {
+                contact: &[],
+                terms_of_service_agreed: true,
+                only_return_existing: false,
+            },
+            &self.directory_url(),
+            None,
+            Box::new(self.client.clone()),
+        )
+        .await?;
+        info!(account_id = account.id(), "created ACME account");
+        Ok(account)
     }
 
     /// Provision an HTTP-01 challenge response for the given token and key authorization.
