@@ -20,8 +20,11 @@ fn main() -> anyhow::Result<()> {
     let ee_key = KeyPair::generate()?;
     fs::write("tests/testdata/server.key", ee_key.serialize_pem())?;
 
-    let mut ee_params =
-        rcgen::CertificateParams::new(["localhost".to_owned(), "127.0.0.1".to_owned()])?;
+    let mut ee_params = rcgen::CertificateParams::new([
+        "localhost".to_owned(),
+        "127.0.0.1".to_owned(),
+        "::1".to_owned(),
+    ])?;
     ee_params.distinguished_name = DistinguishedName::new();
     let ee_cert = ee_params.signed_by(&ee_key, &ca_cert, &ca_key)?;
     fs::write("tests/testdata/server.pem", ee_cert.pem())?;
