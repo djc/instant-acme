@@ -41,10 +41,10 @@ use tracing_subscriber::{fmt, EnvFilter};
 #[tokio::test]
 #[ignore]
 async fn http_01() -> Result<(), Box<dyn StdError>> {
-    tracing_subscriber::registry()
+    let _ = tracing_subscriber::registry()
         .with(fmt::layer())
         .with(EnvFilter::from_default_env())
-        .init();
+        .try_init();
 
     // Spawn a Pebble CA and a challenge response server.
     debug!("starting Pebble CA environment");
