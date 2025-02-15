@@ -63,6 +63,27 @@ async fn http_01() -> Result<(), Box<dyn StdError>> {
     pebble.verify_cert(identifiers, cert_chain).await
 }
 
+#[tokio::test]
+#[ignore]
+async fn dns_01() -> Result<(), Box<dyn StdError>> {
+    let _ = tracing_subscriber::registry()
+        .with(fmt::layer())
+        .with(EnvFilter::from_default_env())
+        .try_init();
+
+    // Spawn a Pebble CA and a challenge response server.
+    debug!("starting Pebble CA environment");
+    let pebble = EnvironmentConfig::default().run().await?;
+
+    // Create a test account with the Pebble CA.
+    let mut account = pebble.new_account().await?;
+
+    // Issue a certificate w/ DNS-01 challenge.
+    let identifiers = &["dns01.example.com"];
+    let cert_chain = pebble.test_dns1(&mut account, identifiers).await?;
+    pebble.verify_cert(identifiers, cert_chain).await
+}
+
 /// A test environment running Pebble and a challenge test server.
 ///
 /// Subprocesses are torn down cleanly on drop to avoid leaving
@@ -86,6 +107,16 @@ impl Environment {
     ) -> Result<Vec<CertificateDer<'static>>, Box<dyn StdError>> {
         info!("testing HTTP-01 challenge");
         self.complete_order(account, identifiers, ChallengeType::Http01, &Http01 {})
+            .await
+    }
+
+    async fn test_dns1<'a>(
+        &'a self,
+        account: &mut Account,
+        identifiers: &[&'static str],
+    ) -> Result<Vec<CertificateDer<'static>>, Box<dyn StdError + 'static>> {
+        info!("testing DNS-01 challenge");
+        self.complete_order(account, identifiers, ChallengeType::Dns01, &Dns01 {})
             .await
     }
 
@@ -311,6 +342,42 @@ impl AuthorizationMethod for Http01 {
             .body(Full::from(serde_json::to_vec(&AddHttp01Request {
                 token: challenge.token.as_str(),
                 content: key_auth.as_str(),
+            })?))?;
+
+        env.client.request(req).await?;
+
+        Ok(())
+    }
+}
+
+struct Dns01 {}
+
+#[async_trait]
+impl AuthorizationMethod for Dns01 {
+    async fn provision(
+        &self,
+        env: &Environment,
+        identifier: String,
+        _challenge: &Challenge,
+        key_auth: &KeyAuthorization,
+    ) -> Result<(), Box<dyn StdError>> {
+        let host = &format!("_acme-challenge.{}.", identifier);
+        let value = &key_auth.dns_value();
+        debug!(host, value, "provisioning DNS-01 response",);
+
+        #[derive(Serialize)]
+        struct AddDns01Request<'a> {
+            host: &'a str,
+            value: &'a str,
+        }
+
+        let req = Request::builder()
+            .method(Method::POST)
+            .uri(format!("{}/set-txt", env.challenge_management_url()))
+            .header(CONTENT_TYPE, "application/json")
+            .body(Full::from(serde_json::to_vec(&AddDns01Request {
+                host,
+                value,
             })?))?;
 
         env.client.request(req).await?;
