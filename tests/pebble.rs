@@ -7,6 +7,7 @@ use std::sync::atomic::{AtomicU16, Ordering};
 use std::time::Duration;
 use std::{env, fs};
 
+use async_trait::async_trait;
 use bytes::{Buf, Bytes};
 use http::header::CONTENT_TYPE;
 use http::{Method, Request};
@@ -15,8 +16,8 @@ use hyper_util::client::legacy::connect::HttpConnector;
 use hyper_util::client::legacy::Client as HyperClient;
 use hyper_util::rt::TokioExecutor;
 use instant_acme::{
-    Account, AuthorizationStatus, ChallengeType, Identifier, NewAccount, NewOrder, Order,
-    OrderStatus,
+    Account, AuthorizationStatus, Challenge, ChallengeType, Identifier, KeyAuthorization,
+    NewAccount, NewOrder, Order, OrderStatus,
 };
 use rcgen::{CertificateParams, DistinguishedName, KeyPair};
 use rustls::client::{verify_server_cert_signed_by_trust_anchor, verify_server_name};
@@ -82,14 +83,47 @@ impl Environment {
         identifiers: &[&'static str],
     ) -> Result<Vec<CertificateDer<'static>>, Box<dyn StdError>> {
         info!("testing HTTP-01 challenge");
+        self.complete_order(account, identifiers, ChallengeType::Http01, &Http01 {})
+            .await
+    }
 
+    /// Create a new `Account` with the ACME server.
+    async fn new_account(&self) -> Result<Account, Box<dyn StdError>> {
+        debug!("creating test account");
+        let (account, _) = Account::create_with_http(
+            &NewAccount {
+                contact: &[],
+                terms_of_service_agreed: true,
+                only_return_existing: false,
+            },
+            &self.directory_url(),
+            None,
+            Box::new(self.client.clone()),
+        )
+        .await?;
+        info!(account_id = account.id(), "created ACME account");
+        Ok(account)
+    }
+
+    /// Create and finalize an ACME order for the given `Account` and `Identifier`s using
+    /// the specified `ChallengeType`.
+    ///
+    /// The `provision_fn` will be invoked to set up the appropriate challenge response
+    /// based on the `Challenge`/`KeyAuthorization`.
+    ///
+    /// Returns the issued certificate chain unless an error occurs.
+    async fn complete_order<'a>(
+        &'a self,
+        account: &mut Account,
+        identifiers: &[&'static str],
+        chal_type: ChallengeType,
+        auth_method: &'a dyn AuthorizationMethod,
+    ) -> Result<Vec<CertificateDer<'static>>, Box<dyn StdError + 'static>> {
         let identifiers = identifiers
             .iter()
             .map(|id| Identifier::Dns(id.to_string()))
             .collect::<Vec<_>>();
         debug!(?identifiers, "creating order");
-
-        // Create an order.
         let mut order = account
             .new_order(&NewOrder {
                 identifiers: &identifiers,
@@ -112,19 +146,18 @@ impl Environment {
             let challenge = authz
                 .challenges
                 .iter()
-                .find(|c| c.r#type == ChallengeType::Http01)
-                .ok_or("no http01 challenge found")?;
+                .find(|c| c.r#type == chal_type)
+                .ok_or(format!("no {chal_type:?} challenge found"))?;
 
             let Identifier::Dns(identifier) = &authz.identifier;
 
-            // Provision the HTTP-01 challenge response with the Pebble challenge test server.
-            let key_auth = order.key_authorization(challenge);
-            debug!(
-                token = challenge.token,
-                key_auth = key_auth.as_str(),
-                "provisioning HTTP-01 response",
-            );
-            self.add_http01_response(&challenge.token, key_auth.as_str())
+            auth_method
+                .provision(
+                    self,
+                    identifier.to_owned(),
+                    challenge,
+                    &order.key_authorization(challenge),
+                )
                 .await?;
 
             challenges.push((identifier, &challenge.url));
@@ -141,56 +174,7 @@ impl Environment {
         poll_until_ready(&mut order).await?;
 
         // Issue a certificate for the names and test the chain validates to the issuer root.
-        let cert_chain = self.certificate(&mut order, &names).await?;
-
-        Ok(cert_chain)
-    }
-
-    /// Create a new `Account` with the ACME server.
-    async fn new_account(&self) -> Result<Account, Box<dyn StdError>> {
-        debug!("creating test account");
-        let (account, _) = Account::create_with_http(
-            &NewAccount {
-                contact: &[],
-                terms_of_service_agreed: true,
-                only_return_existing: false,
-            },
-            &self.directory_url(),
-            None,
-            Box::new(self.client.clone()),
-        )
-        .await?;
-        info!(account_id = account.id(), "created ACME account");
-        Ok(account)
-    }
-
-    /// Provision an HTTP-01 challenge response for the given token and key authorization.
-    ///
-    /// The Pebble challenge test server will be configured to respond to HTTP-01 challenge
-    /// requests for the provided token by returning the expected key auth.
-    async fn add_http01_response(
-        &self,
-        token: &str,
-        key_auth: &str,
-    ) -> Result<(), Box<dyn StdError>> {
-        #[derive(Serialize)]
-        struct AddHttp01Request<'a> {
-            token: &'a str,
-            content: &'a str,
-        }
-
-        let req = Request::builder()
-            .method(Method::POST)
-            .uri(format!("{}/add-http01", self.challenge_management_url()))
-            .header(CONTENT_TYPE, "application/json")
-            .body(Full::from(serde_json::to_vec(&AddHttp01Request {
-                token,
-                content: key_auth,
-            })?))?;
-
-        self.client.request(req).await?;
-
-        Ok(())
+        self.certificate(&mut order, &names).await
     }
 
     /// Issue a certificate for the given order, and identifiers.
@@ -293,6 +277,57 @@ impl Environment {
     fn directory_url(&self) -> String {
         format!("https://{}/dir", &self.config.pebble.listen_address)
     }
+}
+
+struct Http01 {}
+
+#[async_trait]
+impl AuthorizationMethod for Http01 {
+    async fn provision(
+        &self,
+        env: &Environment,
+        _identifier: String,
+        challenge: &Challenge,
+        key_auth: &KeyAuthorization,
+    ) -> Result<(), Box<dyn StdError>> {
+        debug!(
+            token = challenge.token,
+            key_auth = key_auth.as_str(),
+            "provisioning HTTP-01 response",
+        );
+
+        #[derive(Serialize)]
+        struct AddHttp01Request<'a> {
+            token: &'a str,
+            content: &'a str,
+        }
+
+        let req = Request::builder()
+            .method(Method::POST)
+            .uri(format!("{}/add-http01", env.challenge_management_url()))
+            .header(CONTENT_TYPE, "application/json")
+            .body(Full::from(serde_json::to_vec(&AddHttp01Request {
+                token: challenge.token.as_str(),
+                content: key_auth.as_str(),
+            })?))?;
+
+        env.client.request(req).await?;
+
+        Ok(())
+    }
+}
+
+/// A trait for something able to provision a challenge response with an external system
+#[async_trait]
+trait AuthorizationMethod {
+    /// Provision a challenge response for the given identifier, challenge, and key auth.
+    async fn provision(
+        &self,
+        env: &Environment,
+        identifier: String,
+        challenge: &Challenge,
+        key_auth: &KeyAuthorization,
+    ) -> Result<(), Box<dyn StdError>>;
 }
 
 /// Poll the given order until it is ready, waiting longer between each attempt up to
