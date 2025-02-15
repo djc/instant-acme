@@ -47,7 +47,7 @@ async fn http_01() -> Result<(), Box<dyn StdError>> {
 
     // Spawn a Pebble CA and a challenge response server.
     debug!("starting Pebble CA environment");
-    let pebble = PebbleEnvironment::new(Config::default()).await?;
+    let pebble = PebbleEnvironment::new(PebbleConfig::default()).await?;
 
     // Create a test account with the Pebble CA.
     debug!("creating test account");
@@ -95,7 +95,7 @@ async fn http_01() -> Result<(), Box<dyn StdError>> {
 /// Subprocesses are torn down cleanly on drop to avoid leaving
 /// stray child processes.
 struct PebbleEnvironment {
-    config: Config,
+    config: PebbleConfig,
     #[allow(dead_code)] // Held for the lifetime of the environment.
     config_file: NamedTempFile,
     #[allow(dead_code)] // Held for the lifetime of the environment.
@@ -112,10 +112,10 @@ impl PebbleEnvironment {
     /// respectively. If unset "./pebble" and "./pebble-challtestsrv" are used.
     ///
     /// Returns only once the Pebble CA server interface is responding.
-    async fn new(config: Config) -> io::Result<Self> {
+    async fn new(config: PebbleConfig) -> io::Result<Self> {
         #[derive(Clone, Serialize)]
         struct ConfigWrapper<'a> {
-            pebble: &'a Config,
+            pebble: &'a PebbleConfig,
         }
 
         let config_file = NamedTempFile::new()?;
@@ -403,7 +403,7 @@ async fn wait_for_server(addr: &str) {
 
 #[derive(Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
-struct Config {
+struct PebbleConfig {
     listen_address: String,
     management_listen_address: String,
     certificate: &'static Path,
@@ -417,7 +417,7 @@ struct Config {
     profiles: HashMap<&'static str, Profile>,
 }
 
-impl Default for Config {
+impl Default for PebbleConfig {
     fn default() -> Self {
         Self {
             listen_address: "[::1]:14000".to_string(),
