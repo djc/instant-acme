@@ -47,7 +47,7 @@ async fn http_01() -> Result<(), Box<dyn StdError>> {
 
     // Spawn a Pebble CA and a challenge response server.
     debug!("starting Pebble CA environment");
-    let pebble = Environment::new(PebbleConfig::default()).await?;
+    let pebble = Environment::new(EnvironmentConfig::default()).await?;
 
     // Create a test account with the Pebble CA.
     debug!("creating test account");
@@ -95,7 +95,7 @@ async fn http_01() -> Result<(), Box<dyn StdError>> {
 /// Subprocesses are torn down cleanly on drop to avoid leaving
 /// stray child processes.
 struct Environment {
-    config: PebbleConfig,
+    config: EnvironmentConfig,
     #[allow(dead_code)] // Held for the lifetime of the environment.
     config_file: NamedTempFile,
     #[allow(dead_code)] // Held for the lifetime of the environment.
@@ -112,14 +112,16 @@ impl Environment {
     /// respectively. If unset "./pebble" and "./pebble-challtestsrv" are used.
     ///
     /// Returns only once the Pebble CA server interface is responding.
-    async fn new(config: PebbleConfig) -> io::Result<Self> {
+    async fn new(config: EnvironmentConfig) -> io::Result<Self> {
         #[derive(Clone, Serialize)]
         struct ConfigWrapper<'a> {
             pebble: &'a PebbleConfig,
         }
 
         let config_file = NamedTempFile::new()?;
-        let config_json = serde_json::to_string_pretty(&ConfigWrapper { pebble: &config })?;
+        let config_json = serde_json::to_string_pretty(&ConfigWrapper {
+            pebble: &config.pebble,
+        })?;
         trace!(config = config_json, "using static config");
         fs::write(&config_file, config_json)?;
 
@@ -132,19 +134,29 @@ impl Environment {
                 .arg("-config")
                 .arg(config_file.path())
                 .arg("-dnsserver")
-                .arg("127.0.0.1:8053") // Matched to default -dns01 addr for pebble-challtestsrv.
+                .arg(format!("[::1]:{}", config.dns_port))
                 .arg("-strict"),
         )?;
 
+        // Note: we bind `[::1]` for the challenge test server because by default it will
+        //  return both A and AAAA records.
         let challtestsrv = Subprocess::new(
             Command::new(&challtestsrv_path)
-                .arg("-doh-cert")
-                .arg("tests/testdata/server.pem")
-                .arg("-doh-cert-key")
-                .arg("tests/testdata/server.key"),
+                .arg("-management")
+                .arg(format!("[::1]:{}", config.challtestsrv_port))
+                .arg("-dns01")
+                .arg(format!("[::1]:{}", config.dns_port))
+                .arg("-http01")
+                .arg(format!("[::1]:{}", config.pebble.http_port))
+                .arg("-tlsalpn01")
+                .arg(format!("[::1]:{}", config.pebble.tls_port))
+                .arg("-https01")
+                .arg("") // Disable HTTP-01 over https:// redirect challenges.
+                .arg("-doh")
+                .arg(""), // Disable DoH interface.
         )?;
 
-        wait_for_server(&config.listen_address).await;
+        wait_for_server(&config.pebble.listen_address).await;
 
         // Trust the Pebble management interface root CA.
         let mut roots = RootCertStore::empty();
@@ -314,7 +326,7 @@ impl Environment {
             .method(Method::GET)
             .uri(format!(
                 "https://{}/roots/0",
-                &self.config.management_listen_address
+                &self.config.pebble.management_listen_address
             ))
             .header(CONTENT_TYPE, "application/json")
             .body(Full::default())?;
@@ -335,12 +347,12 @@ impl Environment {
         Ok(roots)
     }
 
-    fn challenge_management_url(&self) -> &str {
-        "http://[::1]:8055"
+    fn challenge_management_url(&self) -> String {
+        format!("http://[::1]:{}", self.config.challtestsrv_port)
     }
 
     fn directory_url(&self) -> String {
-        format!("https://{}/dir", &self.config.listen_address)
+        format!("https://{}/dir", &self.config.pebble.listen_address)
     }
 }
 
@@ -399,6 +411,23 @@ async fn wait_for_server(addr: &str) {
         sleep(Duration::from_millis(i * 100)).await
     }
     panic!("failed to connect to {addr:?} after 10 tries");
+}
+
+/// Configuration for running a test [`Environment`] with unique per-environment ports.
+struct EnvironmentConfig {
+    pebble: PebbleConfig,
+    dns_port: u16,
+    challtestsrv_port: u16,
+}
+
+impl Default for EnvironmentConfig {
+    fn default() -> Self {
+        Self {
+            pebble: PebbleConfig::default(),
+            dns_port: 8053,
+            challtestsrv_port: 8055,
+        }
+    }
 }
 
 #[derive(Clone, Serialize)]
