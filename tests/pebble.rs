@@ -1,3 +1,8 @@
+//! Note: tests in the file are ignored by default because they requires `pebble` and
+//! `pebble-challtestsrv` binaries.
+//!
+//! See documentation for [`PebbleEnvironment`].
+
 use std::collections::HashMap;
 use std::error::Error as StdError;
 use std::io::{self, Read};
@@ -36,9 +41,6 @@ use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::util::SubscriberInitExt;
 use tracing_subscriber::{fmt, EnvFilter};
 
-/// Ignored by default because it requires `pebble` and `pebble-challtestsrv` binaries.
-///
-/// See documentation for [`Environment`].
 #[tokio::test]
 #[ignore]
 async fn http_01() -> Result<(), Box<dyn StdError>> {
