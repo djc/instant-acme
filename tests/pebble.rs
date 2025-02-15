@@ -1,5 +1,7 @@
+use std::collections::HashMap;
 use std::error::Error as StdError;
 use std::io::{self, Read};
+use std::path::Path;
 use std::process::{Child, Command};
 use std::time::Duration;
 use std::{env, fs};
@@ -23,7 +25,6 @@ use rustls::pki_types::{CertificateDer, ServerName};
 use rustls::server::ParsedCertificate;
 use rustls::RootCertStore;
 use rustls_pki_types::UnixTime;
-use serde::ser::SerializeMap;
 use serde::{Serialize, Serializer};
 use tempfile::NamedTempFile;
 use tokio::net::TcpStream;
@@ -46,7 +47,7 @@ async fn http_01() -> Result<(), Box<dyn StdError>> {
 
     // Spawn a Pebble CA and a challenge response server.
     debug!("starting Pebble CA environment");
-    let pebble = PebbleEnvironment::new(&DEFAULT_CONFIG).await?;
+    let pebble = PebbleEnvironment::new(Config::default()).await?;
 
     // Create a test account with the Pebble CA.
     debug!("creating test account");
@@ -94,7 +95,7 @@ async fn http_01() -> Result<(), Box<dyn StdError>> {
 /// Subprocesses are torn down cleanly on drop to avoid leaving
 /// stray child processes.
 struct PebbleEnvironment {
-    config: &'static Config,
+    config: Config,
     #[allow(dead_code)] // Held for the lifetime of the environment.
     config_file: NamedTempFile,
     #[allow(dead_code)] // Held for the lifetime of the environment.
@@ -111,14 +112,14 @@ impl PebbleEnvironment {
     /// respectively. If unset "./pebble" and "./pebble-challtestsrv" are used.
     ///
     /// Returns only once the Pebble CA server interface is responding.
-    async fn new(config: &'static Config) -> io::Result<Self> {
+    async fn new(config: Config) -> io::Result<Self> {
         #[derive(Clone, Serialize)]
-        struct ConfigWrapper {
-            pebble: &'static Config,
+        struct ConfigWrapper<'a> {
+            pebble: &'a Config,
         }
 
         let config_file = NamedTempFile::new()?;
-        let config_json = serde_json::to_string_pretty(&ConfigWrapper { pebble: config })?;
+        let config_json = serde_json::to_string_pretty(&ConfigWrapper { pebble: &config })?;
         trace!(config = config_json, "using static config");
         fs::write(&config_file, config_json)?;
 
@@ -143,7 +144,7 @@ impl PebbleEnvironment {
                 .arg("tests/testdata/server.key"),
         )?;
 
-        wait_for_server(config.listen_address).await;
+        wait_for_server(&config.listen_address).await;
 
         // Trust the Pebble management interface root CA.
         let mut roots = RootCertStore::empty();
@@ -403,29 +404,54 @@ async fn wait_for_server(addr: &str) {
 #[derive(Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct Config {
-    listen_address: &'static str,
-    management_listen_address: &'static str,
-    certificate: &'static str,
-    private_key: &'static str,
+    listen_address: String,
+    management_listen_address: String,
+    certificate: &'static Path,
+    private_key: &'static Path,
     http_port: u16,
     tls_port: u16,
     ocsp_responder_url: &'static str,
     external_account_binding_required: bool,
-    domain_blocklist: &'static [&'static str],
+    domain_blocklist: Vec<&'static str>,
     retry_after: RetryConfig,
-    #[serde(serialize_with = "serialize_profiles")]
-    profiles: &'static [(&'static str, Profile)],
+    profiles: HashMap<&'static str, Profile>,
 }
 
-fn serialize_profiles<S: Serializer>(
-    profiles: &'static [(&'static str, Profile)],
-    serializer: S,
-) -> Result<S::Ok, S::Error> {
-    let mut map = serializer.serialize_map(Some(profiles.len()))?;
-    for (k, v) in profiles {
-        map.serialize_entry(k, v)?;
+impl Default for Config {
+    fn default() -> Self {
+        Self {
+            listen_address: "[::1]:14000".to_string(),
+            management_listen_address: "[::1]:15000".to_string(),
+            certificate: Path::new("tests/testdata/server.pem"),
+            private_key: Path::new("tests/testdata/server.key"),
+            http_port: 5002,
+            tls_port: 5001,
+            ocsp_responder_url: "",
+            external_account_binding_required: false,
+            domain_blocklist: vec!["blocked-domain.example"],
+            retry_after: RetryConfig {
+                authz: Duration::from_secs(3),
+                order: Duration::from_secs(5),
+            },
+            profiles: [
+                (
+                    "default",
+                    Profile {
+                        description: "The profile you know and love",
+                        validity_period: Duration::from_secs(7776000),
+                    },
+                ),
+                (
+                    "shortlived",
+                    Profile {
+                        description: "A short-lived cert profile, without actual enforcement",
+                        validity_period: Duration::from_secs(518400),
+                    },
+                ),
+            ]
+            .into(),
+        }
     }
-    map.end()
 }
 
 #[derive(Clone, Serialize)]
@@ -471,35 +497,3 @@ impl Drop for Subprocess {
         }
     }
 }
-
-const DEFAULT_CONFIG: Config = Config {
-    listen_address: "[::1]:14000",
-    management_listen_address: "[::1]:15000",
-    certificate: "tests/testdata/server.pem",
-    private_key: "tests/testdata/server.key",
-    http_port: 5002,
-    tls_port: 5001,
-    ocsp_responder_url: "",
-    external_account_binding_required: false,
-    domain_blocklist: &["blocked-domain.example"],
-    retry_after: RetryConfig {
-        authz: Duration::from_secs(3),
-        order: Duration::from_secs(5),
-    },
-    profiles: &[
-        (
-            "default",
-            Profile {
-                description: "The profile you know and love",
-                validity_period: Duration::from_secs(7776000),
-            },
-        ),
-        (
-            "shortlived",
-            Profile {
-                description: "A short-lived cert profile, without actual enforcement",
-                validity_period: Duration::from_secs(518400),
-            },
-        ),
-    ],
-};
