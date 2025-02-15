@@ -3,6 +3,7 @@ use std::error::Error as StdError;
 use std::io::{self, Read};
 use std::path::Path;
 use std::process::{Child, Command};
+use std::sync::atomic::{AtomicU16, Ordering};
 use std::time::Duration;
 use std::{env, fs};
 
@@ -424,8 +425,8 @@ impl Default for EnvironmentConfig {
     fn default() -> Self {
         Self {
             pebble: PebbleConfig::default(),
-            dns_port: 8053,
-            challtestsrv_port: 8055,
+            dns_port: NEXT_PORT.fetch_add(1, Ordering::SeqCst),
+            challtestsrv_port: NEXT_PORT.fetch_add(1, Ordering::SeqCst),
         }
     }
 }
@@ -449,12 +450,15 @@ struct PebbleConfig {
 impl Default for PebbleConfig {
     fn default() -> Self {
         Self {
-            listen_address: "[::1]:14000".to_string(),
-            management_listen_address: "[::1]:15000".to_string(),
+            listen_address: format!("[::1]:{}", NEXT_PORT.fetch_add(1, Ordering::SeqCst)),
+            management_listen_address: format!(
+                "[::1]:{}",
+                NEXT_PORT.fetch_add(1, Ordering::SeqCst)
+            ),
             certificate: Path::new("tests/testdata/server.pem"),
             private_key: Path::new("tests/testdata/server.key"),
-            http_port: 5002,
-            tls_port: 5001,
+            http_port: NEXT_PORT.fetch_add(1, Ordering::SeqCst),
+            tls_port: NEXT_PORT.fetch_add(1, Ordering::SeqCst),
             ocsp_responder_url: "",
             external_account_binding_required: false,
             domain_blocklist: vec!["blocked-domain.example"],
@@ -526,3 +530,5 @@ impl Drop for Subprocess {
         }
     }
 }
+
+static NEXT_PORT: AtomicU16 = AtomicU16::new(5555);
