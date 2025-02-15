@@ -335,7 +335,7 @@ impl PebbleEnvironment {
     }
 
     fn challenge_management_url(&self) -> &str {
-        "http://127.0.0.1:8055" // Default.
+        "http://[::1]:8055"
     }
 
     fn directory_url(&self) -> String {
@@ -473,8 +473,8 @@ impl Drop for Subprocess {
 }
 
 const DEFAULT_CONFIG: Config = Config {
-    listen_address: "127.0.0.1:14000",
-    management_listen_address: "127.0.0.1:15000",
+    listen_address: "[::1]:14000",
+    management_listen_address: "[::1]:15000",
     certificate: "tests/testdata/server.pem",
     private_key: "tests/testdata/server.key",
     http_port: 5002,
