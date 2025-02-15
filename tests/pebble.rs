@@ -54,7 +54,8 @@ async fn http_01() -> Result<(), Box<dyn StdError>> {
     let mut account = pebble.new_account().await?;
 
     // Issue a certificate w/ HTTP-01 challenge.
-    let (identifiers, cert_chain) = pebble.test_http1(&mut account).await?;
+    let identifiers = &["http01.example.com"];
+    let cert_chain = pebble.test_http1(&mut account, identifiers).await?;
     // Verify the EE cert is valid for each of the identifiers.
     pebble.verify_cert(identifiers, cert_chain).await
 }
@@ -78,15 +79,20 @@ impl Environment {
     async fn test_http1(
         &self,
         account: &mut Account,
-    ) -> Result<(Vec<String>, Vec<CertificateDer<'static>>), Box<dyn StdError>> {
+        identifiers: &[&'static str],
+    ) -> Result<Vec<CertificateDer<'static>>, Box<dyn StdError>> {
         info!("testing HTTP-01 challenge");
 
+        let identifiers = identifiers
+            .iter()
+            .map(|id| Identifier::Dns(id.to_string()))
+            .collect::<Vec<_>>();
+        debug!(?identifiers, "creating order");
+
         // Create an order.
-        let identifier = Identifier::Dns("example.com".to_owned());
-        debug!(?identifier, "creating order");
         let mut order = account
             .new_order(&NewOrder {
-                identifiers: &[identifier],
+                identifiers: &identifiers,
             })
             .await?;
         info!(order_url = order.url(), "created order");
@@ -137,7 +143,7 @@ impl Environment {
         // Issue a certificate for the names and test the chain validates to the issuer root.
         let cert_chain = self.certificate(&mut order, &names).await?;
 
-        Ok((names, cert_chain))
+        Ok(cert_chain)
     }
 
     /// Create a new `Account` with the ACME server.
@@ -223,7 +229,7 @@ impl Environment {
 
     async fn verify_cert(
         &self,
-        identifiers: Vec<String>,
+        identifiers: &[&'static str],
         cert_chain: Vec<CertificateDer<'static>>,
     ) -> Result<(), Box<dyn StdError>> {
         // Split off and parse the EE cert, save the intermediates that follow.
@@ -243,7 +249,7 @@ impl Environment {
 
         // Verify the EE cert is valid for each of the identifiers.
         for ident in identifiers {
-            verify_server_name(&ee_cert, &ServerName::try_from(ident.as_str())?)?;
+            verify_server_name(&ee_cert, &ServerName::try_from(*ident)?)?;
         }
 
         Ok(())
