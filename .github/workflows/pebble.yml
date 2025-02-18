@@ -8,7 +8,7 @@ on:
     - cron: "25 6 * * 5"
 
 jobs:
-  integration:
+  pebble:
     runs-on: ubuntu-latest
 
     steps:
