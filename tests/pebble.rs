@@ -36,7 +36,7 @@ use tracing_subscriber::{fmt, EnvFilter};
 
 /// Ignored by default because it requires `pebble` and `pebble-challtestsrv` binaries.
 ///
-/// See documentation for [`PebbleEnvironment`].
+/// See documentation for [`Environment`].
 #[tokio::test]
 #[ignore]
 async fn http_01() -> Result<(), Box<dyn StdError>> {
@@ -47,7 +47,7 @@ async fn http_01() -> Result<(), Box<dyn StdError>> {
 
     // Spawn a Pebble CA and a challenge response server.
     debug!("starting Pebble CA environment");
-    let pebble = PebbleEnvironment::new(PebbleConfig::default()).await?;
+    let pebble = Environment::new(PebbleConfig::default()).await?;
 
     // Create a test account with the Pebble CA.
     debug!("creating test account");
@@ -94,7 +94,7 @@ async fn http_01() -> Result<(), Box<dyn StdError>> {
 ///
 /// Subprocesses are torn down cleanly on drop to avoid leaving
 /// stray child processes.
-struct PebbleEnvironment {
+struct Environment {
     config: PebbleConfig,
     #[allow(dead_code)] // Held for the lifetime of the environment.
     config_file: NamedTempFile,
@@ -105,7 +105,7 @@ struct PebbleEnvironment {
     client: HyperClient<hyper_rustls::HttpsConnector<HttpConnector>, Full<Bytes>>,
 }
 
-impl PebbleEnvironment {
+impl Environment {
     /// Create a test environment for the given configuration.
     ///
     /// Set the PEBBLE and CHALLTESTSRV to pebble and pebble-challtestsrv binaries
