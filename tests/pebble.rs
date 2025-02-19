@@ -36,7 +36,7 @@ use serde::{Serialize, Serializer};
 use tempfile::NamedTempFile;
 use tokio::net::TcpStream;
 use tokio::time::sleep;
-use tracing::{debug, error, info, trace};
+use tracing::{debug, info, trace};
 use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::util::SubscriberInitExt;
 use tracing_subscriber::{fmt, EnvFilter};
@@ -233,7 +233,10 @@ impl Environment {
         }
 
         // Poll until the order is ready.
-        poll_until_ready(&mut order).await?;
+        let status = order.poll(10, Duration::from_millis(250)).await?;
+        if status != OrderStatus::Ready {
+            return Err(format!("unexpected order status: {status:?}").into());
+        }
 
         // Issue a certificate for the names and test the chain validates to the issuer root.
         self.certificate(&mut order, &names).await
@@ -480,51 +483,6 @@ impl TryFrom<&ChallengeType> for Box<dyn AuthorizationMethod> {
                 return Err(format!("unknown challenge type: {chal_type}"))
             }
         })
-    }
-}
-
-/// Poll the given order until it is ready, waiting longer between each attempt up to
-/// a maximum.
-///
-/// Returns an error when the maximum number of tries has been reached.
-async fn poll_until_ready(order: &mut Order) -> Result<(), Box<dyn StdError>> {
-    let url = order.url().to_owned();
-    info!(order_url = url, "waiting for order to be ready");
-    let mut tries = 1u8;
-    let mut delay = Duration::from_millis(250);
-    loop {
-        sleep(delay).await;
-        let state = order.refresh().await.unwrap();
-        if let OrderStatus::Ready | OrderStatus::Invalid = state.status {
-            break;
-        }
-
-        delay *= 2;
-        tries += 1;
-        match tries < 10 {
-            true => info!(
-                tries,
-                ?delay,
-                order_url = url,
-                order_status = ?state.status,
-                "order not ready yet, trying again after delay",
-            ),
-            false => {
-                error!(
-                    tries,
-                    order_url = url,
-                    order_state = ?state,
-                    "giving up on polling order"
-                );
-                return Err("order is not ready".into());
-            }
-        }
-    }
-
-    let state = order.state();
-    match state.status {
-        OrderStatus::Ready => Ok(()),
-        _ => Err(format!("unexpected order status: {:?}", state.status).into()),
     }
 }
 

@@ -3,7 +3,7 @@ use std::{io, time::Duration};
 use clap::Parser;
 use rcgen::{CertificateParams, DistinguishedName, KeyPair};
 use tokio::time::sleep;
-use tracing::{error, info};
+use tracing::info;
 
 use instant_acme::{
     Account, AuthorizationStatus, ChallengeType, Identifier, LetsEncrypt, NewAccount, NewOrder,
@@ -91,33 +91,9 @@ async fn main() -> anyhow::Result<()> {
 
     // Exponentially back off until the order becomes ready or invalid.
 
-    let mut tries = 1u8;
-    let mut delay = Duration::from_millis(250);
-    loop {
-        sleep(delay).await;
-        let state = order.refresh().await.unwrap();
-        if let OrderStatus::Ready | OrderStatus::Invalid = state.status {
-            info!("order state: {:#?}", state);
-            break;
-        }
-
-        delay *= 2;
-        tries += 1;
-        match tries < 5 {
-            true => info!(?state, tries, "order is not ready, waiting {delay:?}"),
-            false => {
-                error!(tries, "order is not ready: {state:#?}");
-                return Err(anyhow::anyhow!("order is not ready"));
-            }
-        }
-    }
-
-    let state = order.state();
-    if state.status != OrderStatus::Ready {
-        return Err(anyhow::anyhow!(
-            "unexpected order status: {:?}",
-            state.status
-        ));
+    let status = order.poll(5, Duration::from_millis(250)).await?;
+    if status != OrderStatus::Ready {
+        return Err(anyhow::anyhow!("unexpected order status: {status:?}"));
     }
 
     let mut names = Vec::with_capacity(challenges.len());

@@ -8,6 +8,7 @@ use std::fmt;
 use std::future::Future;
 use std::pin::Pin;
 use std::sync::Arc;
+use std::time::Duration;
 
 use async_trait::async_trait;
 use base64::prelude::{Engine, BASE64_URL_SAFE_NO_PAD};
@@ -23,6 +24,7 @@ use hyper_util::client::legacy::Client as HyperClient;
 use hyper_util::{client::legacy::connect::HttpConnector, rt::TokioExecutor};
 use serde::de::DeserializeOwned;
 use serde::Serialize;
+use tokio::time::sleep;
 
 mod types;
 pub use types::{
@@ -161,6 +163,29 @@ impl Order {
     /// Get the current state of the given challenge
     pub async fn challenge(&mut self, challenge_url: &str) -> Result<Challenge, Error> {
         self.account.get(&mut self.nonce, challenge_url).await
+    }
+
+    /// Poll the order with exponential backoff until in a final state
+    ///
+    /// Refresh the order state from the server for `tries` times, waiting `delay` before the
+    /// first attempt and increasing the delay by a factor of 2 for each subsequent attempt.
+    ///
+    /// Yields the [`OrderStatus`] immediately if `Ready` or `Invalid`, or after `tries` attempts.
+    ///
+    /// (Empirically, we've had good results with 5 tries and an initial delay of 250ms.)
+    pub async fn poll(&mut self, mut tries: u8, mut delay: Duration) -> Result<OrderStatus, Error> {
+        loop {
+            sleep(delay).await;
+            let state = self.refresh().await?;
+            if let OrderStatus::Ready | OrderStatus::Invalid = state.status {
+                return Ok(state.status);
+            } else if tries <= 1 {
+                return Ok(state.status);
+            }
+
+            delay *= 2;
+            tries -= 1;
+        }
     }
 
     /// Refresh the current state of the order
