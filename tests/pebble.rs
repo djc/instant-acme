@@ -84,6 +84,27 @@ async fn dns_01() -> Result<(), Box<dyn StdError>> {
     pebble.verify_cert(identifiers, cert_chain).await
 }
 
+#[tokio::test]
+#[ignore]
+async fn tls_alpn_01() -> Result<(), Box<dyn StdError>> {
+    let _ = tracing_subscriber::registry()
+        .with(fmt::layer())
+        .with(EnvFilter::from_default_env())
+        .try_init();
+
+    // Spawn a Pebble CA and a challenge response server.
+    debug!("starting Pebble CA environment");
+    let pebble = EnvironmentConfig::default().run().await?;
+
+    // Create a test account with the Pebble CA.
+    let mut account = pebble.new_account().await?;
+
+    // Issue a certificate w/ TLS-ALPN-01 challenge.
+    let identifiers = &["tls-alpn.example.com"];
+    let cert_chain = pebble.test_alpn1(&mut account, identifiers).await?;
+    pebble.verify_cert(identifiers, cert_chain).await
+}
+
 /// A test environment running Pebble and a challenge test server.
 ///
 /// Subprocesses are torn down cleanly on drop to avoid leaving
@@ -117,6 +138,16 @@ impl Environment {
     ) -> Result<Vec<CertificateDer<'static>>, Box<dyn StdError + 'static>> {
         info!("testing DNS-01 challenge");
         self.complete_order(account, identifiers, ChallengeType::Dns01, &Dns01 {})
+            .await
+    }
+
+    async fn test_alpn1<'a>(
+        &'a self,
+        account: &mut Account,
+        identifiers: &[&'static str],
+    ) -> Result<Vec<CertificateDer<'static>>, Box<dyn StdError + 'static>> {
+        info!("testing ALPN-01 challenge");
+        self.complete_order(account, identifiers, ChallengeType::TlsAlpn01, &Alpn01 {})
             .await
     }
 
@@ -378,6 +409,46 @@ impl AuthorizationMethod for Dns01 {
             .body(Full::from(serde_json::to_vec(&AddDns01Request {
                 host,
                 value,
+            })?))?;
+
+        env.client.request(req).await?;
+
+        Ok(())
+    }
+}
+
+struct Alpn01 {}
+
+#[async_trait]
+impl AuthorizationMethod for Alpn01 {
+    async fn provision(
+        &self,
+        env: &Environment,
+        identifier: String,
+        _challenge: &Challenge,
+        key_auth: &KeyAuthorization,
+    ) -> Result<(), Box<dyn StdError>> {
+        debug!(
+            identifier,
+            key_auth = key_auth.as_str(),
+            "provisioning TLS-ALPN-01 response",
+        );
+
+        #[derive(Serialize)]
+        struct AddAlpn01Request<'a> {
+            host: &'a str,
+            content: &'a str,
+        }
+
+        let req = Request::builder()
+            .method(Method::POST)
+            .uri(format!("{}/add-tlsalpn01", env.challenge_management_url()))
+            .header(CONTENT_TYPE, "application/json")
+            .body(Full::from(serde_json::to_vec(&AddAlpn01Request {
+                host: &identifier,
+                // Note: pebble-challtestsrv wants to hash the key auth itself, so we
+                // don't use key_auth.digest() here.
+                content: key_auth.as_str(),
             })?))?;
 
         env.client.request(req).await?;
