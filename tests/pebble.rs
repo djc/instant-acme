@@ -127,7 +127,7 @@ impl Environment {
         identifiers: &[&'static str],
     ) -> Result<Vec<CertificateDer<'static>>, Box<dyn StdError>> {
         info!("testing HTTP-01 challenge");
-        self.complete_order(account, identifiers, ChallengeType::Http01, &Http01 {})
+        self.complete_order(account, identifiers, ChallengeType::Http01)
             .await
     }
 
@@ -137,7 +137,7 @@ impl Environment {
         identifiers: &[&'static str],
     ) -> Result<Vec<CertificateDer<'static>>, Box<dyn StdError + 'static>> {
         info!("testing DNS-01 challenge");
-        self.complete_order(account, identifiers, ChallengeType::Dns01, &Dns01 {})
+        self.complete_order(account, identifiers, ChallengeType::Dns01)
             .await
     }
 
@@ -147,7 +147,7 @@ impl Environment {
         identifiers: &[&'static str],
     ) -> Result<Vec<CertificateDer<'static>>, Box<dyn StdError + 'static>> {
         info!("testing ALPN-01 challenge");
-        self.complete_order(account, identifiers, ChallengeType::TlsAlpn01, &Alpn01 {})
+        self.complete_order(account, identifiers, ChallengeType::TlsAlpn01)
             .await
     }
 
@@ -172,17 +172,15 @@ impl Environment {
     /// Create and finalize an ACME order for the given `Account` and `Identifier`s using
     /// the specified `ChallengeType`.
     ///
-    /// The `provision_fn` will be invoked to set up the appropriate challenge response
-    /// based on the `Challenge`/`KeyAuthorization`.
-    ///
     /// Returns the issued certificate chain unless an error occurs.
     async fn complete_order<'a>(
         &'a self,
         account: &mut Account,
         identifiers: &[&'static str],
         chal_type: ChallengeType,
-        auth_method: &'a dyn AuthorizationMethod,
     ) -> Result<Vec<CertificateDer<'static>>, Box<dyn StdError + 'static>> {
+        let auth_method: Box<dyn AuthorizationMethod> = (&chal_type).try_into()?;
+
         let identifiers = identifiers
             .iter()
             .map(|id| Identifier::Dns(id.to_string()))
@@ -468,6 +466,21 @@ trait AuthorizationMethod {
         challenge: &Challenge,
         key_auth: &KeyAuthorization,
     ) -> Result<(), Box<dyn StdError>>;
+}
+
+impl TryFrom<&ChallengeType> for Box<dyn AuthorizationMethod> {
+    type Error = String;
+
+    fn try_from(value: &ChallengeType) -> Result<Self, Self::Error> {
+        Ok(match value {
+            ChallengeType::Http01 => Box::new(Http01 {}),
+            ChallengeType::Dns01 => Box::new(Dns01 {}),
+            ChallengeType::TlsAlpn01 => Box::new(Alpn01 {}),
+            ChallengeType::Unknown(chal_type) => {
+                return Err(format!("unknown challenge type: {chal_type}"))
+            }
+        })
+    }
 }
 
 /// Poll the given order until it is ready, waiting longer between each attempt up to
