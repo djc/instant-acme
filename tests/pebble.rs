@@ -216,7 +216,7 @@ impl Environment {
             auth_method
                 .provision(
                     self,
-                    identifier.to_owned(),
+                    identifier,
                     challenge,
                     &order.key_authorization(challenge),
                 )
@@ -367,7 +367,7 @@ impl AuthorizationMethod for Http01 {
     async fn provision(
         &self,
         env: &Environment,
-        _identifier: String,
+        _identifier: &str,
         challenge: &Challenge,
         key_auth: &KeyAuthorization,
     ) -> Result<(), Box<dyn StdError>> {
@@ -401,7 +401,7 @@ impl AuthorizationMethod for Dns01 {
     async fn provision(
         &self,
         env: &Environment,
-        identifier: String,
+        identifier: &str,
         _challenge: &Challenge,
         key_auth: &KeyAuthorization,
     ) -> Result<(), Box<dyn StdError>> {
@@ -427,7 +427,7 @@ impl AuthorizationMethod for Alpn01 {
     async fn provision(
         &self,
         env: &Environment,
-        identifier: String,
+        identifier: &str,
         _challenge: &Challenge,
         key_auth: &KeyAuthorization,
     ) -> Result<(), Box<dyn StdError>> {
@@ -463,7 +463,7 @@ trait AuthorizationMethod {
     async fn provision(
         &self,
         env: &Environment,
-        identifier: String,
+        identifier: &str,
         challenge: &Challenge,
         key_auth: &KeyAuthorization,
     ) -> Result<(), Box<dyn StdError>>;
