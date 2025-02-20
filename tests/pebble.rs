@@ -214,17 +214,17 @@ impl Environment {
             let key_authz = order.key_authorization(challenge);
             match chal_type {
                 ChallengeType::Http01 => {
-                    Http01 {}
+                    Http01
                         .provision(self, identifier, challenge, &key_authz)
                         .await?
                 }
                 ChallengeType::Dns01 => {
-                    Dns01 {}
+                    Dns01
                         .provision(self, identifier, challenge, &key_authz)
                         .await?
                 }
                 ChallengeType::TlsAlpn01 => {
-                    Alpn01 {}
+                    Alpn01
                         .provision(self, identifier, challenge, &key_authz)
                         .await?
                 }
@@ -371,7 +371,7 @@ impl Environment {
     }
 }
 
-struct Http01 {}
+struct Http01;
 
 #[async_trait]
 impl AuthorizationMethod for Http01 {
@@ -405,7 +405,7 @@ impl AuthorizationMethod for Http01 {
     }
 }
 
-struct Dns01 {}
+struct Dns01;
 
 #[async_trait]
 impl AuthorizationMethod for Dns01 {
@@ -431,7 +431,7 @@ impl AuthorizationMethod for Dns01 {
     }
 }
 
-struct Alpn01 {}
+struct Alpn01;
 
 #[async_trait]
 impl AuthorizationMethod for Alpn01 {
