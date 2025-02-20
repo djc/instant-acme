@@ -344,16 +344,15 @@ impl Environment {
             .request(
                 Request::builder()
                     .method(Method::POST)
-                    .uri(format!("{}/{}", self.challenge_management_url(), path))
+                    .uri(format!(
+                        "http://[::1]:{}/{}",
+                        self.config.challtestsrv_port, path
+                    ))
                     .header(CONTENT_TYPE, "application/json")
                     .body(Full::from(serde_json::to_vec(body)?))?,
             )
             .await?;
         Ok(())
-    }
-
-    fn challenge_management_url(&self) -> String {
-        format!("http://[::1]:{}", self.config.challtestsrv_port)
     }
 
     fn directory_url(&self) -> String {
