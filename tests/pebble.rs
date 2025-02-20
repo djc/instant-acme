@@ -50,18 +50,11 @@ async fn http_01() -> Result<(), Box<dyn StdError>> {
 
     // Spawn a Pebble CA and a challenge response server.
     debug!("starting Pebble CA environment");
-    let pebble = Environment::new(EnvironmentConfig::default()).await?;
-
-    // Create a test account with the Pebble CA.
-    let mut account = pebble.new_account().await?;
+    let mut pebble = Environment::new(EnvironmentConfig::default()).await?;
 
     // Issue a certificate w/ HTTP-01 challenge.
     let identifiers = &["http01.example.com"];
-    let cert_chain = pebble
-        .complete_order::<Http01>(&mut account, identifiers)
-        .await?;
-
-    // Verify the EE cert is valid for each of the identifiers.
+    let cert_chain = pebble.complete_order::<Http01>(identifiers).await?;
     pebble.verify_cert(identifiers, cert_chain).await
 }
 
@@ -75,17 +68,11 @@ async fn dns_01() -> Result<(), Box<dyn StdError>> {
 
     // Spawn a Pebble CA and a challenge response server.
     debug!("starting Pebble CA environment");
-    let pebble = Environment::new(EnvironmentConfig::default()).await?;
-
-    // Create a test account with the Pebble CA.
-    let mut account = pebble.new_account().await?;
+    let mut pebble = Environment::new(EnvironmentConfig::default()).await?;
 
     // Issue a certificate w/ DNS-01 challenge.
     let identifiers = &["dns01.example.com"];
-    let cert_chain = pebble
-        .complete_order::<Dns01>(&mut account, identifiers)
-        .await?;
-
+    let cert_chain = pebble.complete_order::<Dns01>(identifiers).await?;
     pebble.verify_cert(identifiers, cert_chain).await
 }
 
@@ -99,17 +86,11 @@ async fn tls_alpn_01() -> Result<(), Box<dyn StdError>> {
 
     // Spawn a Pebble CA and a challenge response server.
     debug!("starting Pebble CA environment");
-    let pebble = Environment::new(EnvironmentConfig::default()).await?;
-
-    // Create a test account with the Pebble CA.
-    let mut account = pebble.new_account().await?;
+    let mut pebble = Environment::new(EnvironmentConfig::default()).await?;
 
     // Issue a certificate w/ TLS-ALPN-01 challenge.
     let identifiers = &["tls-alpn.example.com"];
-    let cert_chain = pebble
-        .complete_order::<Alpn01>(&mut account, identifiers)
-        .await?;
-
+    let cert_chain = pebble.complete_order::<Alpn01>(identifiers).await?;
     pebble.verify_cert(identifiers, cert_chain).await
 }
 
@@ -118,6 +99,7 @@ async fn tls_alpn_01() -> Result<(), Box<dyn StdError>> {
 /// Subprocesses are torn down cleanly on drop to avoid leaving
 /// stray child processes.
 struct Environment {
+    account: Account,
     config: EnvironmentConfig,
     #[allow(dead_code)] // Held for the lifetime of the environment.
     config_file: NamedTempFile,
@@ -130,7 +112,7 @@ struct Environment {
 
 impl Environment {
     /// Create a new [`Environment`] with running Pebble and challenge test servers.
-    async fn new(config: EnvironmentConfig) -> io::Result<Environment> {
+    async fn new(config: EnvironmentConfig) -> Result<Environment, Box<dyn StdError>> {
         #[derive(Clone, Serialize)]
         struct ConfigWrapper<'a> {
             pebble: &'a PebbleConfig,
@@ -197,7 +179,23 @@ impl Environment {
                 .build(),
         );
 
+        // Create a new `Account` with the ACME server.
+        debug!("creating test account");
+        let (account, _) = Account::create_with_http(
+            &NewAccount {
+                contact: &[],
+                terms_of_service_agreed: true,
+                only_return_existing: false,
+            },
+            &format!("https://{}/dir", &config.pebble.listen_address),
+            None,
+            Box::new(client.clone()),
+        )
+        .await?;
+        info!(account_id = account.id(), "created ACME account");
+
         Ok(Self {
+            account,
             config,
             config_file,
             pebble,
@@ -206,31 +204,12 @@ impl Environment {
         })
     }
 
-    /// Create a new `Account` with the ACME server.
-    async fn new_account(&self) -> Result<Account, Box<dyn StdError>> {
-        debug!("creating test account");
-        let (account, _) = Account::create_with_http(
-            &NewAccount {
-                contact: &[],
-                terms_of_service_agreed: true,
-                only_return_existing: false,
-            },
-            &format!("https://{}/dir", &self.config.pebble.listen_address),
-            None,
-            Box::new(self.client.clone()),
-        )
-        .await?;
-        info!(account_id = account.id(), "created ACME account");
-        Ok(account)
-    }
-
     /// Create and finalize an ACME order for the given `Account` and `Identifier`s using
     /// the specified `ChallengeType`.
     ///
     /// Returns the issued certificate chain unless an error occurs.
     async fn complete_order<A: AuthorizationMethod>(
-        &self,
-        account: &mut Account,
+        &mut self,
         identifiers: &[&'static str],
     ) -> Result<Vec<CertificateDer<'static>>, Box<dyn StdError + 'static>> {
         let identifiers = identifiers
@@ -238,7 +217,8 @@ impl Environment {
             .map(|id| Identifier::Dns(id.to_string()))
             .collect::<Vec<_>>();
         debug!(?identifiers, "creating order");
-        let mut order = account
+        let mut order = self
+            .account
             .new_order(&NewOrder {
                 identifiers: &identifiers,
             })
