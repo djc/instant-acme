@@ -57,7 +57,10 @@ async fn http_01() -> Result<(), Box<dyn StdError>> {
 
     // Issue a certificate w/ HTTP-01 challenge.
     let identifiers = &["http01.example.com"];
-    let cert_chain = pebble.test_http1(&mut account, identifiers).await?;
+    let cert_chain = pebble
+        .complete_order(&mut account, identifiers, ChallengeType::Http01)
+        .await?;
+
     // Verify the EE cert is valid for each of the identifiers.
     pebble.verify_cert(identifiers, cert_chain).await
 }
@@ -79,7 +82,10 @@ async fn dns_01() -> Result<(), Box<dyn StdError>> {
 
     // Issue a certificate w/ DNS-01 challenge.
     let identifiers = &["dns01.example.com"];
-    let cert_chain = pebble.test_dns1(&mut account, identifiers).await?;
+    let cert_chain = pebble
+        .complete_order(&mut account, identifiers, ChallengeType::Dns01)
+        .await?;
+
     pebble.verify_cert(identifiers, cert_chain).await
 }
 
@@ -100,7 +106,10 @@ async fn tls_alpn_01() -> Result<(), Box<dyn StdError>> {
 
     // Issue a certificate w/ TLS-ALPN-01 challenge.
     let identifiers = &["tls-alpn.example.com"];
-    let cert_chain = pebble.test_alpn1(&mut account, identifiers).await?;
+    let cert_chain = pebble
+        .complete_order(&mut account, identifiers, ChallengeType::TlsAlpn01)
+        .await?;
+
     pebble.verify_cert(identifiers, cert_chain).await
 }
 
@@ -120,36 +129,6 @@ struct Environment {
 }
 
 impl Environment {
-    async fn test_http1(
-        &self,
-        account: &mut Account,
-        identifiers: &[&'static str],
-    ) -> Result<Vec<CertificateDer<'static>>, Box<dyn StdError>> {
-        info!("testing HTTP-01 challenge");
-        self.complete_order(account, identifiers, ChallengeType::Http01)
-            .await
-    }
-
-    async fn test_dns1<'a>(
-        &'a self,
-        account: &mut Account,
-        identifiers: &[&'static str],
-    ) -> Result<Vec<CertificateDer<'static>>, Box<dyn StdError + 'static>> {
-        info!("testing DNS-01 challenge");
-        self.complete_order(account, identifiers, ChallengeType::Dns01)
-            .await
-    }
-
-    async fn test_alpn1<'a>(
-        &'a self,
-        account: &mut Account,
-        identifiers: &[&'static str],
-    ) -> Result<Vec<CertificateDer<'static>>, Box<dyn StdError + 'static>> {
-        info!("testing ALPN-01 challenge");
-        self.complete_order(account, identifiers, ChallengeType::TlsAlpn01)
-            .await
-    }
-
     /// Create a new `Account` with the ACME server.
     async fn new_account(&self) -> Result<Account, Box<dyn StdError>> {
         debug!("creating test account");
