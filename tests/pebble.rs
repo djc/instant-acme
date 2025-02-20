@@ -335,6 +335,23 @@ impl Environment {
         Ok(roots)
     }
 
+    async fn request_challenge(
+        &self,
+        path: &str,
+        body: &impl Serialize,
+    ) -> Result<(), Box<dyn StdError>> {
+        self.client
+            .request(
+                Request::builder()
+                    .method(Method::POST)
+                    .uri(format!("{}/{}", self.challenge_management_url(), path))
+                    .header(CONTENT_TYPE, "application/json")
+                    .body(Full::from(serde_json::to_vec(body)?))?,
+            )
+            .await?;
+        Ok(())
+    }
+
     fn challenge_management_url(&self) -> String {
         format!("http://[::1]:{}", self.config.challtestsrv_port)
     }
@@ -367,18 +384,14 @@ impl AuthorizationMethod for Http01 {
             content: &'a str,
         }
 
-        let req = Request::builder()
-            .method(Method::POST)
-            .uri(format!("{}/add-http01", env.challenge_management_url()))
-            .header(CONTENT_TYPE, "application/json")
-            .body(Full::from(serde_json::to_vec(&AddHttp01Request {
-                token: challenge.token.as_str(),
+        env.request_challenge(
+            "add-http01",
+            &AddHttp01Request {
+                token: &challenge.token,
                 content: key_auth.as_str(),
-            })?))?;
-
-        env.client.request(req).await?;
-
-        Ok(())
+            },
+        )
+        .await
     }
 }
 
@@ -403,18 +416,8 @@ impl AuthorizationMethod for Dns01 {
             value: &'a str,
         }
 
-        let req = Request::builder()
-            .method(Method::POST)
-            .uri(format!("{}/set-txt", env.challenge_management_url()))
-            .header(CONTENT_TYPE, "application/json")
-            .body(Full::from(serde_json::to_vec(&AddDns01Request {
-                host,
-                value,
-            })?))?;
-
-        env.client.request(req).await?;
-
-        Ok(())
+        env.request_challenge("set-txt", &AddDns01Request { host, value })
+            .await
     }
 }
 
@@ -441,20 +444,16 @@ impl AuthorizationMethod for Alpn01 {
             content: &'a str,
         }
 
-        let req = Request::builder()
-            .method(Method::POST)
-            .uri(format!("{}/add-tlsalpn01", env.challenge_management_url()))
-            .header(CONTENT_TYPE, "application/json")
-            .body(Full::from(serde_json::to_vec(&AddAlpn01Request {
+        env.request_challenge(
+            "add-tlsalpn01",
+            &AddAlpn01Request {
                 host: &identifier,
                 // Note: pebble-challtestsrv wants to hash the key auth itself, so we
                 // don't use key_auth.digest() here.
                 content: key_auth.as_str(),
-            })?))?;
-
-        env.client.request(req).await?;
-
-        Ok(())
+            },
+        )
+        .await
     }
 }
 
