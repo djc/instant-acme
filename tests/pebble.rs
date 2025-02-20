@@ -228,8 +228,8 @@ impl Environment {
     /// the specified `ChallengeType`.
     ///
     /// Returns the issued certificate chain unless an error occurs.
-    async fn complete_order<'a>(
-        &'a self,
+    async fn complete_order(
+        &self,
         account: &mut Account,
         identifiers: &[&'static str],
         chal_type: ChallengeType,
