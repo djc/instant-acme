@@ -58,7 +58,7 @@ async fn http_01() -> Result<(), Box<dyn StdError>> {
     // Issue a certificate w/ HTTP-01 challenge.
     let identifiers = &["http01.example.com"];
     let cert_chain = pebble
-        .complete_order(&mut account, identifiers, ChallengeType::Http01)
+        .complete_order::<Http01>(&mut account, identifiers)
         .await?;
 
     // Verify the EE cert is valid for each of the identifiers.
@@ -83,7 +83,7 @@ async fn dns_01() -> Result<(), Box<dyn StdError>> {
     // Issue a certificate w/ DNS-01 challenge.
     let identifiers = &["dns01.example.com"];
     let cert_chain = pebble
-        .complete_order(&mut account, identifiers, ChallengeType::Dns01)
+        .complete_order::<Dns01>(&mut account, identifiers)
         .await?;
 
     pebble.verify_cert(identifiers, cert_chain).await
@@ -107,7 +107,7 @@ async fn tls_alpn_01() -> Result<(), Box<dyn StdError>> {
     // Issue a certificate w/ TLS-ALPN-01 challenge.
     let identifiers = &["tls-alpn.example.com"];
     let cert_chain = pebble
-        .complete_order(&mut account, identifiers, ChallengeType::TlsAlpn01)
+        .complete_order::<Alpn01>(&mut account, identifiers)
         .await?;
 
     pebble.verify_cert(identifiers, cert_chain).await
@@ -228,11 +228,10 @@ impl Environment {
     /// the specified `ChallengeType`.
     ///
     /// Returns the issued certificate chain unless an error occurs.
-    async fn complete_order(
+    async fn complete_order<A: AuthorizationMethod>(
         &self,
         account: &mut Account,
         identifiers: &[&'static str],
-        chal_type: ChallengeType,
     ) -> Result<Vec<CertificateDer<'static>>, Box<dyn StdError + 'static>> {
         let identifiers = identifiers
             .iter()
@@ -261,30 +260,14 @@ impl Environment {
             let challenge = authz
                 .challenges
                 .iter()
-                .find(|c| c.r#type == chal_type)
-                .ok_or(format!("no {chal_type:?} challenge found"))?;
+                .find(|c| c.r#type == A::TYPE)
+                .ok_or(format!("no {:?} challenge found", A::TYPE))?;
 
             let Identifier::Dns(identifier) = &authz.identifier;
 
             let key_authz = order.key_authorization(challenge);
-            match chal_type {
-                ChallengeType::Http01 => {
-                    self.request_challenge::<Http01>(identifier, challenge, &key_authz)
-                        .await?
-                }
-                ChallengeType::Dns01 => {
-                    self.request_challenge::<Dns01>(identifier, challenge, &key_authz)
-                        .await?
-                }
-                ChallengeType::TlsAlpn01 => {
-                    self.request_challenge::<Alpn01>(identifier, challenge, &key_authz)
-                        .await?
-                }
-                ChallengeType::Unknown(chal_type) => {
-                    return Err(format!("unknown challenge type: {chal_type}").into())
-                }
-            }
-
+            self.request_challenge::<A>(identifier, challenge, &key_authz)
+                .await?;
             challenges.push((identifier, &challenge.url));
             names.push(identifier.clone());
         }
@@ -446,6 +429,7 @@ impl AuthorizationMethod for Http01 {
     }
 
     const PATH: &str = "add-http01";
+    const TYPE: ChallengeType = ChallengeType::Http01;
 }
 
 struct Dns01;
@@ -470,6 +454,7 @@ impl AuthorizationMethod for Dns01 {
     }
 
     const PATH: &str = "set-txt";
+    const TYPE: ChallengeType = ChallengeType::Dns01;
 }
 
 struct Alpn01;
@@ -501,6 +486,7 @@ impl AuthorizationMethod for Alpn01 {
     }
 
     const PATH: &str = "add-tlsalpn01";
+    const TYPE: ChallengeType = ChallengeType::TlsAlpn01;
 }
 
 /// A trait for something able to provision a challenge response with an external system
@@ -513,6 +499,7 @@ trait AuthorizationMethod {
     ) -> impl Serialize + 'a;
 
     const PATH: &str;
+    const TYPE: ChallengeType;
 }
 
 /// Wait for the server at the given address to be ready.
