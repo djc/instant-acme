@@ -50,7 +50,7 @@ async fn http_01() -> Result<(), Box<dyn StdError>> {
 
     // Spawn a Pebble CA and a challenge response server.
     debug!("starting Pebble CA environment");
-    let pebble = EnvironmentConfig::default().run().await?;
+    let pebble = Environment::new(EnvironmentConfig::default()).await?;
 
     // Create a test account with the Pebble CA.
     let mut account = pebble.new_account().await?;
@@ -75,7 +75,7 @@ async fn dns_01() -> Result<(), Box<dyn StdError>> {
 
     // Spawn a Pebble CA and a challenge response server.
     debug!("starting Pebble CA environment");
-    let pebble = EnvironmentConfig::default().run().await?;
+    let pebble = Environment::new(EnvironmentConfig::default()).await?;
 
     // Create a test account with the Pebble CA.
     let mut account = pebble.new_account().await?;
@@ -99,7 +99,7 @@ async fn tls_alpn_01() -> Result<(), Box<dyn StdError>> {
 
     // Spawn a Pebble CA and a challenge response server.
     debug!("starting Pebble CA environment");
-    let pebble = EnvironmentConfig::default().run().await?;
+    let pebble = Environment::new(EnvironmentConfig::default()).await?;
 
     // Create a test account with the Pebble CA.
     let mut account = pebble.new_account().await?;
@@ -129,6 +129,83 @@ struct Environment {
 }
 
 impl Environment {
+    /// Create a new [`Environment`] with running Pebble and challenge test servers.
+    async fn new(config: EnvironmentConfig) -> io::Result<Environment> {
+        #[derive(Clone, Serialize)]
+        struct ConfigWrapper<'a> {
+            pebble: &'a PebbleConfig,
+        }
+
+        let config_file = NamedTempFile::new()?;
+        let config_json = serde_json::to_string_pretty(&ConfigWrapper {
+            pebble: &config.pebble,
+        })?;
+        trace!(config = config_json, "using static config");
+        fs::write(&config_file, config_json)?;
+
+        let pebble_path = env::var("PEBBLE").unwrap_or_else(|_| "./pebble".to_owned());
+        let challtestsrv_path =
+            env::var("CHALLTESTSRV").unwrap_or_else(|_| "./pebble-challtestsrv".to_owned());
+
+        let pebble = Subprocess::new(
+            Command::new(&pebble_path)
+                .arg("-config")
+                .arg(config_file.path())
+                .arg("-dnsserver")
+                .arg(format!("[::1]:{}", config.dns_port))
+                .arg("-strict"),
+        )?;
+
+        // Note: we bind `[::1]` for the challenge test server because by default it will
+        //  return both A and AAAA records.
+        let challtestsrv = Subprocess::new(
+            Command::new(&challtestsrv_path)
+                .arg("-management")
+                .arg(format!("[::1]:{}", config.challtestsrv_port))
+                .arg("-dns01")
+                .arg(format!("[::1]:{}", config.dns_port))
+                .arg("-http01")
+                .arg(format!("[::1]:{}", config.pebble.http_port))
+                .arg("-tlsalpn01")
+                .arg(format!("[::1]:{}", config.pebble.tls_port))
+                .arg("-https01")
+                .arg("") // Disable HTTP-01 over https:// redirect challenges.
+                .arg("-doh")
+                .arg(""), // Disable DoH interface.
+        )?;
+
+        wait_for_server(&config.pebble.listen_address).await;
+
+        // Trust the Pebble management interface root CA.
+        let mut roots = RootCertStore::empty();
+        roots.add_parsable_certificates(
+            CertificateDer::pem_file_iter("tests/testdata/ca.pem")
+                .unwrap()
+                .map(|result| result.unwrap()),
+        );
+
+        let client = HyperClient::builder(TokioExecutor::new()).build(
+            hyper_rustls::HttpsConnectorBuilder::new()
+                .with_tls_config(
+                    rustls::ClientConfig::builder()
+                        .with_root_certificates(roots)
+                        .with_no_client_auth(),
+                )
+                .https_or_http()
+                .enable_http1()
+                .enable_http2()
+                .build(),
+        );
+
+        Ok(Self {
+            config,
+            config_file,
+            pebble,
+            challtestsrv,
+            client,
+        })
+    }
+
     /// Create a new `Account` with the ACME server.
     async fn new_account(&self) -> Result<Account, Box<dyn StdError>> {
         debug!("creating test account");
@@ -459,87 +536,6 @@ struct EnvironmentConfig {
     pebble: PebbleConfig,
     dns_port: u16,
     challtestsrv_port: u16,
-}
-
-impl EnvironmentConfig {
-    /// Consume the [`EnvironmentConfig`] and start a Pebble and challenge test servers.
-    ///
-    /// Returns the running [`Environment`] when successful.
-    async fn run(self) -> io::Result<Environment> {
-        #[derive(Clone, Serialize)]
-        struct ConfigWrapper<'a> {
-            pebble: &'a PebbleConfig,
-        }
-
-        let config_file = NamedTempFile::new()?;
-        let config_json = serde_json::to_string_pretty(&ConfigWrapper {
-            pebble: &self.pebble,
-        })?;
-        trace!(config = config_json, "using static config");
-        fs::write(&config_file, config_json)?;
-
-        let pebble_path = env::var("PEBBLE").unwrap_or_else(|_| "./pebble".to_owned());
-        let challtestsrv_path =
-            env::var("CHALLTESTSRV").unwrap_or_else(|_| "./pebble-challtestsrv".to_owned());
-
-        let pebble = Subprocess::new(
-            Command::new(&pebble_path)
-                .arg("-config")
-                .arg(config_file.path())
-                .arg("-dnsserver")
-                .arg(format!("[::1]:{}", self.dns_port))
-                .arg("-strict"),
-        )?;
-
-        // Note: we bind `[::1]` for the challenge test server because by default it will
-        //  return both A and AAAA records.
-        let challtestsrv = Subprocess::new(
-            Command::new(&challtestsrv_path)
-                .arg("-management")
-                .arg(format!("[::1]:{}", self.challtestsrv_port))
-                .arg("-dns01")
-                .arg(format!("[::1]:{}", self.dns_port))
-                .arg("-http01")
-                .arg(format!("[::1]:{}", self.pebble.http_port))
-                .arg("-tlsalpn01")
-                .arg(format!("[::1]:{}", self.pebble.tls_port))
-                .arg("-https01")
-                .arg("") // Disable HTTP-01 over https:// redirect challenges.
-                .arg("-doh")
-                .arg(""), // Disable DoH interface.
-        )?;
-
-        wait_for_server(&self.pebble.listen_address).await;
-
-        // Trust the Pebble management interface root CA.
-        let mut roots = RootCertStore::empty();
-        roots.add_parsable_certificates(
-            CertificateDer::pem_file_iter("tests/testdata/ca.pem")
-                .unwrap()
-                .map(|result| result.unwrap()),
-        );
-
-        let client = HyperClient::builder(TokioExecutor::new()).build(
-            hyper_rustls::HttpsConnectorBuilder::new()
-                .with_tls_config(
-                    rustls::ClientConfig::builder()
-                        .with_root_certificates(roots)
-                        .with_no_client_auth(),
-                )
-                .https_or_http()
-                .enable_http1()
-                .enable_http2()
-                .build(),
-        );
-
-        Ok(Environment {
-            config: self,
-            config_file,
-            pebble,
-            challtestsrv,
-            client,
-        })
-    }
 }
 
 impl Default for EnvironmentConfig {
