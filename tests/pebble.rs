@@ -215,7 +215,7 @@ impl Environment {
                 terms_of_service_agreed: true,
                 only_return_existing: false,
             },
-            &self.directory_url(),
+            &format!("https://{}/dir", &self.config.pebble.listen_address),
             None,
             Box::new(self.client.clone()),
         )
@@ -416,10 +416,6 @@ impl Environment {
             )
             .await?;
         Ok(())
-    }
-
-    fn directory_url(&self) -> String {
-        format!("https://{}/dir", &self.config.pebble.listen_address)
     }
 }
 
