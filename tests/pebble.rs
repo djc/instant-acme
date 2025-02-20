@@ -12,7 +12,6 @@ use std::sync::atomic::{AtomicU16, Ordering};
 use std::time::Duration;
 use std::{env, fs};
 
-use async_trait::async_trait;
 use bytes::{Buf, Bytes};
 use http::header::CONTENT_TYPE;
 use http::{Method, Request};
@@ -214,18 +213,15 @@ impl Environment {
             let key_authz = order.key_authorization(challenge);
             match chal_type {
                 ChallengeType::Http01 => {
-                    Http01
-                        .provision(self, identifier, challenge, &key_authz)
+                    self.request_challenge::<Http01>(identifier, challenge, &key_authz)
                         .await?
                 }
                 ChallengeType::Dns01 => {
-                    Dns01
-                        .provision(self, identifier, challenge, &key_authz)
+                    self.request_challenge::<Dns01>(identifier, challenge, &key_authz)
                         .await?
                 }
                 ChallengeType::TlsAlpn01 => {
-                    Alpn01
-                        .provision(self, identifier, challenge, &key_authz)
+                    self.request_challenge::<Alpn01>(identifier, challenge, &key_authz)
                         .await?
                 }
                 ChallengeType::Unknown(chal_type) => {
@@ -346,21 +342,21 @@ impl Environment {
         Ok(roots)
     }
 
-    async fn request_challenge(
+    async fn request_challenge<A: AuthorizationMethod>(
         &self,
-        path: &str,
-        body: &impl Serialize,
+        identifier: &str,
+        challenge: &Challenge,
+        key_auth: &KeyAuthorization,
     ) -> Result<(), Box<dyn StdError>> {
+        let url = format!("http://[::1]:{}/{}", self.config.challtestsrv_port, A::PATH);
+        let body = serde_json::to_vec(&A::authz_request(identifier, challenge, key_auth))?;
         self.client
             .request(
                 Request::builder()
                     .method(Method::POST)
-                    .uri(format!(
-                        "http://[::1]:{}/{}",
-                        self.config.challtestsrv_port, path
-                    ))
+                    .uri(url)
                     .header(CONTENT_TYPE, "application/json")
-                    .body(Full::from(serde_json::to_vec(body)?))?,
+                    .body(Full::from(body))?,
             )
             .await?;
         Ok(())
@@ -373,15 +369,12 @@ impl Environment {
 
 struct Http01;
 
-#[async_trait]
 impl AuthorizationMethod for Http01 {
-    async fn provision(
-        &self,
-        env: &Environment,
-        _identifier: &str,
-        challenge: &Challenge,
-        key_auth: &KeyAuthorization,
-    ) -> Result<(), Box<dyn StdError>> {
+    fn authz_request<'a>(
+        _identifier: &'a str,
+        challenge: &'a Challenge,
+        key_auth: &'a KeyAuthorization,
+    ) -> impl Serialize + 'a {
         debug!(
             token = challenge.token,
             key_auth = key_auth.as_str(),
@@ -394,54 +387,47 @@ impl AuthorizationMethod for Http01 {
             content: &'a str,
         }
 
-        env.request_challenge(
-            "add-http01",
-            &AddHttp01Request {
-                token: &challenge.token,
-                content: key_auth.as_str(),
-            },
-        )
-        .await
+        AddHttp01Request {
+            token: &challenge.token,
+            content: key_auth.as_str(),
+        }
     }
+
+    const PATH: &str = "add-http01";
 }
 
 struct Dns01;
 
-#[async_trait]
 impl AuthorizationMethod for Dns01 {
-    async fn provision(
-        &self,
-        env: &Environment,
-        identifier: &str,
-        _challenge: &Challenge,
-        key_auth: &KeyAuthorization,
-    ) -> Result<(), Box<dyn StdError>> {
-        let host = &format!("_acme-challenge.{}.", identifier);
-        let value = &key_auth.dns_value();
-        debug!(host, value, "provisioning DNS-01 response",);
+    fn authz_request<'a>(
+        identifier: &'a str,
+        _challenge: &'a Challenge,
+        key_auth: &'a KeyAuthorization,
+    ) -> impl Serialize + 'a {
+        let host = format!("_acme-challenge.{}.", identifier);
+        let value = key_auth.dns_value();
+        debug!(host, value, "provisioning DNS-01 response");
 
         #[derive(Serialize)]
-        struct AddDns01Request<'a> {
-            host: &'a str,
-            value: &'a str,
+        struct AddDns01Request {
+            host: String,
+            value: String,
         }
 
-        env.request_challenge("set-txt", &AddDns01Request { host, value })
-            .await
+        AddDns01Request { host, value }
     }
+
+    const PATH: &str = "set-txt";
 }
 
 struct Alpn01;
 
-#[async_trait]
 impl AuthorizationMethod for Alpn01 {
-    async fn provision(
-        &self,
-        env: &Environment,
-        identifier: &str,
-        _challenge: &Challenge,
-        key_auth: &KeyAuthorization,
-    ) -> Result<(), Box<dyn StdError>> {
+    fn authz_request<'a>(
+        identifier: &'a str,
+        _challenge: &'a Challenge,
+        key_auth: &'a KeyAuthorization,
+    ) -> impl Serialize + 'a {
         debug!(
             identifier,
             key_auth = key_auth.as_str(),
@@ -454,30 +440,27 @@ impl AuthorizationMethod for Alpn01 {
             content: &'a str,
         }
 
-        env.request_challenge(
-            "add-tlsalpn01",
-            &AddAlpn01Request {
-                host: &identifier,
-                // Note: pebble-challtestsrv wants to hash the key auth itself, so we
-                // don't use key_auth.digest() here.
-                content: key_auth.as_str(),
-            },
-        )
-        .await
+        AddAlpn01Request {
+            host: identifier,
+            // Note: pebble-challtestsrv wants to hash the key auth itself, so we
+            // don't use key_auth.digest() here.
+            content: key_auth.as_str(),
+        }
     }
+
+    const PATH: &str = "add-tlsalpn01";
 }
 
 /// A trait for something able to provision a challenge response with an external system
-#[async_trait]
 trait AuthorizationMethod {
     /// Provision a challenge response for the given identifier, challenge, and key auth.
-    async fn provision(
-        &self,
-        env: &Environment,
-        identifier: &str,
-        challenge: &Challenge,
-        key_auth: &KeyAuthorization,
-    ) -> Result<(), Box<dyn StdError>>;
+    fn authz_request<'a>(
+        identifier: &'a str,
+        challenge: &'a Challenge,
+        key_auth: &'a KeyAuthorization,
+    ) -> impl Serialize + 'a;
+
+    const PATH: &str;
 }
 
 /// Wait for the server at the given address to be ready.
