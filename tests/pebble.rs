@@ -50,12 +50,10 @@ async fn http_01() -> Result<(), Box<dyn StdError>> {
 
     // Spawn a Pebble CA and a challenge response server.
     debug!("starting Pebble CA environment");
-    let mut pebble = Environment::new(EnvironmentConfig::default()).await?;
-
-    // Issue a certificate w/ HTTP-01 challenge.
-    let identifiers = &["http01.example.com"];
-    let cert_chain = pebble.complete_order::<Http01>(identifiers).await?;
-    pebble.verify_cert(identifiers, cert_chain).await
+    Environment::new(EnvironmentConfig::default())
+        .await?
+        .test::<Http01>(&["http01.example.com"])
+        .await
 }
 
 #[tokio::test]
@@ -68,12 +66,10 @@ async fn dns_01() -> Result<(), Box<dyn StdError>> {
 
     // Spawn a Pebble CA and a challenge response server.
     debug!("starting Pebble CA environment");
-    let mut pebble = Environment::new(EnvironmentConfig::default()).await?;
-
-    // Issue a certificate w/ DNS-01 challenge.
-    let identifiers = &["dns01.example.com"];
-    let cert_chain = pebble.complete_order::<Dns01>(identifiers).await?;
-    pebble.verify_cert(identifiers, cert_chain).await
+    Environment::new(EnvironmentConfig::default())
+        .await?
+        .test::<Dns01>(&["dns01.example.com"])
+        .await
 }
 
 #[tokio::test]
@@ -86,12 +82,10 @@ async fn tls_alpn_01() -> Result<(), Box<dyn StdError>> {
 
     // Spawn a Pebble CA and a challenge response server.
     debug!("starting Pebble CA environment");
-    let mut pebble = Environment::new(EnvironmentConfig::default()).await?;
-
-    // Issue a certificate w/ TLS-ALPN-01 challenge.
-    let identifiers = &["tls-alpn.example.com"];
-    let cert_chain = pebble.complete_order::<Alpn01>(identifiers).await?;
-    pebble.verify_cert(identifiers, cert_chain).await
+    Environment::new(EnvironmentConfig::default())
+        .await?
+        .test::<Alpn01>(&["dns01.example.com"])
+        .await
 }
 
 /// A test environment running Pebble and a challenge test server.
@@ -204,15 +198,12 @@ impl Environment {
         })
     }
 
-    /// Create and finalize an ACME order for the given `Account` and `Identifier`s using
-    /// the specified `ChallengeType`.
-    ///
-    /// Returns the issued certificate chain unless an error occurs.
-    async fn complete_order<A: AuthorizationMethod>(
+    /// Test certificates for an authorization method and a set of identifiers.
+    async fn test<A: AuthorizationMethod>(
         &mut self,
-        identifiers: &[&'static str],
-    ) -> Result<Vec<CertificateDer<'static>>, Box<dyn StdError + 'static>> {
-        let identifiers = identifiers
+        names: &[&'static str],
+    ) -> Result<(), Box<dyn StdError + 'static>> {
+        let identifiers = names
             .iter()
             .map(|id| Identifier::Dns(id.to_string()))
             .collect::<Vec<_>>();
@@ -265,7 +256,29 @@ impl Environment {
         }
 
         // Issue a certificate for the names and test the chain validates to the issuer root.
-        self.certificate(&mut order, &names).await
+        let cert_chain = self.certificate(&mut order, &names).await?;
+
+        // Split off and parse the EE cert, save the intermediates that follow.
+        let (ee_cert, intermediates) = cert_chain.split_first().unwrap();
+        let ee_cert = ParsedCertificate::try_from(ee_cert).unwrap();
+
+        // Use the default crypto provider to verify the certificate chain to the Pebble CA root.
+        let crypto_provider = CryptoProvider::get_default().unwrap();
+        verify_server_cert_signed_by_trust_anchor(
+            &ee_cert,
+            &self.issuer_roots().await?,
+            intermediates,
+            UnixTime::now(),
+            crypto_provider.signature_verification_algorithms.all,
+        )
+        .unwrap();
+
+        // Verify the EE cert is valid for each of the identifiers.
+        for ident in names {
+            verify_server_name(&ee_cert, &ServerName::try_from(ident)?)?;
+        }
+
+        Ok(())
     }
 
     /// Issue a certificate for the given order, and identifiers.
@@ -300,34 +313,6 @@ impl Environment {
         Ok(CertificateDer::pem_slice_iter(cert_chain_pem.as_bytes())
             .map(|result| result.unwrap())
             .collect())
-    }
-
-    async fn verify_cert(
-        &self,
-        identifiers: &[&'static str],
-        cert_chain: Vec<CertificateDer<'static>>,
-    ) -> Result<(), Box<dyn StdError>> {
-        // Split off and parse the EE cert, save the intermediates that follow.
-        let (ee_cert, intermediates) = cert_chain.split_first().unwrap();
-        let ee_cert = ParsedCertificate::try_from(ee_cert).unwrap();
-
-        // Use the default crypto provider to verify the certificate chain to the Pebble CA root.
-        let crypto_provider = CryptoProvider::get_default().unwrap();
-        verify_server_cert_signed_by_trust_anchor(
-            &ee_cert,
-            &self.issuer_roots().await?,
-            intermediates,
-            UnixTime::now(),
-            crypto_provider.signature_verification_algorithms.all,
-        )
-        .unwrap();
-
-        // Verify the EE cert is valid for each of the identifiers.
-        for ident in identifiers {
-            verify_server_name(&ee_cert, &ServerName::try_from(*ident)?)?;
-        }
-
-        Ok(())
     }
 
     /// Return a RootCertStore containing the issuer root for the Pebble CA.
