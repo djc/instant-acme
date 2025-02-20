@@ -88,7 +88,7 @@ async fn tls_alpn_01() -> Result<(), Box<dyn StdError>> {
         .await
 }
 
-/// A test environment running Pebble and a challenge test server.
+/// A test environment running Pebble and a challenge test server
 ///
 /// Subprocesses are torn down cleanly on drop to avoid leaving
 /// stray child processes.
@@ -105,7 +105,7 @@ struct Environment {
 }
 
 impl Environment {
-    /// Create a new [`Environment`] with running Pebble and challenge test servers.
+    /// Create a new [`Environment`] with running Pebble and challenge test servers
     async fn new(config: EnvironmentConfig) -> Result<Environment, Box<dyn StdError>> {
         #[derive(Clone, Serialize)]
         struct ConfigWrapper<'a> {
@@ -198,7 +198,7 @@ impl Environment {
         })
     }
 
-    /// Test certificates for an authorization method and a set of identifiers.
+    /// Test certificates for an authorization method and a set of identifiers
     async fn test<A: AuthorizationMethod>(
         &mut self,
         names: &[&'static str],
@@ -281,7 +281,7 @@ impl Environment {
         Ok(())
     }
 
-    /// Issue a certificate for the given order, and identifiers.
+    /// Issue a certificate for the given order, and identifiers
     ///
     /// The issued certificate chain is verified with the provider roots.
     async fn certificate(
@@ -315,7 +315,7 @@ impl Environment {
             .collect())
     }
 
-    /// Return a RootCertStore containing the issuer root for the Pebble CA.
+    /// Return a RootCertStore containing the issuer root for the Pebble CA
     ///
     /// This is distinct from the management root CA, and is randomly generated each
     /// time that Pebble starts up. This is the issuer that signs the randomly generated
@@ -467,7 +467,8 @@ trait AuthorizationMethod {
     const TYPE: ChallengeType;
 }
 
-/// Wait for the server at the given address to be ready.
+/// Wait for the server at the given address to be ready
+///
 /// Sleeps a longer duration after each attempt and panics after 10 failed attempts.
 async fn wait_for_server(addr: &str) {
     for i in 0..10 {
@@ -479,7 +480,7 @@ async fn wait_for_server(addr: &str) {
     panic!("failed to connect to {addr:?} after 10 tries");
 }
 
-/// Configuration for running a test [`Environment`] with unique per-environment ports.
+/// Configuration for running a test [`Environment`] with unique per-environment ports
 struct EnvironmentConfig {
     pebble: PebbleConfig,
     dns_port: u16,
@@ -554,10 +555,10 @@ impl Default for PebbleConfig {
 
 #[derive(Clone, Serialize)]
 struct RetryConfig {
-    /// Duration to add to pending authorization retry-after headers.
+    /// Duration to add to pending authorization retry-after headers
     #[serde(serialize_with = "duration_as_secs")]
     authz: Duration,
-    /// Duration to add to pending order authorization retry-after headers.
+    /// Duration to add to pending order authorization retry-after headers
     #[serde(serialize_with = "duration_as_secs")]
     order: Duration,
 }
@@ -566,7 +567,7 @@ struct RetryConfig {
 #[serde(rename_all = "camelCase")]
 struct Profile {
     description: &'static str,
-    /// lifetime of issued end entity certificates, expressed in seconds.
+    /// lifetime of issued end entity certificates, expressed in seconds
     #[serde(serialize_with = "duration_as_secs")]
     validity_period: Duration,
 }
@@ -575,7 +576,7 @@ fn duration_as_secs<S: Serializer>(duration: &Duration, serializer: S) -> Result
     serializer.serialize_u64(duration.as_secs())
 }
 
-/// A wrapper type for a subprocess that ensures it is killed and waited on drop.
+/// A wrapper type for a subprocess that ensures it is killed and waited on drop
 struct Subprocess(Option<Child>);
 
 impl Subprocess {
