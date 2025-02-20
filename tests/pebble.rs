@@ -179,8 +179,6 @@ impl Environment {
         identifiers: &[&'static str],
         chal_type: ChallengeType,
     ) -> Result<Vec<CertificateDer<'static>>, Box<dyn StdError + 'static>> {
-        let auth_method: Box<dyn AuthorizationMethod> = (&chal_type).try_into()?;
-
         let identifiers = identifiers
             .iter()
             .map(|id| Identifier::Dns(id.to_string()))
@@ -213,14 +211,27 @@ impl Environment {
 
             let Identifier::Dns(identifier) = &authz.identifier;
 
-            auth_method
-                .provision(
-                    self,
-                    identifier,
-                    challenge,
-                    &order.key_authorization(challenge),
-                )
-                .await?;
+            let key_authz = order.key_authorization(challenge);
+            match chal_type {
+                ChallengeType::Http01 => {
+                    Http01 {}
+                        .provision(self, identifier, challenge, &key_authz)
+                        .await?
+                }
+                ChallengeType::Dns01 => {
+                    Dns01 {}
+                        .provision(self, identifier, challenge, &key_authz)
+                        .await?
+                }
+                ChallengeType::TlsAlpn01 => {
+                    Alpn01 {}
+                        .provision(self, identifier, challenge, &key_authz)
+                        .await?
+                }
+                ChallengeType::Unknown(chal_type) => {
+                    return Err(format!("unknown challenge type: {chal_type}").into())
+                }
+            }
 
             challenges.push((identifier, &challenge.url));
             names.push(identifier.clone());
@@ -467,21 +478,6 @@ trait AuthorizationMethod {
         challenge: &Challenge,
         key_auth: &KeyAuthorization,
     ) -> Result<(), Box<dyn StdError>>;
-}
-
-impl TryFrom<&ChallengeType> for Box<dyn AuthorizationMethod> {
-    type Error = String;
-
-    fn try_from(value: &ChallengeType) -> Result<Self, Self::Error> {
-        Ok(match value {
-            ChallengeType::Http01 => Box::new(Http01 {}),
-            ChallengeType::Dns01 => Box::new(Dns01 {}),
-            ChallengeType::TlsAlpn01 => Box::new(Alpn01 {}),
-            ChallengeType::Unknown(chal_type) => {
-                return Err(format!("unknown challenge type: {chal_type}"))
-            }
-        })
-    }
 }
 
 /// Wait for the server at the given address to be ready.
