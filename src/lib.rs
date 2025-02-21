@@ -11,19 +11,19 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use async_trait::async_trait;
-use base64::prelude::{Engine, BASE64_URL_SAFE_NO_PAD};
+use base64::prelude::{BASE64_URL_SAFE_NO_PAD, Engine};
 use bytes::Bytes;
 use http::header::{CONTENT_TYPE, LOCATION};
 use http::{Method, Request, Response, StatusCode};
 use http_body_util::{BodyExt, Full};
 #[cfg(feature = "hyper-rustls")]
-use hyper_util::client::legacy::connect::Connect;
-#[cfg(feature = "hyper-rustls")]
 use hyper_util::client::legacy::Client as HyperClient;
 #[cfg(feature = "hyper-rustls")]
+use hyper_util::client::legacy::connect::Connect;
+#[cfg(feature = "hyper-rustls")]
 use hyper_util::{client::legacy::connect::HttpConnector, rt::TokioExecutor};
-use serde::de::DeserializeOwned;
 use serde::Serialize;
+use serde::de::DeserializeOwned;
 use tokio::time::sleep;
 
 mod types;
@@ -882,10 +882,10 @@ mod crypto {
     #[cfg(all(feature = "ring", not(feature = "fips")))]
     pub(crate) use ring as ring_like;
 
-    pub(crate) use ring_like::digest::{digest, Digest, SHA256};
+    pub(crate) use ring_like::digest::{Digest, SHA256, digest};
     pub(crate) use ring_like::error::{KeyRejected, Unspecified};
     pub(crate) use ring_like::rand::SystemRandom;
-    pub(crate) use ring_like::signature::{EcdsaKeyPair, ECDSA_P256_SHA256_FIXED_SIGNING};
+    pub(crate) use ring_like::signature::{ECDSA_P256_SHA256_FIXED_SIGNING, EcdsaKeyPair};
     pub(crate) use ring_like::signature::{KeyPair, Signature};
     pub(crate) use ring_like::{hmac, pkcs8};
 

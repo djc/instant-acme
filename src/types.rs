@@ -1,6 +1,6 @@
 use std::fmt;
 
-use base64::prelude::{Engine, BASE64_URL_SAFE_NO_PAD};
+use base64::prelude::{BASE64_URL_SAFE_NO_PAD, Engine};
 use bytes::Bytes;
 use rustls_pki_types::CertificateDer;
 use serde::de::DeserializeOwned;
@@ -8,8 +8,8 @@ use serde::ser::SerializeMap;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
-use crate::crypto::{self, KeyPair};
 use crate::BytesResponse;
+use crate::crypto::{self, KeyPair};
 
 /// Error type for instant-acme
 #[derive(Debug, Error)]
@@ -84,8 +84,8 @@ pub struct AccountCredentials {
 mod pkcs8_serde {
     use std::fmt;
 
-    use base64::prelude::{Engine, BASE64_URL_SAFE_NO_PAD};
-    use serde::{de, Deserializer, Serializer};
+    use base64::prelude::{BASE64_URL_SAFE_NO_PAD, Engine};
+    use serde::{Deserializer, Serializer, de};
 
     pub(crate) fn serialize<S>(key_pkcs8: &[u8], serializer: S) -> Result<S::Ok, S::Error>
     where
