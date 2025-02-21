@@ -12,6 +12,8 @@ use std::sync::atomic::{AtomicU16, Ordering};
 use std::time::Duration;
 use std::{env, fs};
 
+use base64::Engine;
+use base64::prelude::BASE64_URL_SAFE_NO_PAD;
 use bytes::{Buf, Bytes};
 use http::header::CONTENT_TYPE;
 use http::{Method, Request};
@@ -20,8 +22,8 @@ use hyper_util::client::legacy::Client as HyperClient;
 use hyper_util::client::legacy::connect::HttpConnector;
 use hyper_util::rt::TokioExecutor;
 use instant_acme::{
-    Account, AuthorizationStatus, Challenge, ChallengeType, Error, Identifier, KeyAuthorization,
-    NewAccount, NewOrder, Order, OrderStatus,
+    Account, AuthorizationStatus, Challenge, ChallengeType, Error, ExternalAccountKey, Identifier,
+    KeyAuthorization, NewAccount, NewOrder, Order, OrderStatus,
 };
 use rcgen::{CertificateParams, DistinguishedName, KeyPair};
 use rustls::RootCertStore;
@@ -109,6 +111,40 @@ async fn forbidden_identifier() -> Result<(), Box<dyn StdError>> {
     );
 
     Ok(())
+}
+
+/// Test that account registration works when external account binding is required
+#[tokio::test]
+#[ignore]
+async fn eab_required() -> Result<(), Box<dyn StdError>> {
+    try_tracing_init();
+
+    // Creating an environment with external account binding required, but not providing
+    // an external account key should provoke an error.
+    let mut config = EnvironmentConfig::default();
+    config.pebble.external_account_binding_required = true;
+    let err = Environment::new(config).await.map(|_| ()).unwrap_err();
+    let Error::Api(problem) = *err.downcast::<Error>()? else {
+        panic!("unexpected error result");
+    };
+    assert_eq!(
+        problem.r#type.as_deref(),
+        Some("urn:ietf:params:acme:error:externalAccountRequired")
+    );
+
+    // Setting a valid external account key should allow account creation to succeed.
+    let eab_id = "test-account";
+    let eab_hmac_key = "zWNDZM6eQGHWpSRTPal5eIUYFTu7EajVIoguysqZ9wG44nMEtx3MUAsUDkMTQ12W";
+    let raw_eab_hmac_key = BASE64_URL_SAFE_NO_PAD.decode(eab_hmac_key).unwrap();
+    let mac_keys = [(eab_id, eab_hmac_key)].into();
+    let mut config = EnvironmentConfig::default();
+    config.pebble.external_account_binding_required = true;
+    config.pebble.external_account_mac_keys = mac_keys;
+    config.eab_key = Some(ExternalAccountKey::new(
+        eab_id.to_string(),
+        raw_eab_hmac_key.as_ref(),
+    ));
+    Environment::new(config).await.map(|_| ())
 }
 
 fn try_tracing_init() {
@@ -214,7 +250,7 @@ impl Environment {
                 only_return_existing: false,
             },
             &format!("https://{}/dir", &config.pebble.listen_address),
-            None,
+            config.eab_key.as_ref(),
             Box::new(client.clone()),
         )
         .await?;
@@ -517,6 +553,7 @@ struct EnvironmentConfig {
     pebble: PebbleConfig,
     dns_port: u16,
     challtestsrv_port: u16,
+    eab_key: Option<ExternalAccountKey>,
 }
 
 impl Default for EnvironmentConfig {
@@ -525,6 +562,7 @@ impl Default for EnvironmentConfig {
             pebble: PebbleConfig::default(),
             dns_port: NEXT_PORT.fetch_add(1, Ordering::SeqCst),
             challtestsrv_port: NEXT_PORT.fetch_add(1, Ordering::SeqCst),
+            eab_key: None,
         }
     }
 }
