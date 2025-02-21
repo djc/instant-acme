@@ -21,7 +21,7 @@ specification.
 * Support for certificate revocation
 * Uses hyper with rustls and Tokio for HTTP requests
 * Uses *ring* or aws-lc-rs for ECDSA signing
-* Minimum supported Rust version: 1.63
+* Minimum supported Rust version (MSRV): 1.70
 
 ## Cargo features
 
