@@ -19,9 +19,9 @@ use http_body_util::{BodyExt, Full};
 #[cfg(feature = "hyper-rustls")]
 use hyper_util::client::legacy::Client as HyperClient;
 #[cfg(feature = "hyper-rustls")]
-use hyper_util::client::legacy::connect::Connect;
+use hyper_util::client::legacy::connect::{Connect, HttpConnector};
 #[cfg(feature = "hyper-rustls")]
-use hyper_util::{client::legacy::connect::HttpConnector, rt::TokioExecutor};
+use hyper_util::rt::TokioExecutor;
 use serde::Serialize;
 use serde::de::DeserializeOwned;
 use tokio::time::sleep;
