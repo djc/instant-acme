@@ -35,7 +35,7 @@ If `fips` is enabled, `aws-lc-rs` is used; otherwise, `ring` is used.
 
 ## Limitations
 
-* Only supports ECDSA keys for now
+* Only supports P-256 ECDSA account keys for now
 
 ## Getting started
 
