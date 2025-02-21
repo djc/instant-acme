@@ -131,6 +131,11 @@ pub struct Problem {
     pub detail: Option<String>,
     /// The HTTP status code returned for this response
     pub status: Option<u16>,
+    /// One or more subproblems associated with specific identifiers
+    ///
+    /// See <https://www.rfc-editor.org/rfc/rfc8555#section-6.7.1>
+    #[serde(default)]
+    pub subproblems: Vec<Subproblem>,
 }
 
 impl Problem {
@@ -159,11 +164,55 @@ impl fmt::Display for Problem {
             write!(f, " ({})", r#type)?;
         }
 
+        if !self.subproblems.is_empty() {
+            let count = self.subproblems.len();
+            write!(f, ": {count} subproblems: ")?;
+            for (i, subproblem) in self.subproblems.iter().enumerate() {
+                write!(f, "{subproblem}")?;
+                if i != count - 1 {
+                    f.write_str(", ")?;
+                }
+            }
+        }
+
         Ok(())
     }
 }
 
 impl std::error::Error for Problem {}
+
+/// An RFC 8555 subproblem document contained within a problem returned by the ACME server
+///
+/// See <https://www.rfc-editor.org/rfc/rfc8555#section-6.7.1>
+#[derive(Clone, Debug, Deserialize)]
+pub struct Subproblem {
+    /// The identifier associated with this problem
+    pub identifier: Option<Identifier>,
+    /// One of an enumerated list of problem types
+    ///
+    /// See <https://datatracker.ietf.org/doc/html/rfc8555#section-6.7>
+    pub r#type: Option<String>,
+    /// A human-readable explanation of the problem
+    pub detail: Option<String>,
+}
+
+impl fmt::Display for Subproblem {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        if let Some(identifier) = &self.identifier {
+            write!(f, r#"for "{identifier}""#)?;
+        }
+
+        if let Some(detail) = &self.detail {
+            write!(f, ": {detail}")?;
+        }
+
+        if let Some(r#type) = &self.r#type {
+            write!(f, " ({})", r#type)?;
+        }
+
+        Ok(())
+    }
+}
 
 #[derive(Debug, Serialize)]
 pub(crate) struct FinalizeRequest {
@@ -644,5 +693,81 @@ mod tests {
             obj.detail,
             Some("No authorization provided for name example.org".into())
         );
+        assert!(obj.subproblems.is_empty());
+    }
+
+    // https://www.rfc-editor.org/rfc/rfc8555#section-6.7.1
+    #[test]
+    fn subproblems() {
+        const PROBLEM: &str = r#"{
+            "type": "urn:ietf:params:acme:error:malformed",
+            "detail": "Some of the identifiers requested were rejected",
+            "subproblems": [
+                {
+                    "type": "urn:ietf:params:acme:error:malformed",
+                    "detail": "Invalid underscore in DNS name \"_example.org\"",
+                    "identifier": {
+                        "type": "dns",
+                        "value": "_example.org"
+                    }
+                },
+                {
+                    "type": "urn:ietf:params:acme:error:rejectedIdentifier",
+                    "detail": "This CA will not issue for \"example.net\"",
+                    "identifier": {
+                        "type": "dns",
+                        "value": "example.net"
+                    }
+                }
+            ]
+        }"#;
+
+        let obj = serde_json::from_str::<Problem>(PROBLEM).unwrap();
+        assert_eq!(
+            obj.r#type,
+            Some("urn:ietf:params:acme:error:malformed".into())
+        );
+        assert_eq!(
+            obj.detail,
+            Some("Some of the identifiers requested were rejected".into())
+        );
+
+        let subproblems = &obj.subproblems;
+        assert_eq!(subproblems.len(), 2);
+
+        let first_subproblem = subproblems.first().unwrap();
+        assert_eq!(
+            first_subproblem.identifier,
+            Some(Identifier::Dns("_example.org".into()))
+        );
+        assert_eq!(
+            first_subproblem.r#type,
+            Some("urn:ietf:params:acme:error:malformed".into())
+        );
+        assert_eq!(
+            first_subproblem.detail,
+            Some(r#"Invalid underscore in DNS name "_example.org""#.into())
+        );
+
+        let second_subproblem = subproblems.get(1).unwrap();
+        assert_eq!(
+            second_subproblem.identifier,
+            Some(Identifier::Dns("example.net".into()))
+        );
+        assert_eq!(
+            second_subproblem.r#type,
+            Some("urn:ietf:params:acme:error:rejectedIdentifier".into())
+        );
+        assert_eq!(
+            second_subproblem.detail,
+            Some(r#"This CA will not issue for "example.net""#.into())
+        );
+
+        let expected_display = "\
+    API error: Some of the identifiers requested were rejected (urn:ietf:params:acme:error:malformed): \
+    2 subproblems: \
+    for \"_example.org\": Invalid underscore in DNS name \"_example.org\" (urn:ietf:params:acme:error:malformed), \
+    for \"example.net\": This CA will not issue for \"example.net\" (urn:ietf:params:acme:error:rejectedIdentifier)";
+        assert_eq!(format!("{obj}"), expected_display);
     }
 }
