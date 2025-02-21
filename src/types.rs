@@ -456,6 +456,14 @@ pub enum Identifier {
     Dns(String),
 }
 
+impl fmt::Display for Identifier {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Dns(domain) => write!(f, "{domain}"),
+        }
+    }
+}
+
 /// The challenge type
 #[allow(missing_docs)]
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq)]
