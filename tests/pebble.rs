@@ -43,10 +43,7 @@ use tracing_subscriber::{EnvFilter, fmt};
 #[tokio::test]
 #[ignore]
 async fn http_01() -> Result<(), Box<dyn StdError>> {
-    let _ = tracing_subscriber::registry()
-        .with(fmt::layer())
-        .with(EnvFilter::from_default_env())
-        .try_init();
+    try_tracing_init();
 
     Environment::new(EnvironmentConfig::default())
         .await?
@@ -57,10 +54,7 @@ async fn http_01() -> Result<(), Box<dyn StdError>> {
 #[tokio::test]
 #[ignore]
 async fn dns_01() -> Result<(), Box<dyn StdError>> {
-    let _ = tracing_subscriber::registry()
-        .with(fmt::layer())
-        .with(EnvFilter::from_default_env())
-        .try_init();
+    try_tracing_init();
 
     Environment::new(EnvironmentConfig::default())
         .await?
@@ -71,10 +65,7 @@ async fn dns_01() -> Result<(), Box<dyn StdError>> {
 #[tokio::test]
 #[ignore]
 async fn tls_alpn_01() -> Result<(), Box<dyn StdError>> {
-    let _ = tracing_subscriber::registry()
-        .with(fmt::layer())
-        .with(EnvFilter::from_default_env())
-        .try_init();
+    try_tracing_init();
 
     Environment::new(EnvironmentConfig::default())
         .await?
@@ -86,10 +77,7 @@ async fn tls_alpn_01() -> Result<(), Box<dyn StdError>> {
 #[tokio::test]
 #[ignore]
 async fn forbidden_identifier() -> Result<(), Box<dyn StdError>> {
-    let _ = tracing_subscriber::registry()
-        .with(fmt::layer())
-        .with(EnvFilter::from_default_env())
-        .try_init();
+    try_tracing_init();
 
     let config = EnvironmentConfig::default();
     let forbidden_name = config.pebble.domain_blocklist.first().unwrap();
@@ -121,6 +109,13 @@ async fn forbidden_identifier() -> Result<(), Box<dyn StdError>> {
     );
 
     Ok(())
+}
+
+fn try_tracing_init() {
+    let _ = tracing_subscriber::registry()
+        .with(fmt::layer())
+        .with(EnvFilter::from_default_env())
+        .try_init();
 }
 
 /// A test environment running Pebble and a challenge test server
