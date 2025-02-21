@@ -16,20 +16,20 @@ use bytes::{Buf, Bytes};
 use http::header::CONTENT_TYPE;
 use http::{Method, Request};
 use http_body_util::{BodyExt, Full};
-use hyper_util::client::legacy::connect::HttpConnector;
 use hyper_util::client::legacy::Client as HyperClient;
+use hyper_util::client::legacy::connect::HttpConnector;
 use hyper_util::rt::TokioExecutor;
 use instant_acme::{
     Account, AuthorizationStatus, Challenge, ChallengeType, Identifier, KeyAuthorization,
     NewAccount, NewOrder, Order, OrderStatus,
 };
 use rcgen::{CertificateParams, DistinguishedName, KeyPair};
+use rustls::RootCertStore;
 use rustls::client::{verify_server_cert_signed_by_trust_anchor, verify_server_name};
 use rustls::crypto::CryptoProvider;
 use rustls::pki_types::pem::PemObject;
 use rustls::pki_types::{CertificateDer, ServerName};
 use rustls::server::ParsedCertificate;
-use rustls::RootCertStore;
 use rustls_pki_types::UnixTime;
 use serde::{Serialize, Serializer};
 use tempfile::NamedTempFile;
@@ -38,7 +38,7 @@ use tokio::time::sleep;
 use tracing::{debug, info, trace};
 use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::util::SubscriberInitExt;
-use tracing_subscriber::{fmt, EnvFilter};
+use tracing_subscriber::{EnvFilter, fmt};
 
 #[tokio::test]
 #[ignore]
