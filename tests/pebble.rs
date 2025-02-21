@@ -48,8 +48,6 @@ async fn http_01() -> Result<(), Box<dyn StdError>> {
         .with(EnvFilter::from_default_env())
         .try_init();
 
-    // Spawn a Pebble CA and a challenge response server.
-    debug!("starting Pebble CA environment");
     Environment::new(EnvironmentConfig::default())
         .await?
         .test::<Http01>(&["http01.example.com"])
@@ -64,8 +62,6 @@ async fn dns_01() -> Result<(), Box<dyn StdError>> {
         .with(EnvFilter::from_default_env())
         .try_init();
 
-    // Spawn a Pebble CA and a challenge response server.
-    debug!("starting Pebble CA environment");
     Environment::new(EnvironmentConfig::default())
         .await?
         .test::<Dns01>(&["dns01.example.com"])
@@ -80,8 +76,6 @@ async fn tls_alpn_01() -> Result<(), Box<dyn StdError>> {
         .with(EnvFilter::from_default_env())
         .try_init();
 
-    // Spawn a Pebble CA and a challenge response server.
-    debug!("starting Pebble CA environment");
     Environment::new(EnvironmentConfig::default())
         .await?
         .test::<Alpn01>(&["dns01.example.com"])
@@ -97,7 +91,6 @@ async fn forbidden_identifier() -> Result<(), Box<dyn StdError>> {
         .with(EnvFilter::from_default_env())
         .try_init();
 
-    debug!("starting Pebble CA environment");
     let config = EnvironmentConfig::default();
     let forbidden_name = config.pebble.domain_blocklist.first().unwrap();
     let err = Environment::new(EnvironmentConfig::default())
@@ -164,6 +157,8 @@ impl Environment {
         let pebble_path = env::var("PEBBLE").unwrap_or_else(|_| "./pebble".to_owned());
         let challtestsrv_path =
             env::var("CHALLTESTSRV").unwrap_or_else(|_| "./pebble-challtestsrv".to_owned());
+
+        debug!("starting Pebble CA environment");
 
         let pebble = Subprocess::new(
             Command::new(&pebble_path)
