@@ -35,7 +35,6 @@ If `fips` is enabled, `aws-lc-rs` is used; otherwise, `ring` is used.
 
 ## Limitations
 
-* Only tested with DNS challenges against Let's Encrypt (staging and production) and ZeroSSL (production) so far
 * Only supports ECDSA keys for now
 
 ## Getting started
