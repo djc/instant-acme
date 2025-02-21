@@ -540,6 +540,7 @@ struct PebbleConfig {
     tls_port: u16,
     ocsp_responder_url: &'static str,
     external_account_binding_required: bool,
+    external_account_mac_keys: HashMap<&'static str, &'static str>,
     domain_blocklist: Vec<&'static str>,
     retry_after: RetryConfig,
     profiles: HashMap<&'static str, Profile>,
@@ -559,6 +560,7 @@ impl Default for PebbleConfig {
             tls_port: NEXT_PORT.fetch_add(1, Ordering::SeqCst),
             ocsp_responder_url: "",
             external_account_binding_required: false,
+            external_account_mac_keys: HashMap::default(),
             domain_blocklist: vec!["blocked-domain.example"],
             retry_after: RetryConfig {
                 authz: Duration::from_secs(3),
