@@ -20,7 +20,7 @@ use hyper_util::client::legacy::Client as HyperClient;
 use hyper_util::client::legacy::connect::HttpConnector;
 use hyper_util::rt::TokioExecutor;
 use instant_acme::{
-    Account, AuthorizationStatus, Challenge, ChallengeType, Identifier, KeyAuthorization,
+    Account, AuthorizationStatus, Challenge, ChallengeType, Error, Identifier, KeyAuthorization,
     NewAccount, NewOrder, Order, OrderStatus,
 };
 use rcgen::{CertificateParams, DistinguishedName, KeyPair};
@@ -86,6 +86,48 @@ async fn tls_alpn_01() -> Result<(), Box<dyn StdError>> {
         .await?
         .test::<Alpn01>(&["dns01.example.com"])
         .await
+}
+
+/// Test subproblem handling by trying to issue for a forbidden identifier
+#[tokio::test]
+#[ignore]
+async fn forbidden_identifier() -> Result<(), Box<dyn StdError>> {
+    let _ = tracing_subscriber::registry()
+        .with(fmt::layer())
+        .with(EnvFilter::from_default_env())
+        .try_init();
+
+    debug!("starting Pebble CA environment");
+    let config = EnvironmentConfig::default();
+    let forbidden_name = config.pebble.domain_blocklist.first().unwrap();
+    let err = Environment::new(EnvironmentConfig::default())
+        .await?
+        .test::<Http01>(&["valid.example.com", forbidden_name])
+        .await
+        .expect_err("issuing for blocked domain name should fail");
+
+    let Error::Api(problem) = *err.downcast::<Error>()? else {
+        panic!("unexpected error result");
+    };
+
+    assert_eq!(
+        problem.r#type.as_deref(),
+        Some("urn:ietf:params:acme:error:rejectedIdentifier")
+    );
+    let subproblems = problem.subproblems;
+    assert_eq!(subproblems.len(), 1);
+
+    let first_subproblem = subproblems.first().unwrap();
+    assert_eq!(
+        first_subproblem.identifier,
+        Some(Identifier::Dns(forbidden_name.to_string()))
+    );
+    assert_eq!(
+        problem.r#type.as_deref(),
+        Some("urn:ietf:params:acme:error:rejectedIdentifier")
+    );
+
+    Ok(())
 }
 
 /// A test environment running Pebble and a challenge test server
