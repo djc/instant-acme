@@ -27,6 +27,8 @@ use serde::de::DeserializeOwned;
 use tokio::time::sleep;
 
 mod types;
+#[cfg(feature = "time")]
+pub use types::RenewalInfo;
 pub use types::{
     AccountCredentials, Authorization, AuthorizationStatus, CertificateIdentifier, Challenge,
     ChallengeType, Error, Identifier, LetsEncrypt, NewAccount, NewOrder, OrderState, OrderStatus,
@@ -456,6 +458,39 @@ impl Account {
         // The body is empty if the request was successful
         let _ = Problem::from_response(rsp).await?;
         Ok(())
+    }
+
+    /// Fetch `RenewalInfo` with a suggested window for renewing an identified certificate
+    ///
+    /// Clients may use this information to determine when to renew a certificate. If the renewal
+    /// window starts in the past, then renewal should be attempted immediately. Otherwise, a
+    /// uniformly random point between the window start/end should be selected and used to
+    /// schedule a renewal in the future.
+    ///
+    /// This is only supported by some ACME servers. If the server does not support this feature,
+    /// this method will return `Error::Unsupported`.
+    ///
+    /// See <https://www.ietf.org/archive/id/draft-ietf-acme-ari-07.html#section-4.2-4> for more
+    /// information.
+    #[cfg(feature = "time")]
+    pub async fn renewal_info(
+        &self,
+        certificate_id: &CertificateIdentifier<'_>,
+    ) -> Result<RenewalInfo, Error> {
+        let renewal_info_url = match self.inner.client.urls.renewal_info.as_deref() {
+            Some(url) => url,
+            None => return Err(Error::Unsupported("ACME renewal information (ARI)")),
+        };
+
+        // Note: unlike other ACME endpoints, the renewal info endpoint does not require a nonce
+        // or any JWS authentication. It's just a Plain-Old-HTTP-GET.
+        let request = Request::builder()
+            .method(Method::GET)
+            .uri(format!("{renewal_info_url}/{certificate_id}"))
+            .body(Full::default())?;
+
+        let rsp = self.inner.client.http.request(request).await?;
+        Problem::check::<RenewalInfo>(rsp).await
     }
 
     /// Get the account ID

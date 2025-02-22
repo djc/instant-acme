@@ -9,6 +9,8 @@ use serde::de::{self, DeserializeOwned};
 use serde::ser::SerializeMap;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
+#[cfg(feature = "time")]
+use time::OffsetDateTime;
 #[cfg(feature = "x509-parser")]
 use x509_parser::extensions::ParsedExtension;
 #[cfg(feature = "x509-parser")]
@@ -757,6 +759,35 @@ impl fmt::Display for CertificateIdentifier<'_> {
     }
 }
 
+/// Information about a suggested renewal window for a certificate
+///
+/// See <https://www.ietf.org/archive/id/draft-ietf-acme-ari-07.html#section-4.2>
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+#[cfg(feature = "time")]
+pub struct RenewalInfo {
+    /// The suggested renewal window for a certificate
+    pub suggested_window: SuggestedWindow,
+    /// A URL to a page explaining why the suggested renewal window has its current value
+    #[serde(rename = "explanationURL")]
+    pub explanation_url: Option<String>,
+}
+
+/// A suggested renewal window for a certificate
+///
+/// See <https://www.ietf.org/archive/id/draft-ietf-acme-ari-07.html#section-4.2>
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+#[cfg(feature = "time")]
+pub struct SuggestedWindow {
+    /// The start [`OffsetDateTime`] of the suggested renewal window
+    #[serde(with = "time::serde::rfc3339")]
+    pub start: OffsetDateTime,
+    /// The end [`OffsetDateTime`] of the suggested renewal window
+    #[serde(with = "time::serde::rfc3339")]
+    pub end: OffsetDateTime,
+}
+
 fn deserialize_static_certificate_identifier<'de, D: serde::Deserializer<'de>>(
     deserializer: D,
 ) -> Result<Option<CertificateIdentifier<'static>>, D::Error> {
@@ -1026,5 +1057,28 @@ mod tests {
 
         // We should arrive at the expected encoded certificate identifier.
         assert_eq!(format!("{encoded}"), "wP_u.AMr-");
+    }
+
+    // https://aarongable.github.io/draft-acme-ari/draft-ietf-acme-ari.html#section-4.2
+    #[test]
+    #[cfg(feature = "time")]
+    fn renewal_info() {
+        const INFO: &str = r#"{
+          "suggestedWindow": {
+            "start": "2025-01-02T04:00:00Z",
+            "end": "2025-01-03T04:00:00Z"
+          },
+          "explanationURL": "https://acme.example.com/docs/ari"
+        }
+        "#;
+
+        let info = serde_json::from_str::<RenewalInfo>(INFO).unwrap();
+        assert_eq!(
+            info.explanation_url.unwrap(),
+            "https://acme.example.com/docs/ari"
+        );
+        let window = info.suggested_window;
+        assert_eq!(window.start.day(), 2);
+        assert_eq!(window.end.day(), 3);
     }
 }
