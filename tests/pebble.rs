@@ -51,6 +51,7 @@ async fn http_01() -> Result<(), Box<dyn StdError>> {
         .await?
         .test::<Http01>(&["http01.example.com"])
         .await
+        .map(|_| ())
 }
 
 #[tokio::test]
@@ -62,6 +63,7 @@ async fn dns_01() -> Result<(), Box<dyn StdError>> {
         .await?
         .test::<Dns01>(&["dns01.example.com"])
         .await
+        .map(|_| ())
 }
 
 #[tokio::test]
@@ -73,6 +75,7 @@ async fn tls_alpn_01() -> Result<(), Box<dyn StdError>> {
         .await?
         .test::<Alpn01>(&["tlsalpn01.example.com"])
         .await
+        .map(|_| ())
 }
 
 /// Test subproblem handling by trying to issue for a forbidden identifier
@@ -171,6 +174,7 @@ async fn authz_reuse() -> Result<(), Box<dyn StdError>> {
         "authz-reuse-3.example.com",
     ])
     .await
+    .map(|_| ())
 }
 
 fn try_tracing_init() {
@@ -304,7 +308,7 @@ impl Environment {
     async fn test<A: AuthorizationMethod>(
         &mut self,
         names: &[&'static str],
-    ) -> Result<(), Box<dyn StdError + 'static>> {
+    ) -> Result<CertificateDer<'static>, Box<dyn StdError + 'static>> {
         let identifiers = names
             .iter()
             .map(|id| Identifier::Dns(id.to_string()))
@@ -354,8 +358,8 @@ impl Environment {
         let cert_chain = self.certificate(&mut order, names).await?;
 
         // Split off and parse the EE cert, save the intermediates that follow.
-        let (ee_cert, intermediates) = cert_chain.split_first().unwrap();
-        let ee_cert = ParsedCertificate::try_from(ee_cert).unwrap();
+        let (ee_cert_der, intermediates) = cert_chain.split_first().unwrap();
+        let ee_cert = ParsedCertificate::try_from(ee_cert_der).unwrap();
 
         // Use the default crypto provider to verify the certificate chain to the Pebble CA root.
         let crypto_provider = CryptoProvider::get_default().unwrap();
@@ -373,7 +377,7 @@ impl Environment {
             verify_server_name(&ee_cert, &ServerName::try_from(*ident)?)?;
         }
 
-        Ok(())
+        Ok(ee_cert_der.to_owned())
     }
 
     /// Issue a certificate for the given order, and identifiers
