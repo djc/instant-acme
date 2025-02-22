@@ -44,6 +44,9 @@ pub enum Error {
     /// Failed to (de)serialize a JSON object
     #[error("failed to (de)serialize JSON: {0}")]
     Json(#[from] serde_json::Error),
+    /// ACME server does not support a requested feature
+    #[error("ACME server does not support: {0}")]
+    Unsupported(&'static str),
     /// Other kind of error
     #[error(transparent)]
     Other(Box<dyn std::error::Error + Send + Sync + 'static>),
