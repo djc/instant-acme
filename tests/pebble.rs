@@ -1,7 +1,7 @@
 //! Note: tests in the file are ignored by default because they requires `pebble` and
 //! `pebble-challtestsrv` binaries.
 //!
-//! See documentation for [`PebbleEnvironment`].
+//! See documentation for [`Environment`].
 
 use std::collections::HashMap;
 use std::error::Error as StdError;
@@ -182,8 +182,12 @@ fn try_tracing_init() {
 
 /// A test environment running Pebble and a challenge test server
 ///
-/// Subprocesses are torn down cleanly on drop to avoid leaving
-/// stray child processes.
+/// You must have the `pebble` and `pebble-challtestsrv` binaries available
+/// in your `$PATH`, or, set the `PEBBLE` and `CHALLTESTSRV` environment variables
+/// to the paths of the binaries.
+///
+/// Binary downloads for many common platforms are available at:
+/// <https://github.com/letsencrypt/pebble/releases>.
 struct Environment {
     account: Account,
     config: EnvironmentConfig,
@@ -198,6 +202,9 @@ struct Environment {
 
 impl Environment {
     /// Create a new [`Environment`] with running Pebble and challenge test servers
+    ///
+    /// Spawned test server subprocesses are torn down cleanly on drop to avoid leaving
+    /// stray child processes.
     async fn new(config: EnvironmentConfig) -> Result<Environment, Box<dyn StdError>> {
         #[derive(Clone, Serialize)]
         struct ConfigWrapper<'a> {
