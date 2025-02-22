@@ -9,6 +9,10 @@ use serde::de::{self, DeserializeOwned};
 use serde::ser::SerializeMap;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
+#[cfg(feature = "x509-parser")]
+use x509_parser::extensions::ParsedExtension;
+#[cfg(feature = "x509-parser")]
+use x509_parser::parse_x509_certificate;
 
 use crate::BytesResponse;
 use crate::crypto::{self, KeyPair};
@@ -708,6 +712,37 @@ impl Serialize for CertificateIdentifier<'_> {
     }
 }
 
+#[cfg(feature = "x509-parser")]
+impl<'a> TryFrom<&'a CertificateDer<'_>> for CertificateIdentifier<'_> {
+    type Error = String;
+
+    fn try_from(cert: &'a CertificateDer) -> Result<Self, Self::Error> {
+        let (_, parsed_cert) = parse_x509_certificate(cert.as_ref())
+            .map_err(|e| format!("failed to parse certificate: {e}"))?;
+
+        let Some(authority_key_identifier) =
+            parsed_cert
+                .iter_extensions()
+                .find_map(|ext| match ext.parsed_extension() {
+                    ParsedExtension::AuthorityKeyIdentifier(aki_ext) => aki_ext
+                        .key_identifier
+                        .as_ref()
+                        .map(|aki| Der::from_slice(aki.0)),
+                    _ => None,
+                })
+        else {
+            return Err(
+                "certificate does not contain an Authority Key Identifier (AKI) extension".into(),
+            );
+        };
+
+        Ok(Self::new(
+            authority_key_identifier,
+            Der::from_slice(parsed_cert.tbs_certificate.raw_serial()),
+        ))
+    }
+}
+
 impl fmt::Display for CertificateIdentifier<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str(&self.authority_key_identifier)?;
@@ -740,6 +775,12 @@ pub(crate) struct Empty {}
 
 #[cfg(test)]
 mod tests {
+    #[cfg(feature = "x509-parser")]
+    use rcgen::{
+        BasicConstraints, CertificateParams, DistinguishedName, IsCa, KeyIdMethod, KeyPair,
+        SerialNumber,
+    };
+
     use super::*;
 
     // https://datatracker.ietf.org/doc/html/rfc8555#section-7.4
@@ -950,5 +991,34 @@ mod tests {
 
         let serialized = serde_json::to_string(&cert_id).unwrap();
         assert_eq!(serialized, r#""aYhba4dGQEHhs3uEe6CuLN4ByNQ.AIdlQyE""#);
+    }
+
+    #[cfg(feature = "x509-parser")]
+    #[test]
+    fn encoded_certificate_identifier_from_cert() {
+        // Generate a CA key_pair and self-signed cert with a specific subject key identifier.
+        let ca_key_id = vec![0xC0, 0xFF, 0xEE];
+        let ca_key = KeyPair::generate().unwrap();
+        let mut ca_params = CertificateParams::default();
+        ca_params.is_ca = IsCa::Ca(BasicConstraints::Unconstrained);
+        ca_params.key_identifier_method = KeyIdMethod::PreSpecified(ca_key_id);
+        let ca_cert = ca_params.self_signed(&ca_key).unwrap();
+
+        // Generate an end entity certificate issued by the CA, with a specific serial number
+        // and an AKI extension.
+        let ee_key = KeyPair::generate().unwrap();
+        let ee_serial = [0xCA, 0xFE];
+        let mut ee_params = CertificateParams::new(["example.com".to_owned()]).unwrap();
+        ee_params.distinguished_name = DistinguishedName::new();
+        ee_params.serial_number = Some(SerialNumber::from_slice(ee_serial.as_slice()));
+        ee_params.use_authority_key_identifier_extension = true;
+        let ee_cert = ee_params.signed_by(&ee_key, &ca_cert, &ca_key).unwrap();
+
+        // Extract the AKI and serial number from the EE certificate and create an encoded
+        // certificate identifier.
+        let encoded = CertificateIdentifier::try_from(ee_cert.der()).unwrap();
+
+        // We should arrive at the expected encoded certificate identifier.
+        assert_eq!(format!("{encoded}"), "wP_u.AMr-");
     }
 }
