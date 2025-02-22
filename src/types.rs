@@ -430,6 +430,10 @@ pub(crate) struct DirectoryUrls {
     pub(crate) new_authz: Option<String>,
     pub(crate) revoke_cert: Option<String>,
     pub(crate) key_change: Option<String>,
+    // Endpoint for the ACME renewal information (ARI) extension
+    //
+    // <https://www.ietf.org/archive/id/draft-ietf-acme-ari-07.html>
+    pub(crate) renewal_info: Option<String>,
 }
 
 #[derive(Serialize)]
