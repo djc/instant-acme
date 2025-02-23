@@ -193,6 +193,7 @@ impl Environment {
 
         let pebble = Subprocess::new(
             Command::new(&pebble_path)
+                .env("PEBBLE_AUTHZREUSE", config.authz_reuse.to_string())
                 .arg("-config")
                 .arg(config_file.path())
                 .arg("-dnsserver")
@@ -557,6 +558,10 @@ struct EnvironmentConfig {
     dns_port: u16,
     challtestsrv_port: u16,
     eab_key: Option<ExternalAccountKey>,
+    /// Percentage of valid authorizations the Pebble CA will reuse between orders
+    ///
+    /// See <https://github.com/letsencrypt/pebble?tab=readme-ov-file#valid-authorization-reuse>
+    authz_reuse: u8,
 }
 
 impl Default for EnvironmentConfig {
@@ -566,6 +571,7 @@ impl Default for EnvironmentConfig {
             dns_port: NEXT_PORT.fetch_add(1, Ordering::SeqCst),
             challtestsrv_port: NEXT_PORT.fetch_add(1, Ordering::SeqCst),
             eab_key: None,
+            authz_reuse: 50,
         }
     }
 }
