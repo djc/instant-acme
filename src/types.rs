@@ -327,6 +327,7 @@ pub struct Challenge {
 ///
 /// <https://datatracker.ietf.org/doc/html/rfc8555#section-7.1.3>
 #[derive(Debug, Deserialize)]
+#[non_exhaustive]
 #[serde(rename_all = "camelCase")]
 pub struct OrderState {
     /// Current status
