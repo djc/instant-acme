@@ -309,10 +309,7 @@ impl Environment {
         &mut self,
         names: &[&'static str],
     ) -> Result<CertificateDer<'static>, Box<dyn StdError + 'static>> {
-        let identifiers = names
-            .iter()
-            .map(|id| Identifier::Dns(id.to_string()))
-            .collect::<Vec<_>>();
+        let identifiers = dns_identifiers(names);
         debug!(?identifiers, "creating order");
         let mut order = self.account.new_order(&NewOrder::new(&identifiers)).await?;
         info!(order_url = order.url(), "created order");
@@ -471,6 +468,13 @@ impl Environment {
             .await?;
         Ok(())
     }
+}
+
+fn dns_identifiers(dns_names: impl IntoIterator<Item = impl ToString>) -> Vec<Identifier> {
+    dns_names
+        .into_iter()
+        .map(|id| Identifier::Dns(id.to_string()))
+        .collect()
 }
 
 struct Http01;
