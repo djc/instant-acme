@@ -147,6 +147,32 @@ async fn eab_required() -> Result<(), Box<dyn StdError>> {
     Environment::new(config).await.map(|_| ())
 }
 
+/// Test that the issuance logic works correctly in the presence of authz reuse
+#[tokio::test]
+#[ignore]
+async fn authz_reuse() -> Result<(), Box<dyn StdError>> {
+    try_tracing_init();
+
+    let mut env = Environment::new(EnvironmentConfig {
+        authz_reuse: 100,
+        ..EnvironmentConfig::default()
+    })
+    .await?;
+
+    // Issue an initial order so we have authzs to reuse.
+    env.test::<Http01>(&["authz-reuse-1.example.com", "authz-reuse-2.example.com"])
+        .await?;
+
+    // Issue a second order that includes the same identifiers as before, plus one new one.
+    // The re-use of the previous two authz shouldn't affect the issuance.
+    env.test::<Http01>(&[
+        "authz-reuse-1.example.com",
+        "authz-reuse-2.example.com",
+        "authz-reuse-3.example.com",
+    ])
+    .await
+}
+
 fn try_tracing_init() {
     let _ = tracing_subscriber::registry()
         .with(fmt::layer())
