@@ -21,6 +21,8 @@ use http_body_util::{BodyExt, Full};
 use hyper_util::client::legacy::Client as HyperClient;
 use hyper_util::client::legacy::connect::HttpConnector;
 use hyper_util::rt::TokioExecutor;
+#[cfg(feature = "x509-parser")]
+use instant_acme::CertificateIdentifier;
 use instant_acme::{
     Account, AuthorizationStatus, Challenge, ChallengeType, Error, ExternalAccountKey, Identifier,
     KeyAuthorization, NewAccount, NewOrder, Order, OrderStatus,
@@ -181,6 +183,31 @@ async fn authz_reuse() -> Result<(), Box<dyn StdError>> {
     ])))
     .await
     .map(|_| ())
+}
+
+/// Test ACME automated renewal information (ARI)
+#[cfg(feature = "x509-parser")]
+#[tokio::test]
+#[ignore]
+async fn replacement_order() -> Result<(), Box<dyn StdError>> {
+    try_tracing_init();
+
+    let mut env = Environment::new(EnvironmentConfig::default()).await?;
+
+    // Issue an initial certificate.
+    let names = &["example.com"];
+    let initial_cert = env
+        .test::<Http01>(&NewOrder::new(&dns_identifiers(names)))
+        .await?;
+
+    // Construct an identifier from the initial certificate DER.
+    let initial_cert_id = CertificateIdentifier::try_from(&initial_cert)?;
+
+    // Then, issue a replacement certificate.
+    env.test::<Http01>(NewOrder::new(&dns_identifiers(names)).replaces(initial_cert_id))
+        .await?;
+
+    Ok(())
 }
 
 fn try_tracing_init() {
