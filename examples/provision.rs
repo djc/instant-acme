@@ -40,9 +40,7 @@ async fn main() -> anyhow::Result<()> {
 
     let identifier = Identifier::Dns(opts.name.clone());
     let mut order = account
-        .new_order(&NewOrder {
-            identifiers: &[identifier],
-        })
+        .new_order(&NewOrder::new(&[identifier]))
         .await
         .unwrap();
 
