@@ -15,6 +15,7 @@ use crate::crypto::{self, KeyPair};
 
 /// Error type for instant-acme
 #[derive(Debug, Error)]
+#[non_exhaustive]
 pub enum Error {
     /// An JSON problem as returned by the ACME server
     ///
