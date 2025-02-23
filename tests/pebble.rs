@@ -334,7 +334,9 @@ impl Environment {
                 .find(|c| c.r#type == A::TYPE)
                 .ok_or(format!("no {:?} challenge found", A::TYPE))?;
 
-            let Identifier::Dns(identifier) = &authz.identifier;
+            let Identifier::Dns(identifier) = &authz.identifier else {
+                panic!("unsupported identifier type");
+            };
 
             let key_authz = order.key_authorization(challenge);
             self.request_challenge::<A>(identifier, challenge, &key_authz)
