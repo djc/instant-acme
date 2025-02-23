@@ -49,7 +49,7 @@ async fn http_01() -> Result<(), Box<dyn StdError>> {
 
     Environment::new(EnvironmentConfig::default())
         .await?
-        .test::<Http01>(&["http01.example.com"])
+        .test::<Http01>(&NewOrder::new(&dns_identifiers(["http01.example.com"])))
         .await
         .map(|_| ())
 }
@@ -61,7 +61,7 @@ async fn dns_01() -> Result<(), Box<dyn StdError>> {
 
     Environment::new(EnvironmentConfig::default())
         .await?
-        .test::<Dns01>(&["dns01.example.com"])
+        .test::<Dns01>(&NewOrder::new(&dns_identifiers(["dns01.example.com"])))
         .await
         .map(|_| ())
 }
@@ -73,7 +73,7 @@ async fn tls_alpn_01() -> Result<(), Box<dyn StdError>> {
 
     Environment::new(EnvironmentConfig::default())
         .await?
-        .test::<Alpn01>(&["tlsalpn01.example.com"])
+        .test::<Alpn01>(&NewOrder::new(&dns_identifiers(["tlsalpn01.example.com"])))
         .await
         .map(|_| ())
 }
@@ -88,7 +88,10 @@ async fn forbidden_identifier() -> Result<(), Box<dyn StdError>> {
     let forbidden_name = config.pebble.domain_blocklist.first().unwrap();
     let err = Environment::new(EnvironmentConfig::default())
         .await?
-        .test::<Http01>(&["valid.example.com", forbidden_name])
+        .test::<Http01>(&NewOrder::new(&dns_identifiers([
+            "valid.example.com",
+            forbidden_name,
+        ])))
         .await
         .expect_err("issuing for blocked domain name should fail");
 
@@ -163,16 +166,19 @@ async fn authz_reuse() -> Result<(), Box<dyn StdError>> {
     .await?;
 
     // Issue an initial order so we have authzs to reuse.
-    env.test::<Http01>(&["authz-reuse-1.example.com", "authz-reuse-2.example.com"])
-        .await?;
+    env.test::<Http01>(&NewOrder::new(&dns_identifiers([
+        "authz-reuse-1.example.com",
+        "authz-reuse-2.example.com",
+    ])))
+    .await?;
 
     // Issue a second order that includes the same identifiers as before, plus one new one.
     // The re-use of the previous two authz shouldn't affect the issuance.
-    env.test::<Http01>(&[
+    env.test::<Http01>(&NewOrder::new(&dns_identifiers([
         "authz-reuse-1.example.com",
         "authz-reuse-2.example.com",
         "authz-reuse-3.example.com",
-    ])
+    ])))
     .await
     .map(|_| ())
 }
@@ -307,11 +313,11 @@ impl Environment {
     /// Test certificates for an authorization method and a set of identifiers
     async fn test<A: AuthorizationMethod>(
         &mut self,
-        names: &[&'static str],
+        new_order: &NewOrder<'_>,
     ) -> Result<CertificateDer<'static>, Box<dyn StdError + 'static>> {
-        let identifiers = dns_identifiers(names);
+        let identifiers = new_order.identifiers();
         debug!(?identifiers, "creating order");
-        let mut order = self.account.new_order(&NewOrder::new(&identifiers)).await?;
+        let mut order = self.account.new_order(new_order).await?;
         info!(order_url = order.url(), "created order");
 
         let authorizations = order.authorizations().await?;
@@ -354,7 +360,7 @@ impl Environment {
         }
 
         // Issue a certificate for the names and test the chain validates to the issuer root.
-        let cert_chain = self.certificate(&mut order, names).await?;
+        let cert_chain = self.certificate(&mut order, identifiers).await?;
 
         // Split off and parse the EE cert, save the intermediates that follow.
         let (ee_cert_der, intermediates) = cert_chain.split_first().unwrap();
@@ -372,8 +378,8 @@ impl Environment {
         .unwrap();
 
         // Verify the EE cert is valid for each of the identifiers.
-        for ident in names {
-            verify_server_name(&ee_cert, &ServerName::try_from(*ident)?)?;
+        for ident in identifiers {
+            verify_server_name(&ee_cert, &ServerName::try_from(ident.to_string())?)?;
         }
 
         Ok(ee_cert_der.to_owned())
@@ -385,7 +391,7 @@ impl Environment {
     async fn certificate(
         &self,
         order: &mut Order,
-        identifiers: &[&str],
+        identifiers: &[Identifier],
     ) -> Result<Vec<CertificateDer<'static>>, Box<dyn StdError>> {
         info!(?identifiers, order_url = order.url(), "issuing certificate");
 
@@ -393,7 +399,7 @@ impl Environment {
         let mut params = CertificateParams::new(
             identifiers
                 .iter()
-                .map(|&s| s.to_owned())
+                .map(|s| s.to_string())
                 .collect::<Vec<_>>(),
         )?;
         params.distinguished_name = DistinguishedName::new();
