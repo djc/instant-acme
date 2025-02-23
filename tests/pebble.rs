@@ -71,7 +71,7 @@ async fn tls_alpn_01() -> Result<(), Box<dyn StdError>> {
 
     Environment::new(EnvironmentConfig::default())
         .await?
-        .test::<Alpn01>(&["dns01.example.com"])
+        .test::<Alpn01>(&["tlsalpn01.example.com"])
         .await
 }
 
