@@ -28,9 +28,9 @@ use tokio::time::sleep;
 
 mod types;
 pub use types::{
-    AccountCredentials, Authorization, AuthorizationStatus, Challenge, ChallengeType, Error,
-    Identifier, LetsEncrypt, NewAccount, NewOrder, OrderState, OrderStatus, Problem,
-    RevocationReason, RevocationRequest, ZeroSsl,
+    AccountCredentials, Authorization, AuthorizationStatus, CertificateIdentifier, Challenge,
+    ChallengeType, Error, Identifier, LetsEncrypt, NewAccount, NewOrder, OrderState, OrderStatus,
+    Problem, RevocationReason, RevocationRequest, ZeroSsl,
 };
 use types::{
     DirectoryUrls, Empty, FinalizeRequest, Header, JoseJson, Jwk, KeyOrKeyId, NewAccountPayload,
