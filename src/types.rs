@@ -343,6 +343,10 @@ pub struct OrderState {
     pub finalize: String,
     /// The certificate URL, which becomes available after finalization
     pub certificate: Option<String>,
+    /// The certificate that this order is replacing, if any
+    #[serde(deserialize_with = "deserialize_static_certificate_identifier")]
+    #[serde(default)]
+    pub replaces: Option<CertificateIdentifier<'static>>,
 }
 
 /// Input data for [Order](crate::Order) creation
@@ -350,17 +354,39 @@ pub struct OrderState {
 /// To be passed into [Account::new_order()](crate::Account::new_order()).
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
-pub struct NewOrder<'a> {
+pub struct NewOrder<'a, 'b> {
+    /// The [`CertificateIdentifier`] of a previously issued certificate being replaced by the order
+    pub(crate) replaces: Option<CertificateIdentifier<'b>>,
     /// Identifiers to be included in the order
     identifiers: &'a [Identifier],
 }
 
-impl<'a> NewOrder<'a> {
+impl<'a, 'b> NewOrder<'a, 'b> {
     /// Prepare to create a new order for the given identifiers
     ///
     /// To be passed into [Account::new_order()](crate::Account::new_order()).
     pub fn new(identifiers: &'a [Identifier]) -> Self {
-        Self { identifiers }
+        Self {
+            identifiers,
+            replaces: None,
+        }
+    }
+
+    /// Indicate to the ACME server that the `NewOrder` is replacing a previously issued certificate
+    ///
+    /// The previously issued certificate must be identified by a `EncodedCertificateIdentifier`.
+    ///
+    /// Some ACME servers may give preferential rate limits to orders that replace
+    /// existing certificates, or use this information to determine when it is safe
+    /// to revoke a certificate affected by a compliance incident.
+    ///
+    /// When provided, at least one of the `identifiers` for the new order must have been
+    /// present in the certificate being replaced. If the ACME CA does not support the
+    /// ACME renewal information (ARI) extension, the [crate::Account::new_order()] method will
+    /// return an error.
+    pub fn replaces(&mut self, replaces: CertificateIdentifier<'b>) -> &mut Self {
+        self.replaces = Some(replaces);
+        self
     }
 }
 
@@ -703,6 +729,19 @@ impl fmt::Display for CertificateIdentifier<'_> {
     }
 }
 
+fn deserialize_static_certificate_identifier<'de, D>(
+    deserializer: D,
+) -> Result<Option<CertificateIdentifier<'static>>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let opt_cert_id = Option::<CertificateIdentifier<'_>>::deserialize(deserializer)?;
+    Ok(opt_cert_id.map(move |cert_id| CertificateIdentifier {
+        authority_key_identifier: Cow::Owned(cert_id.authority_key_identifier.into_owned()),
+        serial: Cow::Owned(cert_id.serial.into_owned()),
+    }))
+}
+
 #[derive(Clone, Copy, Debug, Serialize)]
 #[serde(rename_all = "UPPERCASE")]
 pub(crate) enum SigningAlgorithm {
@@ -895,23 +934,29 @@ mod tests {
     // https://www.ietf.org/archive/id/draft-ietf-acme-ari-07.html#section-4.1
     #[test]
     fn certificate_identifier() {
-        // TODO(@cpu): once `OrderState` has a `replaces` field, use that type here. For now
-        //   to keep commits small, use a minimal stand-in.
-        #[derive(Debug, Serialize, Deserialize)]
-        struct EchoedOrder<'a> {
-            #[serde(borrow)]
-            replaces: Option<CertificateIdentifier<'a>>,
-        }
-
         const ORDER: &str = r#"{
-            "identifiers": [
-              { "type": "dns", "value": "acme.example.com" }
-            ],
-            "replaces": "aYhba4dGQEHhs3uEe6CuLN4ByNQ.AIdlQyE"
-        }
-        "#;
+          "status": "pending",
+          "expires": "2016-01-05T14:09:07.99Z",
 
-        let order: EchoedOrder = serde_json::from_str(ORDER).unwrap();
+          "notBefore": "2016-01-01T00:00:00Z",
+          "notAfter": "2016-01-08T00:00:00Z",
+
+          "identifiers": [
+            { "type": "dns", "value": "www.example.org" },
+            { "type": "dns", "value": "example.org" }
+          ],
+
+          "authorizations": [
+            "https://example.com/acme/authz/PAniVnsZcis",
+            "https://example.com/acme/authz/r4HqLzrSrpI"
+          ],
+
+          "finalize": "https://example.com/acme/order/TOlocE8rfgo/finalize",
+
+          "replaces": "aYhba4dGQEHhs3uEe6CuLN4ByNQ.AIdlQyE"
+        }"#;
+
+        let order = serde_json::from_str::<OrderState>(ORDER).unwrap();
         let cert_id = order.replaces.unwrap();
         assert_eq!(
             cert_id.authority_key_identifier,
