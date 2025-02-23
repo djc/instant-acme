@@ -392,6 +392,11 @@ impl<'a, 'b> NewOrder<'a, 'b> {
         self.replaces = Some(replaces);
         self
     }
+
+    /// Identifiers to be included in the order
+    pub fn identifiers(&self) -> &[Identifier] {
+        self.identifiers
+    }
 }
 
 /// Payload for a certificate revocation request
