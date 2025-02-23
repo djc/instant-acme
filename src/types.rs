@@ -550,6 +550,7 @@ pub enum AuthorizationStatus {
 /// Represent an identifier in an ACME [Order](crate::Order)
 #[allow(missing_docs)]
 #[derive(Clone, Debug, Serialize, Deserialize, Eq, PartialEq)]
+#[non_exhaustive]
 #[serde(tag = "type", content = "value", rename_all = "camelCase")]
 pub enum Identifier {
     Dns(String),
