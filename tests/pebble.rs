@@ -286,7 +286,6 @@ impl Environment {
 
         let authorizations = order.authorizations().await?;
         let mut challenges = Vec::with_capacity(authorizations.len());
-        let mut names = Vec::with_capacity(authorizations.len());
 
         // Collect up the relevant challenges, provisioning the expected responses as we go.
         for authz in &authorizations {
@@ -307,12 +306,11 @@ impl Environment {
             let key_authz = order.key_authorization(challenge);
             self.request_challenge::<A>(identifier, challenge, &key_authz)
                 .await?;
-            challenges.push((identifier, &challenge.url));
-            names.push(identifier.clone());
+            challenges.push(&challenge.url);
         }
 
         // Tell the CA we have provisioned the response for each challenge.
-        for (_, url) in &challenges {
+        for url in &challenges {
             debug!(challenge_url = url, "marking challenge ready");
             order.set_challenge_ready(url).await?;
         }
@@ -324,7 +322,7 @@ impl Environment {
         }
 
         // Issue a certificate for the names and test the chain validates to the issuer root.
-        let cert_chain = self.certificate(&mut order, &names).await?;
+        let cert_chain = self.certificate(&mut order, names).await?;
 
         // Split off and parse the EE cert, save the intermediates that follow.
         let (ee_cert, intermediates) = cert_chain.split_first().unwrap();
@@ -343,7 +341,7 @@ impl Environment {
 
         // Verify the EE cert is valid for each of the identifiers.
         for ident in names {
-            verify_server_name(&ee_cert, &ServerName::try_from(ident)?)?;
+            verify_server_name(&ee_cert, &ServerName::try_from(*ident)?)?;
         }
 
         Ok(())
@@ -355,12 +353,17 @@ impl Environment {
     async fn certificate(
         &self,
         order: &mut Order,
-        identifiers: &[String],
+        identifiers: &[&str],
     ) -> Result<Vec<CertificateDer<'static>>, Box<dyn StdError>> {
         info!(?identifiers, order_url = order.url(), "issuing certificate");
 
         // Create a CSR for the identifiers corresponding to the order.
-        let mut params = CertificateParams::new(identifiers.to_owned())?;
+        let mut params = CertificateParams::new(
+            identifiers
+                .iter()
+                .map(|&s| s.to_owned())
+                .collect::<Vec<_>>(),
+        )?;
         params.distinguished_name = DistinguishedName::new();
         let private_key = KeyPair::generate()?;
         let csr = params.serialize_request(&private_key)?;

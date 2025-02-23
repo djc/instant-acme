@@ -38,7 +38,7 @@ async fn main() -> anyhow::Result<()> {
     // Note that this only needs an `&Account`, so the library will let you
     // process multiple orders in parallel for a single account.
 
-    let identifier = Identifier::Dns(opts.name);
+    let identifier = Identifier::Dns(opts.name.clone());
     let mut order = account
         .new_order(&NewOrder {
             identifiers: &[identifier],
@@ -80,12 +80,12 @@ async fn main() -> anyhow::Result<()> {
         );
         io::stdin().read_line(&mut String::new()).unwrap();
 
-        challenges.push((identifier, &challenge.url));
+        challenges.push(&challenge.url);
     }
 
     // Let the server know we're ready to accept the challenges.
 
-    for (_, url) in &challenges {
+    for url in &challenges {
         order.set_challenge_ready(url).await.unwrap();
     }
 
@@ -96,15 +96,10 @@ async fn main() -> anyhow::Result<()> {
         return Err(anyhow::anyhow!("unexpected order status: {status:?}"));
     }
 
-    let mut names = Vec::with_capacity(challenges.len());
-    for (identifier, _) in challenges {
-        names.push(identifier.to_owned());
-    }
-
     // If the order is ready, we can provision the certificate.
     // Use the rcgen library to create a Certificate Signing Request.
 
-    let mut params = CertificateParams::new(names.clone())?;
+    let mut params = CertificateParams::new(vec![opts.name])?;
     params.distinguished_name = DistinguishedName::new();
     let private_key = KeyPair::generate()?;
     let csr = params.serialize_request(&private_key)?;
