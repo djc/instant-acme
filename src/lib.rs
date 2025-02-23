@@ -375,6 +375,10 @@ impl Account {
     ///
     /// Returns an [`Order`] instance. Use the [`Order::state()`] method to inspect its state.
     pub async fn new_order(&self, order: &NewOrder<'_>) -> Result<Order, Error> {
+        if order.replaces.is_some() && self.inner.client.urls.renewal_info.is_none() {
+            return Err(Error::Unsupported("ACME renewal information (ARI)"));
+        }
+
         let rsp = self
             .inner
             .post(Some(order), None, &self.inner.client.urls.new_order)
@@ -388,13 +392,33 @@ impl Account {
             .and_then(|hv| hv.to_str().ok())
             .map(|s| s.to_owned());
 
+        // We return errors from Problem::check before emitting an error for any further
+        // issues (e.g. no order URL, missing replacement field).
+        let state = Problem::check::<OrderState>(rsp).await?;
+
+        // Per the ARI spec:
+        // "If the Server accepts a new-order request with a "replaces" field, it MUST reflect
+        // that field in the response and in subsequent requests for the corresponding Order
+        // object."
+        // In practice, Let's Encrypt staging/production are not properly reflecting this field
+        // so we enforce it matches only when the server sends it.
+        // TODO(@cpu): tighten this up once Let's Encrypt is fixed.
+        if order.replaces.is_some() && state.replaces.is_some() && order.replaces != state.replaces
+        {
+            return Err(Error::Other(
+                format!(
+                    "replaces field mismatch: expected {expected:?}, found {found:?}",
+                    expected = order.replaces,
+                    found = state.replaces,
+                )
+                .into(),
+            ));
+        }
+
         Ok(Order {
             account: self.inner.clone(),
             nonce,
-            // Order of fields matters! We return errors from Problem::check
-            // before emitting an error if there is no order url. Or the
-            // simple no url error hides the causing error in `Problem::check`.
-            state: Problem::check::<OrderState>(rsp).await?,
+            state,
             url: order_url.ok_or("no order URL found")?,
         })
     }
