@@ -1,9 +1,11 @@
+use std::borrow::Cow;
 use std::fmt;
+use std::fmt::Write;
 
 use base64::prelude::{BASE64_URL_SAFE_NO_PAD, Engine};
 use bytes::Bytes;
-use rustls_pki_types::CertificateDer;
-use serde::de::DeserializeOwned;
+use rustls_pki_types::{CertificateDer, Der};
+use serde::de::{self, DeserializeOwned};
 use serde::ser::SerializeMap;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
@@ -586,6 +588,86 @@ impl ZeroSsl {
     }
 }
 
+/// A unique certificate identifier for the ACME renewal information (ARI) extension
+///
+/// See <https://www.ietf.org/archive/id/draft-ietf-acme-ari-07.html#section-4.1> for
+/// more information.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct CertificateIdentifier<'a> {
+    /// The BASE64URL-encoded authority key identifier (AKI) extension `keyIdentifier` of the certificate
+    pub authority_key_identifier: Cow<'a, str>,
+
+    /// The BASE64URL-encoded serial number of the certificate
+    pub serial: Cow<'a, str>,
+}
+
+impl CertificateIdentifier<'_> {
+    /// Encode a unique certificate identifier using the provided authority key ID and serial
+    ///
+    /// `authority_key_identifier` must be the DER-encoded ASN.1 octet string from the
+    /// `keyIdentifier` field of the `AuthorityKeyIdentifier` extension found in the certificate
+    /// to be identified.
+    ///
+    /// `serial` must be the DER-encoded ASN.1 serial number from the certificate to be identified.
+    /// Care must be taken to use the **encoded** serial number, not a big integer representation.
+    ///
+    /// The combination uniquely identifies a certificate within all certificates issued by the
+    /// same CA.
+    ///
+    /// See [RFC 5280 §4.1.2.2], [RFC 5280 §4.2.1.1], and [draft-ietf-acme-ari-07 §4.1]
+    ///
+    /// [RFC 5280 §4.1.2.2]: https://www.rfc-editor.org/rfc/rfc5280#section-4.1.2.2
+    /// [RFC 5280 §4.2.1.1]: https://www.rfc-editor.org/rfc/rfc5280#section-4.2.1.1
+    /// [draft-ietf-acme-ari-07 §4.1]: https://www.ietf.org/archive/id/draft-ietf-acme-ari-07.html#section-4.1
+    pub fn new(authority_key_identifier: Der<'_>, serial: Der<'_>) -> Self {
+        Self {
+            authority_key_identifier: BASE64_URL_SAFE_NO_PAD
+                .encode(authority_key_identifier)
+                .into(),
+            serial: BASE64_URL_SAFE_NO_PAD.encode(serial).into(),
+        }
+    }
+}
+
+impl<'de: 'a, 'a> Deserialize<'de> for CertificateIdentifier<'a> {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let s = <&str>::deserialize(deserializer)?;
+
+        let Some((aki, serial)) = s.split_once('.') else {
+            return Err(de::Error::invalid_value(
+                de::Unexpected::Str(s),
+                &"a string containing 2 '.'-delimited parts",
+            ));
+        };
+
+        if serial.contains('.') {
+            return Err(de::Error::invalid_value(
+                de::Unexpected::Str(s),
+                &"only one '.' delimiter should be present",
+            ));
+        }
+
+        Ok(CertificateIdentifier {
+            authority_key_identifier: Cow::Borrowed(aki),
+            serial: Cow::Borrowed(serial),
+        })
+    }
+}
+
+impl Serialize for CertificateIdentifier<'_> {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.collect_str(self)
+    }
+}
+
+impl fmt::Display for CertificateIdentifier<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(&self.authority_key_identifier)?;
+        f.write_char('.')?;
+        f.write_str(&self.serial)
+    }
+}
+
 #[derive(Clone, Copy, Debug, Serialize)]
 #[serde(rename_all = "UPPERCASE")]
 pub(crate) enum SigningAlgorithm {
@@ -773,5 +855,36 @@ mod tests {
     for \"_example.org\": Invalid underscore in DNS name \"_example.org\" (urn:ietf:params:acme:error:malformed), \
     for \"example.net\": This CA will not issue for \"example.net\" (urn:ietf:params:acme:error:rejectedIdentifier)";
         assert_eq!(format!("{obj}"), expected_display);
+    }
+
+    // https://www.ietf.org/archive/id/draft-ietf-acme-ari-07.html#section-4.1
+    #[test]
+    fn certificate_identifier() {
+        // TODO(@cpu): once `OrderState` has a `replaces` field, use that type here. For now
+        //   to keep commits small, use a minimal stand-in.
+        #[derive(Debug, Serialize, Deserialize)]
+        struct EchoedOrder<'a> {
+            #[serde(borrow)]
+            replaces: Option<CertificateIdentifier<'a>>,
+        }
+
+        const ORDER: &str = r#"{
+            "identifiers": [
+              { "type": "dns", "value": "acme.example.com" }
+            ],
+            "replaces": "aYhba4dGQEHhs3uEe6CuLN4ByNQ.AIdlQyE"
+        }
+        "#;
+
+        let order: EchoedOrder = serde_json::from_str(ORDER).unwrap();
+        let cert_id = order.replaces.unwrap();
+        assert_eq!(
+            cert_id.authority_key_identifier,
+            "aYhba4dGQEHhs3uEe6CuLN4ByNQ"
+        );
+        assert_eq!(cert_id.serial, "AIdlQyE");
+
+        let serialized = serde_json::to_string(&cert_id).unwrap();
+        assert_eq!(serialized, r#""aYhba4dGQEHhs3uEe6CuLN4ByNQ.AIdlQyE""#);
     }
 }
