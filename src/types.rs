@@ -351,7 +351,16 @@ pub struct OrderState {
 #[serde(rename_all = "camelCase")]
 pub struct NewOrder<'a> {
     /// Identifiers to be included in the order
-    pub identifiers: &'a [Identifier],
+    identifiers: &'a [Identifier],
+}
+
+impl<'a> NewOrder<'a> {
+    /// Prepare to create a new order for the given identifiers
+    ///
+    /// To be passed into [Account::new_order()](crate::Account::new_order()).
+    pub fn new(identifiers: &'a [Identifier]) -> Self {
+        Self { identifiers }
+    }
 }
 
 /// Payload for a certificate revocation request
