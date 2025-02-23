@@ -310,12 +310,7 @@ impl Environment {
             .map(|id| Identifier::Dns(id.to_string()))
             .collect::<Vec<_>>();
         debug!(?identifiers, "creating order");
-        let mut order = self
-            .account
-            .new_order(&NewOrder {
-                identifiers: &identifiers,
-            })
-            .await?;
+        let mut order = self.account.new_order(&NewOrder::new(&identifiers)).await?;
         info!(order_url = order.url(), "created order");
 
         let authorizations = order.authorizations().await?;
