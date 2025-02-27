@@ -21,12 +21,12 @@ use http_body_util::{BodyExt, Full};
 use hyper_util::client::legacy::Client as HyperClient;
 use hyper_util::client::legacy::connect::HttpConnector;
 use hyper_util::rt::TokioExecutor;
-#[cfg(feature = "x509-parser")]
-use instant_acme::CertificateIdentifier;
 use instant_acme::{
     Account, AuthorizationStatus, Challenge, ChallengeType, Error, ExternalAccountKey, Identifier,
     KeyAuthorization, NewAccount, NewOrder, Order, OrderStatus,
 };
+#[cfg(all(feature = "time", feature = "x509-parser"))]
+use instant_acme::{CertificateIdentifier, RevocationRequest};
 use rcgen::{CertificateParams, DistinguishedName, KeyPair};
 use rustls::RootCertStore;
 use rustls::client::{verify_server_cert_signed_by_trust_anchor, verify_server_name};
@@ -37,6 +37,8 @@ use rustls::server::ParsedCertificate;
 use rustls_pki_types::UnixTime;
 use serde::{Serialize, Serializer};
 use tempfile::NamedTempFile;
+#[cfg(all(feature = "time", feature = "x509-parser"))]
+use time::OffsetDateTime;
 use tokio::net::TcpStream;
 use tokio::time::sleep;
 use tracing::{debug, info, trace};
@@ -186,7 +188,7 @@ async fn authz_reuse() -> Result<(), Box<dyn StdError>> {
 }
 
 /// Test ACME automated renewal information (ARI)
-#[cfg(feature = "x509-parser")]
+#[cfg(all(feature = "x509-parser", feature = "time"))]
 #[tokio::test]
 #[ignore]
 async fn replacement_order() -> Result<(), Box<dyn StdError>> {
@@ -200,10 +202,28 @@ async fn replacement_order() -> Result<(), Box<dyn StdError>> {
         .test::<Http01>(&NewOrder::new(&dns_identifiers(names)))
         .await?;
 
+    // Then, revoke it so that the CA suggests immediate replacement.
+    env.account
+        .revoke(&RevocationRequest {
+            certificate: &initial_cert,
+            reason: None,
+        })
+        .await?;
+
     // Construct an identifier from the initial certificate DER.
     let initial_cert_id = CertificateIdentifier::try_from(&initial_cert)?;
 
-    // Then, issue a replacement certificate.
+    // We should be able to fetch the certificate's suggested renewal window.
+    let renewal_info = env
+        .account
+        .renewal_info(&initial_cert_id)
+        .await
+        .expect("failed to fetch renewal window");
+
+    // Since we revoked the initial certificate, the window start should be in the past.
+    assert!(renewal_info.suggested_window.start < OffsetDateTime::now_utc());
+
+    // So, let's go ahead and issue a replacement certificate.
     env.test::<Http01>(NewOrder::new(&dns_identifiers(names)).replaces(initial_cert_id))
         .await?;
 
