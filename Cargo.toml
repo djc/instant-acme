@@ -59,3 +59,8 @@ required-features = ["hyper-rustls"]
 [[test]]
 name = "pebble"
 required-features = ["hyper-rustls"]
+
+[package.metadata.docs.rs]
+# all non-default features except fips (cannot build on docs.rs environment)
+features = ["aws-lc-rs", "x509-parser", "time"]
+rustdoc-args = ["--cfg", "docsrs"]
