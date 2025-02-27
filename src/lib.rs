@@ -2,6 +2,7 @@
 
 #![warn(unreachable_pub)]
 #![warn(missing_docs)]
+#![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
 
 use std::error::Error as StdError;
 use std::fmt;
@@ -27,10 +28,12 @@ use serde::de::DeserializeOwned;
 use tokio::time::sleep;
 
 mod types;
+#[cfg(feature = "time")]
+pub use types::RenewalInfo;
 pub use types::{
-    AccountCredentials, Authorization, AuthorizationStatus, Challenge, ChallengeType, Error,
-    Identifier, LetsEncrypt, NewAccount, NewOrder, OrderState, OrderStatus, Problem,
-    RevocationReason, RevocationRequest, ZeroSsl,
+    AccountCredentials, Authorization, AuthorizationStatus, CertificateIdentifier, Challenge,
+    ChallengeType, Error, Identifier, LetsEncrypt, NewAccount, NewOrder, OrderState, OrderStatus,
+    Problem, RevocationReason, RevocationRequest, ZeroSsl,
 };
 use types::{
     DirectoryUrls, Empty, FinalizeRequest, Header, JoseJson, Jwk, KeyOrKeyId, NewAccountPayload,
@@ -374,7 +377,11 @@ impl Account {
     /// Create a new order based on the given [`NewOrder`]
     ///
     /// Returns an [`Order`] instance. Use the [`Order::state()`] method to inspect its state.
-    pub async fn new_order(&self, order: &NewOrder<'_>) -> Result<Order, Error> {
+    pub async fn new_order(&self, order: &NewOrder<'_, '_>) -> Result<Order, Error> {
+        if order.replaces.is_some() && self.inner.client.urls.renewal_info.is_none() {
+            return Err(Error::Unsupported("ACME renewal information (ARI)"));
+        }
+
         let rsp = self
             .inner
             .post(Some(order), None, &self.inner.client.urls.new_order)
@@ -388,13 +395,29 @@ impl Account {
             .and_then(|hv| hv.to_str().ok())
             .map(|s| s.to_owned());
 
+        // We return errors from Problem::check before emitting an error for any further
+        // issues (e.g. no order URL, missing replacement field).
+        let state = Problem::check::<OrderState>(rsp).await?;
+
+        // Per the ARI spec:
+        // "If the Server accepts a new-order request with a "replaces" field, it MUST reflect
+        // that field in the response and in subsequent requests for the corresponding Order
+        // object."
+        if order.replaces.is_some() && order.replaces != state.replaces {
+            return Err(Error::Other(
+                format!(
+                    "replaces field mismatch: expected {expected:?}, found {found:?}",
+                    expected = order.replaces,
+                    found = order.replaces
+                )
+                .into(),
+            ));
+        }
+
         Ok(Order {
             account: self.inner.clone(),
             nonce,
-            // Order of fields matters! We return errors from Problem::check
-            // before emitting an error if there is no order url. Or the
-            // simple no url error hides the causing error in `Problem::check`.
-            state: Problem::check::<OrderState>(rsp).await?,
+            state,
             url: order_url.ok_or("no order URL found")?,
         })
     }
@@ -432,6 +455,39 @@ impl Account {
         // The body is empty if the request was successful
         let _ = Problem::from_response(rsp).await?;
         Ok(())
+    }
+
+    /// Fetch `RenewalInfo` with a suggested window for renewing an identified certificate
+    ///
+    /// Clients may use this information to determine when to renew a certificate. If the renewal
+    /// window starts in the past, then renewal should be attempted immediately. Otherwise, a
+    /// uniformly random point between the window start/end should be selected and used to
+    /// schedule a renewal in the future.
+    ///
+    /// This is only supported by some ACME servers. If the server does not support this feature,
+    /// this method will return `Error::Unsupported`.
+    ///
+    /// See <https://www.ietf.org/archive/id/draft-ietf-acme-ari-07.html#section-4.2-4> for more
+    /// information.
+    #[cfg(feature = "time")]
+    pub async fn renewal_info(
+        &self,
+        certificate_id: &CertificateIdentifier<'_>,
+    ) -> Result<RenewalInfo, Error> {
+        let renewal_info_url = match self.inner.client.urls.renewal_info.as_deref() {
+            Some(url) => url,
+            None => return Err(Error::Unsupported("ACME renewal information (ARI)")),
+        };
+
+        // Note: unlike other ACME endpoints, the renewal info endpoint does not require a nonce
+        // or any JWS authentication. It's just a Plain-Old-HTTP-GET.
+        let request = Request::builder()
+            .method(Method::GET)
+            .uri(format!("{renewal_info_url}/{certificate_id}"))
+            .body(Full::default())?;
+
+        let rsp = self.inner.client.http.request(request).await?;
+        Problem::check::<RenewalInfo>(rsp).await
     }
 
     /// Get the account ID

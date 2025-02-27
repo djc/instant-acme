@@ -40,9 +40,7 @@ async fn main() -> anyhow::Result<()> {
 
     let identifier = Identifier::Dns(opts.name.clone());
     let mut order = account
-        .new_order(&NewOrder {
-            identifiers: &[identifier],
-        })
+        .new_order(&NewOrder::new(&[identifier]))
         .await
         .unwrap();
 
@@ -70,7 +68,9 @@ async fn main() -> anyhow::Result<()> {
             .find(|c| c.r#type == ChallengeType::Dns01)
             .ok_or_else(|| anyhow::anyhow!("no dns01 challenge found"))?;
 
-        let Identifier::Dns(identifier) = &authz.identifier;
+        let Identifier::Dns(identifier) = &authz.identifier else {
+            panic!("unsupported identifier type");
+        };
 
         println!("Please set the following DNS record then press the Return key:");
         println!(

@@ -1,18 +1,28 @@
+use std::borrow::Cow;
 use std::fmt;
+use std::fmt::Write;
+use std::marker::PhantomData;
 
 use base64::prelude::{BASE64_URL_SAFE_NO_PAD, Engine};
 use bytes::Bytes;
-use rustls_pki_types::CertificateDer;
-use serde::de::DeserializeOwned;
+use rustls_pki_types::{CertificateDer, Der};
+use serde::de::{self, DeserializeOwned, Visitor};
 use serde::ser::SerializeMap;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
+#[cfg(feature = "time")]
+use time::OffsetDateTime;
+#[cfg(feature = "x509-parser")]
+use x509_parser::extensions::ParsedExtension;
+#[cfg(feature = "x509-parser")]
+use x509_parser::parse_x509_certificate;
 
 use crate::BytesResponse;
 use crate::crypto::{self, KeyPair};
 
 /// Error type for instant-acme
 #[derive(Debug, Error)]
+#[non_exhaustive]
 pub enum Error {
     /// An JSON problem as returned by the ACME server
     ///
@@ -41,6 +51,9 @@ pub enum Error {
     /// Failed to (de)serialize a JSON object
     #[error("failed to (de)serialize JSON: {0}")]
     Json(#[from] serde_json::Error),
+    /// ACME server does not support a requested feature
+    #[error("ACME server does not support: {0}")]
+    Unsupported(&'static str),
     /// Other kind of error
     #[error(transparent)]
     Other(Box<dyn std::error::Error + Send + Sync + 'static>),
@@ -321,6 +334,7 @@ pub struct Challenge {
 ///
 /// <https://datatracker.ietf.org/doc/html/rfc8555#section-7.1.3>
 #[derive(Debug, Deserialize)]
+#[non_exhaustive]
 #[serde(rename_all = "camelCase")]
 pub struct OrderState {
     /// Current status
@@ -335,6 +349,10 @@ pub struct OrderState {
     pub finalize: String,
     /// The certificate URL, which becomes available after finalization
     pub certificate: Option<String>,
+    /// The certificate that this order is replacing, if any
+    #[serde(deserialize_with = "deserialize_static_certificate_identifier")]
+    #[serde(default)]
+    pub replaces: Option<CertificateIdentifier<'static>>,
 }
 
 /// Input data for [Order](crate::Order) creation
@@ -342,9 +360,45 @@ pub struct OrderState {
 /// To be passed into [Account::new_order()](crate::Account::new_order()).
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
-pub struct NewOrder<'a> {
+pub struct NewOrder<'a, 'b> {
+    /// The [`CertificateIdentifier`] of a previously issued certificate being replaced by the order
+    pub(crate) replaces: Option<CertificateIdentifier<'b>>,
     /// Identifiers to be included in the order
-    pub identifiers: &'a [Identifier],
+    identifiers: &'a [Identifier],
+}
+
+impl<'a, 'b> NewOrder<'a, 'b> {
+    /// Prepare to create a new order for the given identifiers
+    ///
+    /// To be passed into [Account::new_order()](crate::Account::new_order()).
+    pub fn new(identifiers: &'a [Identifier]) -> Self {
+        Self {
+            identifiers,
+            replaces: None,
+        }
+    }
+
+    /// Indicate to the ACME server that the `NewOrder` is replacing a previously issued certificate
+    ///
+    /// The previously issued certificate must be identified by a `EncodedCertificateIdentifier`.
+    ///
+    /// Some ACME servers may give preferential rate limits to orders that replace
+    /// existing certificates, or use this information to determine when it is safe
+    /// to revoke a certificate affected by a compliance incident.
+    ///
+    /// When provided, at least one of the `identifiers` for the new order must have been
+    /// present in the certificate being replaced. If the ACME CA does not support the
+    /// ACME renewal information (ARI) extension, the [crate::Account::new_order()] method will
+    /// return an error.
+    pub fn replaces(&mut self, replaces: CertificateIdentifier<'b>) -> &mut Self {
+        self.replaces = Some(replaces);
+        self
+    }
+
+    /// Identifiers to be included in the order
+    pub fn identifiers(&self) -> &[Identifier] {
+        self.identifiers
+    }
 }
 
 /// Payload for a certificate revocation request
@@ -430,6 +484,10 @@ pub(crate) struct DirectoryUrls {
     pub(crate) new_authz: Option<String>,
     pub(crate) revoke_cert: Option<String>,
     pub(crate) key_change: Option<String>,
+    // Endpoint for the ACME renewal information (ARI) extension
+    //
+    // <https://www.ietf.org/archive/id/draft-ietf-acme-ari-07.html>
+    pub(crate) renewal_info: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -500,6 +558,7 @@ pub enum AuthorizationStatus {
 /// Represent an identifier in an ACME [Order](crate::Order)
 #[allow(missing_docs)]
 #[derive(Clone, Debug, Serialize, Deserialize, Eq, PartialEq)]
+#[non_exhaustive]
 #[serde(tag = "type", content = "value", rename_all = "camelCase")]
 pub enum Identifier {
     Dns(String),
@@ -582,6 +641,179 @@ impl ZeroSsl {
     }
 }
 
+/// A unique certificate identifier for the ACME renewal information (ARI) extension
+///
+/// See <https://www.ietf.org/archive/id/draft-ietf-acme-ari-07.html#section-4.1> for
+/// more information.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct CertificateIdentifier<'a> {
+    /// The BASE64URL-encoded authority key identifier (AKI) extension `keyIdentifier` of the certificate
+    pub authority_key_identifier: Cow<'a, str>,
+
+    /// The BASE64URL-encoded serial number of the certificate
+    pub serial: Cow<'a, str>,
+}
+
+impl CertificateIdentifier<'_> {
+    /// Encode a unique certificate identifier using the provided authority key ID and serial
+    ///
+    /// `authority_key_identifier` must be the DER-encoded ASN.1 octet string from the
+    /// `keyIdentifier` field of the `AuthorityKeyIdentifier` extension found in the certificate
+    /// to be identified.
+    ///
+    /// `serial` must be the DER-encoded ASN.1 serial number from the certificate to be identified.
+    /// Care must be taken to use the **encoded** serial number, not a big integer representation.
+    ///
+    /// The combination uniquely identifies a certificate within all certificates issued by the
+    /// same CA.
+    ///
+    /// See [RFC 5280 §4.1.2.2], [RFC 5280 §4.2.1.1], and [draft-ietf-acme-ari-07 §4.1]
+    ///
+    /// [RFC 5280 §4.1.2.2]: https://www.rfc-editor.org/rfc/rfc5280#section-4.1.2.2
+    /// [RFC 5280 §4.2.1.1]: https://www.rfc-editor.org/rfc/rfc5280#section-4.2.1.1
+    /// [draft-ietf-acme-ari-07 §4.1]: https://www.ietf.org/archive/id/draft-ietf-acme-ari-07.html#section-4.1
+    pub fn new(authority_key_identifier: Der<'_>, serial: Der<'_>) -> Self {
+        Self {
+            authority_key_identifier: BASE64_URL_SAFE_NO_PAD
+                .encode(authority_key_identifier)
+                .into(),
+            serial: BASE64_URL_SAFE_NO_PAD.encode(serial).into(),
+        }
+    }
+}
+
+impl<'de: 'a, 'a> Deserialize<'de> for CertificateIdentifier<'a> {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        struct CertificateIdentifierVisitor<'de> {
+            marker: PhantomData<CertificateIdentifier<'de>>,
+        }
+
+        impl<'de> Visitor<'de> for CertificateIdentifierVisitor<'de> {
+            type Value = CertificateIdentifier<'de>;
+
+            fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+                formatter.write_str("a string containing 2 '.'-delimited BASE64 URL encoded parts")
+            }
+
+            fn visit_borrowed_str<E>(self, value: &'de str) -> Result<Self::Value, E>
+            where
+                E: de::Error,
+            {
+                let parts: Vec<&str> = value.split('.').collect();
+
+                if parts.len() != 2 {
+                    return Err(E::custom(format!(
+                        "expected 2 '.'-delimited parts, found {} parts",
+                        parts.len()
+                    )));
+                }
+
+                Ok(CertificateIdentifier {
+                    authority_key_identifier: Cow::Borrowed(parts[0]),
+                    serial: Cow::Borrowed(parts[1]),
+                })
+            }
+        }
+
+        deserializer.deserialize_str(CertificateIdentifierVisitor {
+            marker: PhantomData,
+        })
+    }
+}
+
+impl Serialize for CertificateIdentifier<'_> {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        serializer.collect_str(self)
+    }
+}
+
+#[cfg(feature = "x509-parser")]
+impl<'a> TryFrom<&'a CertificateDer<'_>> for CertificateIdentifier<'_> {
+    type Error = String;
+
+    fn try_from(cert: &'a CertificateDer) -> Result<Self, Self::Error> {
+        let (_, parsed_cert) = parse_x509_certificate(cert.as_ref())
+            .map_err(|e| format!("failed to parse certificate: {e}"))?;
+
+        let Some(authority_key_identifier) =
+            parsed_cert
+                .iter_extensions()
+                .find_map(|ext| match ext.parsed_extension() {
+                    ParsedExtension::AuthorityKeyIdentifier(aki_ext) => aki_ext
+                        .key_identifier
+                        .as_ref()
+                        .map(|aki| Der::from_slice(aki.0)),
+                    _ => None,
+                })
+        else {
+            return Err(
+                "certificate does not contain an Authority Key Identifier (AKI) extension".into(),
+            );
+        };
+
+        Ok(Self::new(
+            authority_key_identifier,
+            Der::from_slice(parsed_cert.tbs_certificate.raw_serial()),
+        ))
+    }
+}
+
+impl fmt::Display for CertificateIdentifier<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(&self.authority_key_identifier)?;
+        f.write_char('.')?;
+        f.write_str(&self.serial)
+    }
+}
+
+/// Information about a suggested renewal window for a certificate
+///
+/// See <https://www.ietf.org/archive/id/draft-ietf-acme-ari-07.html#section-4.2>
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+#[cfg(feature = "time")]
+pub struct RenewalInfo {
+    /// The suggested renewal window for a certificate
+    pub suggested_window: SuggestedWindow,
+    /// A URL to a page explaining why the suggested renewal window has its current value
+    #[serde(rename = "explanationURL")]
+    pub explanation_url: Option<String>,
+}
+
+/// A suggested renewal window for a certificate
+///
+/// See <https://www.ietf.org/archive/id/draft-ietf-acme-ari-07.html#section-4.2>
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+#[cfg(feature = "time")]
+pub struct SuggestedWindow {
+    /// The start [`OffsetDateTime`] of the suggested renewal window
+    #[serde(with = "time::serde::rfc3339")]
+    pub start: OffsetDateTime,
+    /// The end [`OffsetDateTime`] of the suggested renewal window
+    #[serde(with = "time::serde::rfc3339")]
+    pub end: OffsetDateTime,
+}
+
+fn deserialize_static_certificate_identifier<'de, D>(
+    deserializer: D,
+) -> Result<Option<CertificateIdentifier<'static>>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let opt_cert_id = Option::<CertificateIdentifier<'_>>::deserialize(deserializer)?;
+    Ok(opt_cert_id.map(move |cert_id| CertificateIdentifier {
+        authority_key_identifier: Cow::Owned(cert_id.authority_key_identifier.into_owned()),
+        serial: Cow::Owned(cert_id.serial.into_owned()),
+    }))
+}
+
 #[derive(Clone, Copy, Debug, Serialize)]
 #[serde(rename_all = "UPPERCASE")]
 pub(crate) enum SigningAlgorithm {
@@ -596,6 +828,12 @@ pub(crate) struct Empty {}
 
 #[cfg(test)]
 mod tests {
+    #[cfg(feature = "x509-parser")]
+    use rcgen::{
+        BasicConstraints, CertificateParams, DistinguishedName, IsCa, KeyIdMethod, KeyPair,
+        SerialNumber,
+    };
+
     use super::*;
 
     // https://datatracker.ietf.org/doc/html/rfc8555#section-7.4
@@ -769,5 +1007,94 @@ mod tests {
     for \"_example.org\": Invalid underscore in DNS name \"_example.org\" (urn:ietf:params:acme:error:malformed), \
     for \"example.net\": This CA will not issue for \"example.net\" (urn:ietf:params:acme:error:rejectedIdentifier)";
         assert_eq!(format!("{obj}"), expected_display);
+    }
+
+    // https://www.ietf.org/archive/id/draft-ietf-acme-ari-07.html#section-4.1
+    #[test]
+    fn certificate_identifier() {
+        const ORDER: &str = r#"{
+          "status": "pending",
+          "expires": "2016-01-05T14:09:07.99Z",
+
+          "notBefore": "2016-01-01T00:00:00Z",
+          "notAfter": "2016-01-08T00:00:00Z",
+
+          "identifiers": [
+            { "type": "dns", "value": "www.example.org" },
+            { "type": "dns", "value": "example.org" }
+          ],
+
+          "authorizations": [
+            "https://example.com/acme/authz/PAniVnsZcis",
+            "https://example.com/acme/authz/r4HqLzrSrpI"
+          ],
+
+          "finalize": "https://example.com/acme/order/TOlocE8rfgo/finalize",
+
+          "replaces": "aYhba4dGQEHhs3uEe6CuLN4ByNQ.AIdlQyE"
+        }"#;
+
+        let order = serde_json::from_str::<OrderState>(ORDER).unwrap();
+        let cert_id = order.replaces.unwrap();
+        assert_eq!(
+            cert_id.authority_key_identifier,
+            "aYhba4dGQEHhs3uEe6CuLN4ByNQ"
+        );
+        assert_eq!(cert_id.serial, "AIdlQyE");
+
+        let serialized = serde_json::to_string(&cert_id).unwrap();
+        assert_eq!(serialized, r#""aYhba4dGQEHhs3uEe6CuLN4ByNQ.AIdlQyE""#);
+    }
+
+    #[cfg(feature = "x509-parser")]
+    #[test]
+    fn encoded_certificate_identifier_from_cert() {
+        // Generate a CA key_pair and self-signed cert with a specific subject key identifier.
+        let ca_key_id = vec![0xC0, 0xFF, 0xEE];
+        let ca_key = KeyPair::generate().unwrap();
+        let mut ca_params = CertificateParams::default();
+        ca_params.is_ca = IsCa::Ca(BasicConstraints::Unconstrained);
+        ca_params.key_identifier_method = KeyIdMethod::PreSpecified(ca_key_id);
+        let ca_cert = ca_params.self_signed(&ca_key).unwrap();
+
+        // Generate an end entity certificate issued by the CA, with a specific serial number
+        // and an AKI extension.
+        let ee_key = KeyPair::generate().unwrap();
+        let ee_serial = [0xCA, 0xFE];
+        let mut ee_params = CertificateParams::new(["example.com".to_owned()]).unwrap();
+        ee_params.distinguished_name = DistinguishedName::new();
+        ee_params.serial_number = Some(SerialNumber::from_slice(ee_serial.as_slice()));
+        ee_params.use_authority_key_identifier_extension = true;
+        let ee_cert = ee_params.signed_by(&ee_key, &ca_cert, &ca_key).unwrap();
+
+        // Extract the AKI and serial number from the EE certificate and create an encoded
+        // certificate identifier.
+        let encoded = CertificateIdentifier::try_from(ee_cert.der()).unwrap();
+
+        // We should arrive at the expected encoded certificate identifier.
+        assert_eq!(format!("{encoded}"), "wP_u.AMr-");
+    }
+
+    // https://aarongable.github.io/draft-acme-ari/draft-ietf-acme-ari.html#section-4.2
+    #[test]
+    #[cfg(feature = "time")]
+    fn renewal_info() {
+        const INFO: &str = r#"{
+          "suggestedWindow": {
+            "start": "2025-01-02T04:00:00Z",
+            "end": "2025-01-03T04:00:00Z"
+          },
+          "explanationURL": "https://acme.example.com/docs/ari"
+        }
+        "#;
+
+        let info = serde_json::from_str::<RenewalInfo>(INFO).unwrap();
+        assert_eq!(
+            info.explanation_url.unwrap(),
+            "https://acme.example.com/docs/ari"
+        );
+        let window = info.suggested_window;
+        assert_eq!(window.start.day(), 2);
+        assert_eq!(window.end.day(), 3);
     }
 }

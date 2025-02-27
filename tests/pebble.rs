@@ -1,7 +1,7 @@
 //! Note: tests in the file are ignored by default because they requires `pebble` and
 //! `pebble-challtestsrv` binaries.
 //!
-//! See documentation for [`PebbleEnvironment`].
+//! See documentation for [`Environment`].
 
 use std::collections::HashMap;
 use std::error::Error as StdError;
@@ -25,6 +25,8 @@ use instant_acme::{
     Account, AuthorizationStatus, Challenge, ChallengeType, Error, ExternalAccountKey, Identifier,
     KeyAuthorization, NewAccount, NewOrder, Order, OrderStatus,
 };
+#[cfg(all(feature = "time", feature = "x509-parser"))]
+use instant_acme::{CertificateIdentifier, RevocationRequest};
 use rcgen::{CertificateParams, DistinguishedName, KeyPair};
 use rustls::RootCertStore;
 use rustls::client::{verify_server_cert_signed_by_trust_anchor, verify_server_name};
@@ -35,6 +37,8 @@ use rustls::server::ParsedCertificate;
 use rustls_pki_types::UnixTime;
 use serde::{Serialize, Serializer};
 use tempfile::NamedTempFile;
+#[cfg(all(feature = "time", feature = "x509-parser"))]
+use time::OffsetDateTime;
 use tokio::net::TcpStream;
 use tokio::time::sleep;
 use tracing::{debug, info, trace};
@@ -49,8 +53,9 @@ async fn http_01() -> Result<(), Box<dyn StdError>> {
 
     Environment::new(EnvironmentConfig::default())
         .await?
-        .test::<Http01>(&["http01.example.com"])
+        .test::<Http01>(&NewOrder::new(&dns_identifiers(["http01.example.com"])))
         .await
+        .map(|_| ())
 }
 
 #[tokio::test]
@@ -60,8 +65,9 @@ async fn dns_01() -> Result<(), Box<dyn StdError>> {
 
     Environment::new(EnvironmentConfig::default())
         .await?
-        .test::<Dns01>(&["dns01.example.com"])
+        .test::<Dns01>(&NewOrder::new(&dns_identifiers(["dns01.example.com"])))
         .await
+        .map(|_| ())
 }
 
 #[tokio::test]
@@ -71,8 +77,9 @@ async fn tls_alpn_01() -> Result<(), Box<dyn StdError>> {
 
     Environment::new(EnvironmentConfig::default())
         .await?
-        .test::<Alpn01>(&["tlsalpn01.example.com"])
+        .test::<Alpn01>(&NewOrder::new(&dns_identifiers(["tlsalpn01.example.com"])))
         .await
+        .map(|_| ())
 }
 
 /// Test subproblem handling by trying to issue for a forbidden identifier
@@ -85,7 +92,10 @@ async fn forbidden_identifier() -> Result<(), Box<dyn StdError>> {
     let forbidden_name = config.pebble.domain_blocklist.first().unwrap();
     let err = Environment::new(EnvironmentConfig::default())
         .await?
-        .test::<Http01>(&["valid.example.com", forbidden_name])
+        .test::<Http01>(&NewOrder::new(&dns_identifiers([
+            "valid.example.com",
+            forbidden_name,
+        ])))
         .await
         .expect_err("issuing for blocked domain name should fail");
 
@@ -160,17 +170,64 @@ async fn authz_reuse() -> Result<(), Box<dyn StdError>> {
     .await?;
 
     // Issue an initial order so we have authzs to reuse.
-    env.test::<Http01>(&["authz-reuse-1.example.com", "authz-reuse-2.example.com"])
-        .await?;
+    env.test::<Http01>(&NewOrder::new(&dns_identifiers([
+        "authz-reuse-1.example.com",
+        "authz-reuse-2.example.com",
+    ])))
+    .await?;
 
     // Issue a second order that includes the same identifiers as before, plus one new one.
     // The re-use of the previous two authz shouldn't affect the issuance.
-    env.test::<Http01>(&[
+    env.test::<Http01>(&NewOrder::new(&dns_identifiers([
         "authz-reuse-1.example.com",
         "authz-reuse-2.example.com",
         "authz-reuse-3.example.com",
-    ])
+    ])))
     .await
+    .map(|_| ())
+}
+
+/// Test ACME automated renewal information (ARI)
+#[cfg(all(feature = "x509-parser", feature = "time"))]
+#[tokio::test]
+#[ignore]
+async fn replacement_order() -> Result<(), Box<dyn StdError>> {
+    try_tracing_init();
+
+    let mut env = Environment::new(EnvironmentConfig::default()).await?;
+
+    // Issue an initial certificate.
+    let names = &["example.com"];
+    let initial_cert = env
+        .test::<Http01>(&NewOrder::new(&dns_identifiers(names)))
+        .await?;
+
+    // Then, revoke it so that the CA suggests immediate replacement.
+    env.account
+        .revoke(&RevocationRequest {
+            certificate: &initial_cert,
+            reason: None,
+        })
+        .await?;
+
+    // Construct an identifier from the initial certificate DER.
+    let initial_cert_id = CertificateIdentifier::try_from(&initial_cert)?;
+
+    // We should be able to fetch the certificate's suggested renewal window.
+    let renewal_info = env
+        .account
+        .renewal_info(&initial_cert_id)
+        .await
+        .expect("failed to fetch renewal window");
+
+    // Since we revoked the initial certificate, the window start should be in the past.
+    assert!(renewal_info.suggested_window.start < OffsetDateTime::now_utc());
+
+    // So, let's go ahead and issue a replacement certificate.
+    env.test::<Http01>(NewOrder::new(&dns_identifiers(names)).replaces(initial_cert_id))
+        .await?;
+
+    Ok(())
 }
 
 fn try_tracing_init() {
@@ -182,8 +239,12 @@ fn try_tracing_init() {
 
 /// A test environment running Pebble and a challenge test server
 ///
-/// Subprocesses are torn down cleanly on drop to avoid leaving
-/// stray child processes.
+/// You must have the `pebble` and `pebble-challtestsrv` binaries available
+/// in your `$PATH`, or, set the `PEBBLE` and `CHALLTESTSRV` environment variables
+/// to the paths of the binaries.
+///
+/// Binary downloads for many common platforms are available at:
+/// <https://github.com/letsencrypt/pebble/releases>.
 struct Environment {
     account: Account,
     config: EnvironmentConfig,
@@ -198,6 +259,9 @@ struct Environment {
 
 impl Environment {
     /// Create a new [`Environment`] with running Pebble and challenge test servers
+    ///
+    /// Spawned test server subprocesses are torn down cleanly on drop to avoid leaving
+    /// stray child processes.
     async fn new(config: EnvironmentConfig) -> Result<Environment, Box<dyn StdError>> {
         #[derive(Clone, Serialize)]
         struct ConfigWrapper<'a> {
@@ -296,19 +360,11 @@ impl Environment {
     /// Test certificates for an authorization method and a set of identifiers
     async fn test<A: AuthorizationMethod>(
         &mut self,
-        names: &[&'static str],
-    ) -> Result<(), Box<dyn StdError + 'static>> {
-        let identifiers = names
-            .iter()
-            .map(|id| Identifier::Dns(id.to_string()))
-            .collect::<Vec<_>>();
+        new_order: &NewOrder<'_, '_>,
+    ) -> Result<CertificateDer<'static>, Box<dyn StdError + 'static>> {
+        let identifiers = new_order.identifiers();
         debug!(?identifiers, "creating order");
-        let mut order = self
-            .account
-            .new_order(&NewOrder {
-                identifiers: &identifiers,
-            })
-            .await?;
+        let mut order = self.account.new_order(new_order).await?;
         info!(order_url = order.url(), "created order");
 
         let authorizations = order.authorizations().await?;
@@ -328,7 +384,9 @@ impl Environment {
                 .find(|c| c.r#type == A::TYPE)
                 .ok_or(format!("no {:?} challenge found", A::TYPE))?;
 
-            let Identifier::Dns(identifier) = &authz.identifier;
+            let Identifier::Dns(identifier) = &authz.identifier else {
+                panic!("unsupported identifier type");
+            };
 
             let key_authz = order.key_authorization(challenge);
             self.request_challenge::<A>(identifier, challenge, &key_authz)
@@ -349,11 +407,11 @@ impl Environment {
         }
 
         // Issue a certificate for the names and test the chain validates to the issuer root.
-        let cert_chain = self.certificate(&mut order, names).await?;
+        let cert_chain = self.certificate(&mut order, identifiers).await?;
 
         // Split off and parse the EE cert, save the intermediates that follow.
-        let (ee_cert, intermediates) = cert_chain.split_first().unwrap();
-        let ee_cert = ParsedCertificate::try_from(ee_cert).unwrap();
+        let (ee_cert_der, intermediates) = cert_chain.split_first().unwrap();
+        let ee_cert = ParsedCertificate::try_from(ee_cert_der).unwrap();
 
         // Use the default crypto provider to verify the certificate chain to the Pebble CA root.
         let crypto_provider = CryptoProvider::get_default().unwrap();
@@ -367,11 +425,11 @@ impl Environment {
         .unwrap();
 
         // Verify the EE cert is valid for each of the identifiers.
-        for ident in names {
-            verify_server_name(&ee_cert, &ServerName::try_from(*ident)?)?;
+        for ident in identifiers {
+            verify_server_name(&ee_cert, &ServerName::try_from(ident.to_string())?)?;
         }
 
-        Ok(())
+        Ok(ee_cert_der.to_owned())
     }
 
     /// Issue a certificate for the given order, and identifiers
@@ -380,7 +438,7 @@ impl Environment {
     async fn certificate(
         &self,
         order: &mut Order,
-        identifiers: &[&str],
+        identifiers: &[Identifier],
     ) -> Result<Vec<CertificateDer<'static>>, Box<dyn StdError>> {
         info!(?identifiers, order_url = order.url(), "issuing certificate");
 
@@ -388,7 +446,7 @@ impl Environment {
         let mut params = CertificateParams::new(
             identifiers
                 .iter()
-                .map(|&s| s.to_owned())
+                .map(|s| s.to_string())
                 .collect::<Vec<_>>(),
         )?;
         params.distinguished_name = DistinguishedName::new();
@@ -463,6 +521,13 @@ impl Environment {
             .await?;
         Ok(())
     }
+}
+
+fn dns_identifiers(dns_names: impl IntoIterator<Item = impl ToString>) -> Vec<Identifier> {
+    dns_names
+        .into_iter()
+        .map(|id| Identifier::Dns(id.to_string()))
+        .collect()
 }
 
 struct Http01;
