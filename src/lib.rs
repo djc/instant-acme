@@ -2,6 +2,7 @@
 
 #![warn(unreachable_pub)]
 #![warn(missing_docs)]
+#![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
 
 use std::error::Error as StdError;
 use std::fmt;
