@@ -937,9 +937,9 @@ pub trait BytesBody: Send {
 }
 
 mod crypto {
-    #[cfg(all(feature = "aws-lc-rs", any(feature = "fips", not(feature = "ring"))))]
+    #[cfg(feature = "aws-lc-rs")]
     pub(crate) use aws_lc_rs as ring_like;
-    #[cfg(all(feature = "ring", not(feature = "fips")))]
+    #[cfg(all(feature = "ring", not(feature = "aws-lc-rs")))]
     pub(crate) use ring as ring_like;
 
     pub(crate) use ring_like::digest::{Digest, SHA256, digest};
@@ -949,7 +949,7 @@ mod crypto {
     pub(crate) use ring_like::signature::{KeyPair, Signature};
     pub(crate) use ring_like::{hmac, pkcs8};
 
-    #[cfg(all(feature = "aws-lc-rs", any(feature = "fips", not(feature = "ring"))))]
+    #[cfg(feature = "aws-lc-rs")]
     pub(crate) fn p256_key_pair_from_pkcs8(
         pkcs8: &[u8],
         _: &SystemRandom,
@@ -957,7 +957,7 @@ mod crypto {
         EcdsaKeyPair::from_pkcs8(&ECDSA_P256_SHA256_FIXED_SIGNING, pkcs8)
     }
 
-    #[cfg(all(feature = "ring", not(feature = "fips")))]
+    #[cfg(all(feature = "ring", not(feature = "aws-lc-rs")))]
     pub(crate) fn p256_key_pair_from_pkcs8(
         pkcs8: &[u8],
         rng: &SystemRandom,

@@ -12,7 +12,7 @@ keywords = ["letsencrypt", "acme"]
 categories = ["web-programming", "api-bindings"]
 
 [features]
-default = ["hyper-rustls", "ring"]
+default = ["aws-lc-rs", "hyper-rustls"]
 aws-lc-rs = ["dep:aws-lc-rs", "hyper-rustls?/aws-lc-rs", "rcgen/aws_lc_rs"]
 fips = ["aws-lc-rs", "aws-lc-rs?/fips"]
 hyper-rustls = ["dep:hyper", "dep:hyper-rustls", "dep:hyper-util"]
