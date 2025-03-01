@@ -32,6 +32,9 @@ specification.
 * `ring` (default): use the *ring* crate as the crypto backend
 * `aws-lc-rs`: use the aws-lc-rs crate as the crypto backend
 * `fips`: enable the aws-lc-rs crate's FIPS-compliant mode
+* `x509-parser`: enable extracting `CertificateIdentifier` values for ARI from
+  certificates
+* `time`: enable fetching `RenewalInfo` for a `CertificateIdentifier`
 
 If both `ring` and `aws-lc-rs` are enabled, which backend is used depends on the `fips` feature.
 If `fips` is enabled, `aws-lc-rs` is used; otherwise, `ring` is used.
