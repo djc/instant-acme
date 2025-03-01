@@ -19,9 +19,12 @@ specification.
 * Support for processing multiple orders concurrently
 * Support for external account binding
 * Support for certificate revocation
+* Support for the [ACME renewal information (ARI)] extension
 * Uses hyper with rustls and Tokio for HTTP requests
 * Uses *ring* or aws-lc-rs for ECDSA signing
 * Minimum supported Rust version (MSRV): 1.70
+
+[ACME renewal information (ARI)]: https://www.ietf.org/archive/id/draft-ietf-acme-ari-08.html
 
 ## Cargo features
 
