@@ -641,6 +641,14 @@ impl CertificateIdentifier<'_> {
             serial: BASE64_URL_SAFE_NO_PAD.encode(serial).into(),
         }
     }
+
+    /// Convert the `CertificateIdentifier` into an owned version with a static lifetime
+    pub fn into_owned(self) -> CertificateIdentifier<'static> {
+        CertificateIdentifier {
+            authority_key_identifier: Cow::Owned(self.authority_key_identifier.into_owned()),
+            serial: Cow::Owned(self.serial.into_owned()),
+        }
+    }
 }
 
 impl<'de: 'a, 'a> Deserialize<'de> for CertificateIdentifier<'a> {
