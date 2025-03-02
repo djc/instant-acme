@@ -31,7 +31,7 @@ async fn main() -> anyhow::Result<()> {
     .await?;
     info!(
         "account credentials:\n\n{}",
-        serde_json::to_string_pretty(&credentials).unwrap()
+        serde_json::to_string_pretty(&credentials)?
     );
 
     // Create the ACME order based on the given domain names.
@@ -41,8 +41,7 @@ async fn main() -> anyhow::Result<()> {
     let identifier = Identifier::Dns(opts.name.clone());
     let mut order = account
         .new_order(&NewOrder::new(&[identifier]))
-        .await
-        .unwrap();
+        .await?;
 
     let state = order.state();
     info!("order state: {:#?}", state);
@@ -50,7 +49,7 @@ async fn main() -> anyhow::Result<()> {
 
     // Pick the desired challenge type and prepare the response.
 
-    let authorizations = order.authorizations().await.unwrap();
+    let authorizations = order.authorizations().await?;
     let mut challenges = Vec::with_capacity(authorizations.len());
     for authz in &authorizations {
         let authz_state = authz.state();
@@ -79,7 +78,7 @@ async fn main() -> anyhow::Result<()> {
             identifier,
             order.key_authorization(challenge).dns_value()
         );
-        io::stdin().read_line(&mut String::new()).unwrap();
+        io::stdin().read_line(&mut String::new())?;
 
         challenges.push(&challenge.url);
     }
@@ -87,7 +86,7 @@ async fn main() -> anyhow::Result<()> {
     // Let the server know we're ready to accept the challenges.
 
     for url in &challenges {
-        order.set_challenge_ready(url).await.unwrap();
+        order.set_challenge_ready(url).await?;
     }
 
     // Exponentially back off until the order becomes ready or invalid.
@@ -107,9 +106,9 @@ async fn main() -> anyhow::Result<()> {
 
     // Finalize the order and print certificate chain, private key and account credentials.
 
-    order.finalize(csr.der()).await.unwrap();
+    order.finalize(csr.der()).await?;
     let cert_chain_pem = loop {
-        match order.certificate().await.unwrap() {
+        match order.certificate().await? {
             Some(cert_chain_pem) => break cert_chain_pem,
             None => sleep(Duration::from_secs(1)).await,
         }
