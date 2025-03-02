@@ -584,6 +584,35 @@ impl Account {
         Problem::check::<RenewalInfo>(rsp).await
     }
 
+    /// Deactivate the account with the ACME server
+    ///
+    /// This is useful when you want to cancel an account with the ACME server
+    /// because you don't intend to use it further, or because the account key was
+    /// compromised.
+    ///
+    /// After this point no further operations can be performed with the account.
+    /// Any existing orders or authorizations created with the ACME server will be
+    /// invalidated.
+    pub async fn deactivate(self) -> Result<(), Error> {
+        #[derive(Serialize)]
+        struct DeactivateRequest<'a> {
+            status: &'a str,
+        }
+
+        let _ = self
+            .inner
+            .post(
+                Some(&DeactivateRequest {
+                    status: "deactivated",
+                }),
+                None,
+                self.id(),
+            )
+            .await?;
+
+        Ok(())
+    }
+
     /// Get the account ID
     pub fn id(&self) -> &str {
         &self.inner.id
