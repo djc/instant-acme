@@ -106,7 +106,7 @@ async fn main() -> anyhow::Result<()> {
         }
     };
 
-    info!("certficate chain:\n\n{}", cert_chain_pem);
+    info!("certificate chain:\n\n{cert_chain_pem}");
     info!("private key:\n\n{}", private_key.serialize_pem());
     Ok(())
 }
