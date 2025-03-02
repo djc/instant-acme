@@ -253,6 +253,35 @@ async fn order_deactivate() -> Result<(), Box<dyn StdError>> {
     Ok(())
 }
 
+/// Test account deactivation
+#[tokio::test]
+#[ignore]
+async fn account_deactivate() -> Result<(), Box<dyn StdError>> {
+    try_tracing_init();
+
+    // Creat an env/initial account
+    let mut env = Environment::new(EnvironmentConfig::default()).await?;
+
+    // Deactivate the account - clone the Arc because this moves the account
+    env.account.clone().deactivate().await?;
+
+    // Using the account should now produce unauthorized errors
+    let err = env
+        .test::<Http01>(&NewOrder::new(&dns_identifiers(["http01.example.com"])))
+        .await
+        .expect_err("deactivated account should fail issuance");
+
+    let Error::Api(problem) = *err.downcast::<Error>()? else {
+        panic!("unexpected error result");
+    };
+
+    assert_eq!(
+        problem.r#type,
+        Some("urn:ietf:params:acme:error:unauthorized".to_string())
+    );
+    Ok(())
+}
+
 fn try_tracing_init() {
     let _ = tracing_subscriber::registry()
         .with(fmt::layer())
