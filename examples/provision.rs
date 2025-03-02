@@ -38,10 +38,13 @@ async fn main() -> anyhow::Result<()> {
     // Create the ACME order based on the given domain names.
     // Note that this only needs an `&Account`, so the library will let you
     // process multiple orders in parallel for a single account.
-
-    let identifier = Identifier::Dns(opts.name.clone());
+    let identifiers = opts
+        .names
+        .iter()
+        .map(|ident| Identifier::Dns(ident.clone()))
+        .collect::<Vec<_>>();
     let mut order = account
-        .new_order(&NewOrder::new(&[identifier]))
+        .new_order(&NewOrder::new(identifiers.as_slice()))
         .await?;
 
     let state = order.state();
@@ -99,8 +102,7 @@ async fn main() -> anyhow::Result<()> {
 
     // If the order is ready, we can provision the certificate.
     // Use the rcgen library to create a Certificate Signing Request.
-
-    let mut params = CertificateParams::new(vec![opts.name])?;
+    let mut params = CertificateParams::new(opts.names)?;
     params.distinguished_name = DistinguishedName::new();
     let private_key = KeyPair::generate()?;
     let csr = params.serialize_request(&private_key)?;
@@ -123,5 +125,5 @@ async fn main() -> anyhow::Result<()> {
 #[derive(Parser)]
 struct Options {
     #[clap(long)]
-    name: String,
+    names: Vec<String>,
 }
