@@ -18,7 +18,6 @@ async fn main() -> anyhow::Result<()> {
     // Create a new account. This will generate a fresh ECDSA key for you.
     // Alternatively, restore an account from serialized credentials by
     // using `Account::from_credentials()`.
-
     let (account, credentials) = Account::create(
         &NewAccount {
             contact: &[],
@@ -37,7 +36,6 @@ async fn main() -> anyhow::Result<()> {
     // Create the ACME order based on the given domain names.
     // Note that this only needs an `&Account`, so the library will let you
     // process multiple orders in parallel for a single account.
-
     let identifier = Identifier::Dns(opts.name.clone());
     let mut order = account
         .new_order(&NewOrder::new(&[identifier]))
@@ -48,7 +46,6 @@ async fn main() -> anyhow::Result<()> {
     assert!(matches!(state.status, OrderStatus::Pending));
 
     // Pick the desired challenge type and prepare the response.
-
     let authorizations = order.authorizations().await?;
     let mut challenges = Vec::with_capacity(authorizations.len());
     for authz in &authorizations {
@@ -60,7 +57,6 @@ async fn main() -> anyhow::Result<()> {
 
         // We'll use the DNS challenges for this example, but you could
         // pick something else to use here.
-
         let challenge = authz
             .challenges
             .iter()
@@ -83,13 +79,11 @@ async fn main() -> anyhow::Result<()> {
     }
 
     // Let the server know we're ready to accept the challenges.
-
     for url in &challenges {
         order.set_challenge_ready(url).await?;
     }
 
     // Exponentially back off until the order becomes ready or invalid.
-
     let status = order.poll(5, Duration::from_millis(250)).await?;
     if status != OrderStatus::Ready {
         return Err(anyhow::anyhow!("unexpected order status: {status:?}"));
@@ -97,14 +91,12 @@ async fn main() -> anyhow::Result<()> {
 
     // If the order is ready, we can provision the certificate.
     // Use the rcgen library to create a Certificate Signing Request.
-
     let mut params = CertificateParams::new(vec![opts.name])?;
     params.distinguished_name = DistinguishedName::new();
     let private_key = KeyPair::generate()?;
     let csr = params.serialize_request(&private_key)?;
 
     // Finalize the order and print certificate chain, private key and account credentials.
-
     order.finalize(csr.der()).await?;
     let cert_chain_pem = loop {
         match order.certificate().await? {
