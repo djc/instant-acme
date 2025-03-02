@@ -65,7 +65,10 @@ async fn dns_01() -> Result<(), Box<dyn StdError>> {
 
     Environment::new(EnvironmentConfig::default())
         .await?
-        .test::<Dns01>(&NewOrder::new(&dns_identifiers(["dns01.example.com"])))
+        .test::<Dns01>(&NewOrder::new(&dns_identifiers([
+            "dns01.example.com",
+            "*.wildcard.example.com",
+        ])))
         .await
         .map(|_| ())
 }
@@ -459,7 +462,7 @@ impl Environment {
             return Err(format!("unexpected order status: {status:?}").into());
         }
 
-        // Issue a certificate for the names and test the chain validates to the issuer root.
+        // Issue a certificate for the names, returning the certificate chain.
         let cert_chain = self.certificate(&mut order, identifiers).await?;
 
         // Split off and parse the EE cert, save the intermediates that follow.
@@ -479,7 +482,15 @@ impl Environment {
 
         // Verify the EE cert is valid for each of the identifiers.
         for ident in identifiers {
-            verify_server_name(&ee_cert, &ServerName::try_from(ident.to_string())?)?;
+            let mut server_name = ident.to_string();
+
+            // When verifying a wildcard identifier, use a fixed label under the wildcard.
+            // The wildcard identifier isn't a valid ServerName itself.
+            if server_name.starts_with('*') {
+                server_name = server_name.replace('*', "foo");
+            }
+
+            verify_server_name(&ee_cert, &ServerName::try_from(server_name)?)?;
         }
 
         Ok(ee_cert_der.to_owned())
