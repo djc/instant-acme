@@ -43,13 +43,19 @@ anyhow = "1.0.66"
 clap = { version = "4.0.29", features = ["derive"] }
 rcgen = { version = "0.13", default-features = false, features = ["pem"] }
 rustls = { version = "0.23", default-features = false }
+rustls-platform-verifier = "0.5"
 tempfile = "3"
 tokio = { version = "1.22.0", features = ["macros", "rt", "rt-multi-thread", "time"] }
+tokio-rustls = "0.26"
 tracing = "0.1.37"
 tracing-subscriber =  { version = "0.3.16", features = ["env-filter"] }
 
 [[example]]
 name = "provision"
+required-features = ["hyper-rustls"]
+
+[[example]]
+name = "tls_alpn_provision"
 required-features = ["hyper-rustls"]
 
 # Pebble integration test.
