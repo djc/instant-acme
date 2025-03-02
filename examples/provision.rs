@@ -1,4 +1,5 @@
-use std::{io, time::Duration};
+use std::io;
+use std::time::Duration;
 
 use clap::Parser;
 use rcgen::{CertificateParams, DistinguishedName, KeyPair};
