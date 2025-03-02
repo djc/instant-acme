@@ -230,6 +230,29 @@ async fn replacement_order() -> Result<(), Box<dyn StdError>> {
     Ok(())
 }
 
+/// Test that it is possible to deactivate an order's authorizations
+#[tokio::test]
+#[ignore]
+async fn order_deactivate() -> Result<(), Box<dyn StdError>> {
+    try_tracing_init();
+
+    let env = Environment::new(EnvironmentConfig::default()).await?;
+
+    let idents = dns_identifiers(["authz-deactivate.example.com"]);
+    let new_order = &NewOrder::new(&idents);
+    let mut order = env.account.new_order(new_order).await?;
+
+    // Deactivate each pending authorization in the order.
+    for mut authz in order.authorizations().await? {
+        authz.deactivate().await?;
+    }
+
+    // With all authz's deactivated, the order should be status == Invalid
+    assert_eq!(order.refresh().await?.status, OrderStatus::Invalid);
+
+    Ok(())
+}
+
 fn try_tracing_init() {
     let _ = tracing_subscriber::registry()
         .with(fmt::layer())
