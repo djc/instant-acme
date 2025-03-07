@@ -14,13 +14,18 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
-      - name: Download Pebble
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.24"
+      - name: Clone Pebble repo
+        uses: actions/checkout@v4
+        with:
+          repository: letsencrypt/pebble
+          path: pebble-src
+      - name: Build Pebble binaries
+        working-directory: pebble-src
         run: |
-          curl -L "https://github.com/letsencrypt/pebble/releases/latest/download/pebble-linux-amd64.tar.gz" | tar xz --strip-components=3
-          chmod +x pebble
-      - name: Download Pebble Challenge Test Server
-        run: |
-          curl -L "https://github.com/letsencrypt/pebble/releases/latest/download/pebble-challtestsrv-linux-amd64.tar.gz" | tar xz --strip-components=3
-          chmod +x pebble-challtestsrv
+          go build -o $GITHUB_WORKSPACE/pebble ./cmd/pebble
+          go build -o $GITHUB_WORKSPACE/pebble-challtestsrv ./cmd/pebble-challtestsrv
       - name: Run integration test
         run: RUST_LOG=pebble=info cargo test --features=x509-parser --features=time -- --ignored
