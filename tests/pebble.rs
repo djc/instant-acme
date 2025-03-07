@@ -372,19 +372,20 @@ impl Environment {
 
         // Collect up the relevant challenges, provisioning the expected responses as we go.
         for authz in &authorizations {
-            match authz.status {
+            let authz_state = authz.state();
+            match authz_state.status {
                 AuthorizationStatus::Pending => {}
                 AuthorizationStatus::Valid => continue,
-                _ => unreachable!("unexpected authz state: {:?}", authz.status),
+                _ => unreachable!("unexpected authz state: {:?}", authz_state.status),
             }
 
-            let challenge = authz
+            let challenge = authz_state
                 .challenges
                 .iter()
                 .find(|c| c.r#type == A::TYPE)
                 .ok_or(format!("no {:?} challenge found", A::TYPE))?;
 
-            let Identifier::Dns(identifier) = &authz.identifier else {
+            let Identifier::Dns(identifier) = &authz_state.identifier else {
                 panic!("unsupported identifier type");
             };
 
