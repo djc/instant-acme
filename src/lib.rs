@@ -70,10 +70,15 @@ impl Order {
     /// After the challenges have been set up, check the [`Order::state()`] to see
     /// if the order is ready to be finalized (or becomes invalid). Once it is
     /// ready, call `Order::finalize()` to get the certificate.
-    pub async fn authorizations(&mut self) -> Result<Vec<AuthorizationState>, Error> {
+    pub async fn authorizations(&mut self) -> Result<Vec<Authorization>, Error> {
         let mut authorizations = Vec::with_capacity(self.state.authorizations.len());
         for url in &self.state.authorizations {
-            authorizations.push(self.account.get(&mut self.nonce, url).await?);
+            authorizations.push(Authorization {
+                account: self.account.clone(),
+                nonce: None,
+                url: url.clone(),
+                state: self.account.get(&mut self.nonce, url).await?,
+            });
         }
         Ok(authorizations)
     }
@@ -216,6 +221,45 @@ impl Order {
     }
 
     /// Get the URL of the order
+    pub fn url(&self) -> &str {
+        &self.url
+    }
+}
+
+/// An ACME authorization as described in RFC 8555 (section 7.1.4)
+///
+/// Authorizations are retrieved from an associated [`Order`] by calling
+/// [`Order::authorizations()`].
+///
+/// <https://datatracker.ietf.org/doc/html/rfc8555#section-7.1.3>
+pub struct Authorization {
+    account: Arc<AccountInner>,
+    nonce: Option<String>,
+    url: String,
+    state: AuthorizationState,
+}
+
+impl Authorization {
+    /// Refresh the current state of the authorization
+    pub async fn refresh(&mut self) -> Result<&AuthorizationState, Error> {
+        let rsp = self
+            .account
+            .post(None::<&Empty>, self.nonce.take(), &self.url)
+            .await?;
+
+        self.nonce = nonce_from_response(&rsp);
+        self.state = Problem::check::<AuthorizationState>(rsp).await?;
+        Ok(&self.state)
+    }
+
+    /// Get the [`AuthorizationState`] of the authorization
+    ///
+    /// Call `refresh()` to get the latest state from the server.
+    pub fn state(&self) -> &AuthorizationState {
+        &self.state
+    }
+
+    /// Get the URL of the authorization
     pub fn url(&self) -> &str {
         &self.url
     }

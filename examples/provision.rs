@@ -53,7 +53,8 @@ async fn main() -> anyhow::Result<()> {
     let authorizations = order.authorizations().await.unwrap();
     let mut challenges = Vec::with_capacity(authorizations.len());
     for authz in &authorizations {
-        match authz.status {
+        let authz_state = authz.state();
+        match authz_state.status {
             AuthorizationStatus::Pending => {}
             AuthorizationStatus::Valid => continue,
             _ => todo!(),
@@ -62,13 +63,13 @@ async fn main() -> anyhow::Result<()> {
         // We'll use the DNS challenges for this example, but you could
         // pick something else to use here.
 
-        let challenge = authz
+        let challenge = authz_state
             .challenges
             .iter()
             .find(|c| c.r#type == ChallengeType::Dns01)
             .ok_or_else(|| anyhow::anyhow!("no dns01 challenge found"))?;
 
-        let Identifier::Dns(identifier) = &authz.identifier else {
+        let Identifier::Dns(identifier) = &authz_state.identifier else {
             panic!("unsupported identifier type");
         };
 
