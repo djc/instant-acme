@@ -530,10 +530,10 @@ fn base64(data: &impl Serialize) -> Result<String, serde_json::Error> {
     Ok(BASE64_URL_SAFE_NO_PAD.encode(serde_json::to_vec(data)?))
 }
 
-/// An ACME authorization as described in RFC 8555 (section 7.1.4)
+/// An ACME authorization's state as described in RFC 8555 (section 7.1.4)
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct Authorization {
+pub struct AuthorizationState {
     /// The identifier that the account is authorized to represent
     pub identifier: Identifier,
     /// Current state of the authorization
@@ -542,7 +542,7 @@ pub struct Authorization {
     pub challenges: Vec<Challenge>,
 }
 
-/// Status for an [`Authorization`]
+/// Status for an [`AuthorizationState`]
 #[allow(missing_docs)]
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq)]
 #[serde(rename_all = "camelCase")]
@@ -875,7 +875,7 @@ mod tests {
           ]
         }"#;
 
-        let obj = serde_json::from_str::<Authorization>(AUTHORIZATION).unwrap();
+        let obj = serde_json::from_str::<AuthorizationState>(AUTHORIZATION).unwrap();
         assert_eq!(obj.status, AuthorizationStatus::Valid);
         assert_eq!(obj.identifier, Identifier::Dns("www.example.org".into()));
         assert_eq!(obj.challenges.len(), 1);

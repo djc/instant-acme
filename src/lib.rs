@@ -31,7 +31,7 @@ mod types;
 #[cfg(feature = "time")]
 pub use types::RenewalInfo;
 pub use types::{
-    AccountCredentials, Authorization, AuthorizationStatus, CertificateIdentifier, Challenge,
+    AccountCredentials, AuthorizationState, AuthorizationStatus, CertificateIdentifier, Challenge,
     ChallengeType, Error, Identifier, LetsEncrypt, NewAccount, NewOrder, OrderState, OrderStatus,
     Problem, RevocationReason, RevocationRequest, ZeroSsl,
 };
@@ -70,7 +70,7 @@ impl Order {
     /// After the challenges have been set up, check the [`Order::state()`] to see
     /// if the order is ready to be finalized (or becomes invalid). Once it is
     /// ready, call `Order::finalize()` to get the certificate.
-    pub async fn authorizations(&mut self) -> Result<Vec<Authorization>, Error> {
+    pub async fn authorizations(&mut self) -> Result<Vec<AuthorizationState>, Error> {
         let mut authorizations = Vec::with_capacity(self.state.authorizations.len());
         for url in &self.state.authorizations {
             authorizations.push(self.account.get(&mut self.nonce, url).await?);
