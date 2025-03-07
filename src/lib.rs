@@ -252,6 +252,52 @@ impl Authorization {
         Ok(&self.state)
     }
 
+    /// Deactivate a pending or valid authorization
+    ///
+    /// Returns the updated [`AuthorizationState`] if the deactivation was successful.
+    /// If the authorization was not pending or valid, an error is returned.
+    ///
+    /// Once deactivated the authorization and associated challenges can not be updated
+    /// further.
+    ///
+    /// This is useful when you want to cancel a pending authorization attempt you wish
+    /// to abandon, or if you wish to revoke valid authorization for an identifier to
+    /// force future uses of the identifier by the same ACME account to require
+    /// re-verification with fresh authorizations/challenges.
+    pub async fn deactivate(&mut self) -> Result<&AuthorizationState, Error> {
+        if !matches!(
+            self.state.status,
+            AuthorizationStatus::Pending | AuthorizationStatus::Valid
+        ) {
+            return Err(Error::Other("authorization not pending or valid".into()));
+        }
+
+        #[derive(Serialize)]
+        struct DeactivateRequest {
+            status: AuthorizationStatus,
+        }
+
+        let rsp = self
+            .account
+            .post(
+                Some(&DeactivateRequest {
+                    status: AuthorizationStatus::Deactivated,
+                }),
+                self.nonce.take(),
+                &self.url,
+            )
+            .await?;
+
+        self.nonce = nonce_from_response(&rsp);
+        self.state = Problem::check::<AuthorizationState>(rsp).await?;
+        match self.state.status {
+            AuthorizationStatus::Deactivated => Ok(&self.state),
+            _ => Err(Error::Other(
+                "authorization was not deactivated by ACME server".into(),
+            )),
+        }
+    }
+
     /// Get the [`AuthorizationState`] of the authorization
     ///
     /// Call `refresh()` to get the latest state from the server.
