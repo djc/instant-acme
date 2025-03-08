@@ -338,10 +338,16 @@ pub struct Challenge {
 pub struct OrderState {
     /// Current status
     pub status: OrderStatus,
-    /// Authorization URLs for this order
+    /// Authorizations for this order.
     ///
     /// There should be one authorization per identifier in the order.
-    pub authorizations: Vec<String>,
+    ///
+    /// Callers will usually interact with an [`AuthorizationHandle`] obtained
+    /// via [`Order::authorizations()`] instead of using this directly.
+    ///
+    /// [`AuthorizationHandle`]: crate::AuthorizationHandle
+    /// [`Order::authorizations()`]: crate::Order::authorizations()
+    pub authorizations: Vec<Authorization>,
     /// Potential error state
     pub error: Option<Problem>,
     /// A finalization URL, to be used once status becomes `Ready`
@@ -352,6 +358,36 @@ pub struct OrderState {
     #[serde(deserialize_with = "deserialize_static_certificate_identifier")]
     #[serde(default)]
     pub replaces: Option<CertificateIdentifier<'static>>,
+}
+
+/// A wrapper for [`AuthorizationState`] as held in the [`OrderState`]
+///
+/// Callers will usually interact with an [`AuthorizationHandle`] obtained
+/// via [`Order::authorizations()`] instead of using this directly.
+///
+/// [`AuthorizationHandle`]: crate::AuthorizationHandle
+/// [`Order::authorizations()`]: crate::Order::authorizations()
+#[derive(Debug)]
+pub struct Authorization {
+    /// URL for this authorization
+    pub url: String,
+    /// Current state of the authorization
+    ///
+    /// This starts out as `None` when the [`OrderState`] is first deserialized.
+    /// It is populated when the authorization is first fetched from the server,
+    /// typically via [`Order::authorizations()`].
+    ///
+    /// [`Order::authorizations()`]: crate::Order::authorizations()
+    pub state: Option<AuthorizationState>,
+}
+
+impl<'de> Deserialize<'de> for Authorization {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        Ok(Self {
+            url: String::deserialize(deserializer)?,
+            state: None,
+        })
+    }
 }
 
 /// Input data for [Order](crate::Order) creation

@@ -246,8 +246,9 @@ async fn order_deactivate() -> Result<(), Box<dyn StdError>> {
     let mut order = env.account.new_order(new_order).await?;
 
     // Deactivate each pending authorization in the order.
-    for mut authz in order.authorizations().await? {
-        authz.deactivate().await?;
+    let mut authorizations = order.authorizations();
+    while let Some(result) = authorizations.next().await {
+        result?.deactivate().await?;
     }
 
     // With all authz's deactivated, the order should be status == Invalid
@@ -422,38 +423,30 @@ impl Environment {
         let mut order = self.account.new_order(new_order).await?;
         info!(order_url = order.url(), "created order");
 
-        let authorizations = order.authorizations().await?;
-        let mut challenges = Vec::with_capacity(authorizations.len());
-
         // Collect up the relevant challenges, provisioning the expected responses as we go.
-        for authz in &authorizations {
-            let authz_state = authz.state();
-            match authz_state.status {
+        let mut authorizations = order.authorizations();
+        while let Some(result) = authorizations.next().await {
+            let mut authz = result?;
+            match authz.status {
                 AuthorizationStatus::Pending => {}
                 AuthorizationStatus::Valid => continue,
-                _ => unreachable!("unexpected authz state: {:?}", authz_state.status),
+                _ => unreachable!("unexpected authz state: {:?}", authz.status),
             }
 
-            let challenge = authz_state
-                .challenges
-                .iter()
-                .find(|c| c.r#type == A::TYPE)
+            let mut challenge = authz
+                .challenge(A::TYPE)
                 .ok_or(format!("no {:?} challenge found", A::TYPE))?;
 
-            let Identifier::Dns(identifier) = &authz_state.identifier else {
+            let Identifier::Dns(identifier) = challenge.identifier() else {
                 panic!("unsupported identifier type");
             };
 
-            let key_authz = order.key_authorization(challenge);
-            self.request_challenge::<A>(identifier, challenge, &key_authz)
+            let key_authz = challenge.key_authorization();
+            self.request_challenge::<A>(identifier, &challenge, &key_authz)
                 .await?;
-            challenges.push(&challenge.url);
-        }
 
-        // Tell the CA we have provisioned the response for each challenge.
-        for url in &challenges {
-            debug!(challenge_url = url, "marking challenge ready");
-            order.set_challenge_ready(url).await?;
+            debug!(challenge_url = challenge.url, "marking challenge ready");
+            challenge.set_ready().await?;
         }
 
         // Poll until the order is ready.

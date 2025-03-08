@@ -53,11 +53,10 @@ async fn main() -> anyhow::Result<()> {
 
     // Pick the desired challenge type and prepare the response.
 
-    let authorizations = order.authorizations().await?;
-    let mut challenges = Vec::with_capacity(authorizations.len());
-    for authz in &authorizations {
-        let authz_state = authz.state();
-        match authz_state.status {
+    let mut authorizations = order.authorizations();
+    while let Some(result) = authorizations.next().await {
+        let mut authz = result?;
+        match authz.status {
             AuthorizationStatus::Pending => {}
             AuthorizationStatus::Valid => continue,
             _ => todo!(),
@@ -66,13 +65,11 @@ async fn main() -> anyhow::Result<()> {
         // We'll use the DNS challenges for this example, but you could
         // pick something else to use here.
 
-        let challenge = authz_state
-            .challenges
-            .iter()
-            .find(|c| c.r#type == ChallengeType::Dns01)
+        let mut challenge = authz
+            .challenge(ChallengeType::Dns01)
             .ok_or_else(|| anyhow::anyhow!("no dns01 challenge found"))?;
 
-        let Identifier::Dns(identifier) = &authz_state.identifier else {
+        let Identifier::Dns(identifier) = challenge.identifier() else {
             panic!("unsupported identifier type");
         };
 
@@ -80,17 +77,11 @@ async fn main() -> anyhow::Result<()> {
         println!(
             "_acme-challenge.{} IN TXT {}",
             identifier,
-            order.key_authorization(challenge).dns_value()
+            challenge.key_authorization().dns_value()
         );
         io::stdin().read_line(&mut String::new())?;
 
-        challenges.push(&challenge.url);
-    }
-
-    // Let the server know we're ready to accept the challenges.
-
-    for url in &challenges {
-        order.set_challenge_ready(url).await?;
+        challenge.set_ready().await?;
     }
 
     // Exponentially back off until the order becomes ready or invalid.

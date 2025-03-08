@@ -5,11 +5,12 @@
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
 
 use std::error::Error as StdError;
-use std::fmt;
 use std::future::Future;
+use std::ops::Deref;
 use std::pin::Pin;
 use std::sync::Arc;
 use std::time::Duration;
+use std::{fmt, slice};
 
 use async_trait::async_trait;
 use base64::prelude::{BASE64_URL_SAFE_NO_PAD, Engine};
@@ -31,9 +32,9 @@ mod types;
 #[cfg(feature = "time")]
 pub use types::RenewalInfo;
 pub use types::{
-    AccountCredentials, AuthorizationState, AuthorizationStatus, CertificateIdentifier, Challenge,
-    ChallengeType, Error, Identifier, LetsEncrypt, NewAccount, NewOrder, OrderState, OrderStatus,
-    Problem, RevocationReason, RevocationRequest, ZeroSsl,
+    AccountCredentials, Authorization, AuthorizationState, AuthorizationStatus,
+    CertificateIdentifier, Challenge, ChallengeType, Error, Identifier, LetsEncrypt, NewAccount,
+    NewOrder, OrderState, OrderStatus, Problem, RevocationReason, RevocationRequest, ZeroSsl,
 };
 use types::{
     DirectoryUrls, Empty, FinalizeRequest, Header, JoseJson, Jwk, KeyOrKeyId, NewAccountPayload,
@@ -60,35 +61,12 @@ impl Order {
     /// An order will contain one authorization to complete per identifier in the order.
     /// After creating an order, you'll need to retrieve the authorizations so that
     /// you can set up a challenge response for each authorization.
-    ///
-    /// For each authorization, you'll need to:
-    ///
-    /// * Select which [`ChallengeType`] you want to complete
-    /// * Create a [`KeyAuthorization`] for that [`Challenge`]
-    /// * Call [`Order::set_challenge_ready()`] for that challenge
-    ///
-    /// After the challenges have been set up, check the [`Order::state()`] to see
-    /// if the order is ready to be finalized (or becomes invalid). Once it is
-    /// ready, call `Order::finalize()` to get the certificate.
-    pub async fn authorizations(&mut self) -> Result<Vec<Authorization>, Error> {
-        let mut authorizations = Vec::with_capacity(self.state.authorizations.len());
-        for url in &self.state.authorizations {
-            authorizations.push(Authorization {
-                account: self.account.clone(),
-                nonce: None,
-                url: url.clone(),
-                state: self.account.get(&mut self.nonce, url).await?,
-            });
+    pub fn authorizations(&mut self) -> Authorizations<'_> {
+        Authorizations {
+            iter: self.state.authorizations.iter_mut(),
+            nonce: &mut self.nonce,
+            account: &self.account,
         }
-        Ok(authorizations)
-    }
-
-    /// Create a [`KeyAuthorization`] for the given [`Challenge`]
-    ///
-    /// Signs the challenge's token with the account's private key and use the
-    /// value from [`KeyAuthorization::as_str()`] as the challenge response.
-    pub fn key_authorization(&self, challenge: &Challenge) -> KeyAuthorization {
-        KeyAuthorization::new(challenge, &self.account.key)
     }
 
     /// Request a certificate from the given Certificate Signing Request (CSR)
@@ -154,25 +132,6 @@ impl Order {
         ))
     }
 
-    /// Notify the server that the given challenge is ready to be completed
-    ///
-    /// `challenge_url` should be the `Challenge::url` field.
-    pub async fn set_challenge_ready(&mut self, challenge_url: &str) -> Result<(), Error> {
-        let rsp = self
-            .account
-            .post(Some(&Empty {}), self.nonce.take(), challenge_url)
-            .await?;
-
-        self.nonce = nonce_from_response(&rsp);
-        let _ = Problem::check::<Challenge>(rsp).await?;
-        Ok(())
-    }
-
-    /// Get the current state of the given challenge
-    pub async fn challenge(&mut self, challenge_url: &str) -> Result<Challenge, Error> {
-        self.account.get(&mut self.nonce, challenge_url).await
-    }
-
     /// Poll the order with exponential backoff until in a final state
     ///
     /// Refresh the order state from the server for `tries` times, waiting `delay` before the
@@ -226,30 +185,74 @@ impl Order {
     }
 }
 
+/// An stream-like interface that yields an [`Order`]'s authoritations
+///
+/// Call [`next()`] to get the next authorization in the order. If the order state
+/// does not yet contain the state of the authorization, it will be fetched from the server.
+///
+/// [`next()`]: Authorizations::next()
+pub struct Authorizations<'a> {
+    iter: slice::IterMut<'a, Authorization>,
+    nonce: &'a mut Option<String>,
+    account: &'a AccountInner,
+}
+
+impl Authorizations<'_> {
+    /// Yield the next [`AuthorizationHandle`], fetching its state if we don't have it yet.
+    pub async fn next(&mut self) -> Option<Result<AuthorizationHandle<'_>, Error>> {
+        let authz = self.iter.next()?;
+        if authz.state.is_none() {
+            match self.account.get(self.nonce, &authz.url).await {
+                Ok(state) => authz.state = Some(state),
+                Err(e) => return Some(Err(e)),
+            }
+        }
+
+        Some(Ok(AuthorizationHandle {
+            // The `unwrap()` here is safe: the code above will either set it to `Some` or yield
+            // an error to the caller if it was `None` upon entering this method. I attempted to
+            // use `Option::insert()` which did not pass the borrow checker for reasons that I
+            // think have to do with the let scope extension that got fixed for 2024 edition.
+            // For now, our MSRV does not allow the use of the new edition.
+            state: authz.state.as_mut().unwrap(),
+            url: &authz.url,
+            nonce: self.nonce,
+            account: self.account,
+        }))
+    }
+}
+
 /// An ACME authorization as described in RFC 8555 (section 7.1.4)
 ///
 /// Authorizations are retrieved from an associated [`Order`] by calling
-/// [`Order::authorizations()`].
+/// [`Order::authorizations()`]. This type dereferences to the underlying
+/// [`AuthorizationState`] for easy access to the authorization's state.
+///
+/// For each authorization, you'll need to:
+///
+/// * Select which [`ChallengeType`] you want to complete
+/// * Call [`AuthorizationHandle::challenge()`] to get a [`ChallengeHandle`]
+/// * Use the `ChallengeHandle` to complete the authorization's challenge
 ///
 /// <https://datatracker.ietf.org/doc/html/rfc8555#section-7.1.3>
-pub struct Authorization {
-    account: Arc<AccountInner>,
-    nonce: Option<String>,
-    url: String,
-    state: AuthorizationState,
+pub struct AuthorizationHandle<'a> {
+    state: &'a mut AuthorizationState,
+    url: &'a str,
+    nonce: &'a mut Option<String>,
+    account: &'a AccountInner,
 }
 
-impl Authorization {
+impl<'a> AuthorizationHandle<'a> {
     /// Refresh the current state of the authorization
     pub async fn refresh(&mut self) -> Result<&AuthorizationState, Error> {
         let rsp = self
             .account
-            .post(None::<&Empty>, self.nonce.take(), &self.url)
+            .post(None::<&Empty>, self.nonce.take(), self.url)
             .await?;
 
-        self.nonce = nonce_from_response(&rsp);
-        self.state = Problem::check::<AuthorizationState>(rsp).await?;
-        Ok(&self.state)
+        *self.nonce = nonce_from_response(&rsp);
+        *self.state = Problem::check::<AuthorizationState>(rsp).await?;
+        Ok(self.state)
     }
 
     /// Deactivate a pending or valid authorization
@@ -284,30 +287,100 @@ impl Authorization {
                     status: AuthorizationStatus::Deactivated,
                 }),
                 self.nonce.take(),
-                &self.url,
+                self.url,
             )
             .await?;
 
-        self.nonce = nonce_from_response(&rsp);
-        self.state = Problem::check::<AuthorizationState>(rsp).await?;
+        *self.nonce = nonce_from_response(&rsp);
+        *self.state = Problem::check::<AuthorizationState>(rsp).await?;
         match self.state.status {
-            AuthorizationStatus::Deactivated => Ok(&self.state),
+            AuthorizationStatus::Deactivated => Ok(self.state),
             _ => Err(Error::Other(
                 "authorization was not deactivated by ACME server".into(),
             )),
         }
     }
 
-    /// Get the [`AuthorizationState`] of the authorization
+    /// Get a [`ChallengeHandle`] for the given `type`
     ///
-    /// Call `refresh()` to get the latest state from the server.
-    pub fn state(&self) -> &AuthorizationState {
-        &self.state
+    /// Yields an object to interact with the challenge for the given type, if available.
+    pub fn challenge(&'a mut self, r#type: ChallengeType) -> Option<ChallengeHandle<'a>> {
+        let challenge = self.state.challenges.iter().find(|c| c.r#type == r#type)?;
+        Some(ChallengeHandle {
+            identifier: &self.state.identifier,
+            challenge,
+            nonce: self.nonce,
+            account: self.account,
+        })
     }
 
     /// Get the URL of the authorization
     pub fn url(&self) -> &str {
-        &self.url
+        self.url
+    }
+}
+
+impl Deref for AuthorizationHandle<'_> {
+    type Target = AuthorizationState;
+
+    fn deref(&self) -> &Self::Target {
+        self.state
+    }
+}
+
+/// Wrapper type for interacting with a [`Challenge`]'s state
+///
+/// For each challenge, you'll need to:
+///
+/// * Obtain the [`ChallengeHandle::key_authorization()`] for the challenge response
+/// * Set up the challenge response in your infrastructure (details vary by challenge type)
+/// * Call [`ChallengeHandle::set_ready()`] for that challenge after setup is complete
+///
+/// After the challenges have been set to ready, call [`Order::poll()`] to wait until the order is
+/// ready to be finalized (or to learn if it becomes invalid). Once it is ready, call
+/// [`Order::finalize()`] to get the certificate.
+///
+/// Dereferences to the underlying [`Challenge`] for easy access to the challenge's state.
+pub struct ChallengeHandle<'a> {
+    identifier: &'a Identifier,
+    challenge: &'a Challenge,
+    nonce: &'a mut Option<String>,
+    account: &'a AccountInner,
+}
+
+impl ChallengeHandle<'_> {
+    /// Notify the server that the given challenge is ready to be completed
+    pub async fn set_ready(&mut self) -> Result<(), Error> {
+        let rsp = self
+            .account
+            .post(Some(&Empty {}), self.nonce.take(), &self.challenge.url)
+            .await?;
+
+        *self.nonce = nonce_from_response(&rsp);
+        let _ = Problem::check::<Challenge>(rsp).await?;
+        Ok(())
+    }
+
+    /// Create a [`KeyAuthorization`] for this challenge
+    ///
+    /// Combines a challenge's token with the thumbprint of the account's public key to compute
+    /// the challenge's `KeyAuthorization`. The `KeyAuthorization` must be used to provision the
+    /// expected challenge response based on the challenge type in use.
+    pub fn key_authorization(&self) -> KeyAuthorization {
+        KeyAuthorization::new(self.challenge, &self.account.key)
+    }
+
+    /// The identifier for this challenge's authorization
+    pub fn identifier(&self) -> &Identifier {
+        self.identifier
+    }
+}
+
+impl Deref for ChallengeHandle<'_> {
+    type Target = Challenge;
+
+    fn deref(&self) -> &Self::Target {
+        self.challenge
     }
 }
 
