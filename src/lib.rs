@@ -389,6 +389,8 @@ impl Deref for ChallengeHandle<'_> {
 /// Create an [`Account`] with [`Account::create()`] or restore it from serialized data
 /// by passing deserialized [`AccountCredentials`] to [`Account::from_credentials()`].
 ///
+/// Alternatively, you can load an account using the private key using [`Account::load()`].
+///
 /// The [`Account`] type is cheap to clone.
 ///
 /// <https://datatracker.ietf.org/doc/html/rfc8555#section-7.1.2>
@@ -454,6 +456,7 @@ impl Account {
     ) -> Result<(Account, AccountCredentials), Error> {
         Self::create_inner(
             account,
+            Key::generate()?,
             external_account,
             Client::new(server_url, Box::new(DefaultClient::try_new()?)).await?,
             server_url,
@@ -473,6 +476,7 @@ impl Account {
     ) -> Result<(Account, AccountCredentials), Error> {
         Self::create_inner(
             account,
+            Key::generate()?,
             external_account,
             Client::new(server_url, http).await?,
             server_url,
@@ -480,13 +484,47 @@ impl Account {
         .await
     }
 
+    /// Load a new account by private key, with a default or custom HTTP client
+    ///
+    /// https://www.rfc-editor.org/rfc/rfc8555#section-7.3.1
+    ///
+    /// The returned [`AccountCredentials`] can be serialized and stored for later use.
+    /// Use [`Account::from_credentials()`] to restore the account from the credentials.
+    pub async fn load(
+        private_key_pkcs8_der: &[u8],
+        server_url: &str,
+        http: Option<Box<dyn HttpClient>>,
+    ) -> Result<(Account, AccountCredentials), Error> {
+        let client = match http {
+            Some(http) => Client::new(server_url, http).await?,
+            None => Client::new(server_url, Box::new(DefaultClient::try_new()?)).await?,
+        };
+
+        let key = Key::from_pkcs8_der(private_key_pkcs8_der)?;
+        let pkcs8 = key.to_pkcs8_der()?;
+        let ignored_account = NewAccount {
+            only_return_existing: true,
+            contact: &[],
+            terms_of_service_agreed: true,
+        };
+
+        Self::create_inner(
+            &ignored_account, // This field is ignored as per rfc8555 7.3.1
+            (key, pkcs8),
+            None,             // This field is ignored as per rfc8555 7.3.1
+            client,
+            server_url,
+        )
+        .await
+    }
+
     async fn create_inner(
         account: &NewAccount<'_>,
+        (key, key_pkcs8): (Key, crypto::pkcs8::Document),
         external_account: Option<&ExternalAccountKey>,
         client: Client,
         server_url: &str,
     ) -> Result<(Account, AccountCredentials), Error> {
-        let (key, key_pkcs8) = Key::generate()?;
         let payload = NewAccountPayload {
             new_account: account,
             external_account_binding: external_account
@@ -878,6 +916,10 @@ impl Key {
 
     fn from_pkcs8_der(pkcs8_der: &[u8]) -> Result<Self, Error> {
         Self::new(pkcs8_der, crypto::SystemRandom::new())
+    }
+
+    fn to_pkcs8_der(&self) -> Result<crypto::pkcs8::Document, Error> {
+        Ok(self.inner.to_pkcs8v1()?)
     }
 
     fn new(pkcs8_der: &[u8], rng: crypto::SystemRandom) -> Result<Self, Error> {
