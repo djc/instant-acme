@@ -286,6 +286,60 @@ async fn account_deactivate() -> Result<(), Box<dyn StdError>> {
     Ok(())
 }
 
+/// Test account loading by private key
+#[tokio::test]
+#[ignore]
+async fn account_from_private_key() -> Result<(), Box<dyn StdError>> {
+    use serde_json::Value;
+    use instant_acme::Key;
+
+    try_tracing_init();
+
+    // Creat an env/initial account
+    let env = Environment::new(EnvironmentConfig::default()).await?;
+
+    let new_account = NewAccount {
+        contact: &[],
+        terms_of_service_agreed: true,
+        only_return_existing: false,
+    };
+
+    let directory_url = format!("https://{}/dir", &env.config.pebble.listen_address);
+
+    let (account, credentials) = Account::create(&new_account, &directory_url, None)
+        .await
+        .expect("failed to create account");
+
+    let json: Value = serde_json::to_value(&credentials).expect("failed to serialize credentials");
+    let pkey_encoded = json.as_object().expect("a json object").get("key_pkcs8").expect("a field key_pkcs8").as_str().expect("a string encoded value");
+    let pkey_der = BASE64_URL_SAFE_NO_PAD.decode(pkey_encoded).expect("a base64 encoded value");
+    let key = Key::from_pkcs8_der(&pkey_der).expect("an ES256 key");
+
+    let (account2, credentials2) = Account::for_existing_account(key, &directory_url).await?;
+
+    assert_eq!(account.id(), account2.id());
+    assert_eq!(serde_json::to_string(&credentials).expect("a serializable value"), serde_json::to_string(&credentials2).expect("a serializable value"));
+
+    // Creat a new env/initial account
+    drop(env);
+    let env = Environment::new(EnvironmentConfig::default()).await?;
+    let directory_url = format!("https://{}/dir", &env.config.pebble.listen_address);
+
+    let key = Key::from_pkcs8_der(&pkey_der).expect("an ES256 key");
+    let err = Account::for_existing_account(key, &directory_url).await.err().expect("account loading should fail for a non-existing account");
+
+    let Error::Api(problem) = err else {
+        panic!("unexpected error result {:?}", err);
+    };
+
+    assert_eq!(
+        problem.r#type,
+        Some("urn:ietf:params:acme:error:accountDoesNotExist".to_string())
+    );
+
+    Ok(())
+}
+
 fn try_tracing_init() {
     let _ = tracing_subscriber::registry()
         .with(fmt::layer())

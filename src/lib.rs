@@ -440,7 +440,7 @@ impl Account {
     ) -> Result<(Account, AccountCredentials), Error> {
         let http = Box::new(DefaultClient::try_new()?);
 
-        Self::for_existing_account_http(key, server_url, http)
+        Self::for_existing_account_http(key, server_url, http).await
     }
 
     /// Load a new account by private key, with a default or custom HTTP client
@@ -908,7 +908,8 @@ impl fmt::Debug for Client {
     }
 }
 
-struct Key {
+/// This struct represents a key used to sign requests to the ACME server
+pub struct Key {
     rng: crypto::SystemRandom,
     signing_algorithm: SigningAlgorithm,
     inner: crypto::EcdsaKeyPair,
@@ -916,6 +917,7 @@ struct Key {
 }
 
 impl Key {
+    /// Generate a random key
     pub fn generate() -> Result<(Self, crypto::pkcs8::Document), Error> {
         let rng = crypto::SystemRandom::new();
         let pkcs8 =
@@ -923,14 +925,17 @@ impl Key {
         Self::new(pkcs8.as_ref(), rng).map(|key| (key, pkcs8))
     }
 
+    /// Create a key from a der encoded ES256
     pub fn from_pkcs8_der(pkcs8_der: &[u8]) -> Result<Self, Error> {
         Self::new(pkcs8_der, crypto::SystemRandom::new())
     }
 
+    /// Export a key to a der encoded ES256 key
     pub fn to_pkcs8_der(&self) -> Result<crypto::pkcs8::Document, Error> {
         Ok(self.inner.to_pkcs8v1()?)
     }
 
+    /// Create a key from a der encoded ES256 key and a crypto::SystemRandom
     pub fn new(pkcs8_der: &[u8], rng: crypto::SystemRandom) -> Result<Self, Error> {
         let inner = crypto::p256_key_pair_from_pkcs8(pkcs8_der, &rng)?;
         let thumb = BASE64_URL_SAFE_NO_PAD.encode(Jwk::thumb_sha256(&inner)?);
