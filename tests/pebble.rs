@@ -470,13 +470,17 @@ impl Environment {
 
         // Verify the EE cert is valid for each of the identifiers.
         for ident in identifiers {
-            let mut server_name = ident.to_string();
+            let domain = match ident {
+                Identifier::Dns(domain) => domain,
+                _ => unreachable!("unsupported identifier {ident:?}"),
+            };
 
             // When verifying a wildcard identifier, use a fixed label under the wildcard.
             // The wildcard identifier isn't a valid ServerName itself.
-            if server_name.starts_with('*') {
-                server_name = server_name.replace('*', "foo");
-            }
+            let server_name = match domain.strip_prefix("*.") {
+                Some(rest) => format!("foo.{rest}"),
+                None => domain.to_owned(),
+            };
 
             verify_server_name(&ee_cert, &ServerName::try_from(server_name)?)?;
         }
@@ -498,7 +502,10 @@ impl Environment {
         let mut params = CertificateParams::new(
             identifiers
                 .iter()
-                .map(|s| s.to_string())
+                .map(|ident| match ident {
+                    Identifier::Dns(domain) => domain.to_owned(),
+                    _ => unreachable!("unsupported identifier {ident:?}"),
+                })
                 .collect::<Vec<_>>(),
         )?;
         params.distinguished_name = DistinguishedName::new();
@@ -617,7 +624,13 @@ impl AuthorizationMethod for Dns01 {
         challenge: &'a ChallengeHandle<'_>,
         key_auth: &'a KeyAuthorization,
     ) -> impl Serialize + 'a {
-        let host = format!("_acme-challenge.{}.", challenge.identifier());
+        let identifier = challenge.identifier();
+        let domain = match identifier.identifier {
+            Identifier::Dns(domain) => domain,
+            _ => unreachable!("unsupported identifier {identifier:?}"),
+        };
+
+        let host = format!("_acme-challenge.{domain}.");
         let value = key_auth.dns_value();
         debug!(host, value, "provisioning DNS-01 response");
 
