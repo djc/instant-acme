@@ -2,7 +2,6 @@ use std::io;
 use std::time::Duration;
 
 use clap::Parser;
-use rcgen::{CertificateParams, DistinguishedName, KeyPair};
 use tokio::time::sleep;
 use tracing::info;
 
@@ -87,16 +86,9 @@ async fn main() -> anyhow::Result<()> {
         return Err(anyhow::anyhow!("unexpected order status: {status:?}"));
     }
 
-    // If the order is ready, we can provision the certificate.
-    // Use the rcgen library to create a Certificate Signing Request.
-    let mut params = CertificateParams::new(opts.names)?;
-    params.distinguished_name = DistinguishedName::new();
-    let private_key = KeyPair::generate()?;
-    let csr = params.serialize_request(&private_key)?;
-
     // Finalize the order and print certificate chain, private key and account credentials.
 
-    order.finalize(csr.der()).await?;
+    let private_key_pem = order.finalize().await?;
     let cert_chain_pem = loop {
         match order.certificate().await? {
             Some(cert_chain_pem) => break cert_chain_pem,
@@ -105,7 +97,7 @@ async fn main() -> anyhow::Result<()> {
     };
 
     info!("certificate chain:\n\n{cert_chain_pem}");
-    info!("private key:\n\n{}", private_key.serialize_pem());
+    info!("private key:\n\n{private_key_pem}");
     Ok(())
 }
 

@@ -61,6 +61,13 @@ pub enum Error {
     Str(&'static str),
 }
 
+impl Error {
+    #[cfg(feature = "rcgen")]
+    pub(crate) fn from_rcgen(err: rcgen::Error) -> Self {
+        Self::Other(Box::new(err))
+    }
+}
+
 impl From<&'static str> for Error {
     fn from(s: &'static str) -> Self {
         Error::Str(s)
