@@ -69,14 +69,10 @@ async fn main() -> anyhow::Result<()> {
             .challenge(ChallengeType::Dns01)
             .ok_or_else(|| anyhow::anyhow!("no dns01 challenge found"))?;
 
-        let Identifier::Dns(identifier) = challenge.identifier() else {
-            panic!("unsupported identifier type");
-        };
-
         println!("Please set the following DNS record then press the Return key:");
         println!(
             "_acme-challenge.{} IN TXT {}",
-            identifier,
+            challenge.identifier(),
             challenge.key_authorization().dns_value()
         );
         io::stdin().read_line(&mut String::new())?;
