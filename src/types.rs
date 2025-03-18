@@ -211,7 +211,7 @@ pub struct Subproblem {
 impl fmt::Display for Subproblem {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         if let Some(identifier) = &self.identifier {
-            write!(f, r#"for "{identifier}""#)?;
+            write!(f, r#"for "{}""#, identifier.authorized(false))?;
         }
 
         if let Some(detail) = &self.detail {
@@ -568,14 +568,25 @@ fn base64(data: &impl Serialize) -> Result<String, serde_json::Error> {
 
 /// An ACME authorization's state as described in RFC 8555 (section 7.1.4)
 #[derive(Debug, Deserialize)]
+#[non_exhaustive]
 #[serde(rename_all = "camelCase")]
 pub struct AuthorizationState {
     /// The identifier that the account is authorized to represent
-    pub identifier: Identifier,
+    identifier: Identifier,
     /// Current state of the authorization
     pub status: AuthorizationStatus,
     /// Possible challenges for the authorization
     pub challenges: Vec<Challenge>,
+    /// Whether the identifier represents a wildcard domain name
+    #[serde(default)]
+    pub wildcard: bool,
+}
+
+impl AuthorizationState {
+    /// Creates an [`AuthorizedIdentifier`] for the identifier in this authorization
+    pub fn identifier(&self) -> AuthorizedIdentifier<'_> {
+        self.identifier.authorized(self.wildcard)
+    }
 }
 
 /// Status for an [`AuthorizationState`]
@@ -600,10 +611,34 @@ pub enum Identifier {
     Dns(String),
 }
 
-impl fmt::Display for Identifier {
+impl Identifier {
+    /// Create an [`AuthorizedIdentifier`], which implements `Display`
+    ///
+    /// Needs the `wildcard` context bit to determine whether the identifier represents a
+    /// wildcard domain.
+    pub fn authorized(&self, wildcard: bool) -> AuthorizedIdentifier<'_> {
+        AuthorizedIdentifier {
+            identifier: self,
+            wildcard,
+        }
+    }
+}
+
+/// An [`Identifier`] which knows its `wildcard` context
+#[non_exhaustive]
+#[derive(Debug)]
+pub struct AuthorizedIdentifier<'a> {
+    /// The source identifier, missing any wildcard context
+    pub identifier: &'a Identifier,
+    /// Whether the identifier should be interpreted as a wildcard
+    pub wildcard: bool,
+}
+
+impl fmt::Display for AuthorizedIdentifier<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::Dns(domain) => write!(f, "{domain}"),
+        match (self.wildcard, self.identifier) {
+            (true, Identifier::Dns(dns)) => f.write_fmt(format_args!("*.{dns}")),
+            (false, Identifier::Dns(dns)) => f.write_str(dns),
         }
     }
 }

@@ -33,8 +33,9 @@ mod types;
 pub use types::RenewalInfo;
 pub use types::{
     AccountCredentials, Authorization, AuthorizationState, AuthorizationStatus,
-    CertificateIdentifier, Challenge, ChallengeType, Error, Identifier, LetsEncrypt, NewAccount,
-    NewOrder, OrderState, OrderStatus, Problem, RevocationReason, RevocationRequest, ZeroSsl,
+    AuthorizedIdentifier, CertificateIdentifier, Challenge, ChallengeType, Error, Identifier,
+    LetsEncrypt, NewAccount, NewOrder, OrderState, OrderStatus, Problem, RevocationReason,
+    RevocationRequest, ZeroSsl,
 };
 use types::{
     DirectoryUrls, Empty, FinalizeRequest, Header, JoseJson, Jwk, KeyOrKeyId, NewAccountPayload,
@@ -329,7 +330,7 @@ impl<'a> AuthorizationHandle<'a> {
     pub fn challenge(&'a mut self, r#type: ChallengeType) -> Option<ChallengeHandle<'a>> {
         let challenge = self.state.challenges.iter().find(|c| c.r#type == r#type)?;
         Some(ChallengeHandle {
-            identifier: &self.state.identifier,
+            identifier: self.state.identifier(),
             challenge,
             nonce: self.nonce,
             account: self.account,
@@ -364,7 +365,7 @@ impl Deref for AuthorizationHandle<'_> {
 ///
 /// Dereferences to the underlying [`Challenge`] for easy access to the challenge's state.
 pub struct ChallengeHandle<'a> {
-    identifier: &'a Identifier,
+    identifier: AuthorizedIdentifier<'a>,
     challenge: &'a Challenge,
     nonce: &'a mut Option<String>,
     account: &'a AccountInner,
@@ -393,8 +394,8 @@ impl ChallengeHandle<'_> {
     }
 
     /// The identifier for this challenge's authorization
-    pub fn identifier(&self) -> &Identifier {
-        self.identifier
+    pub fn identifier(&self) -> &AuthorizedIdentifier<'_> {
+        &self.identifier
     }
 }
 
