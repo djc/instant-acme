@@ -389,7 +389,7 @@ impl Deref for ChallengeHandle<'_> {
 /// Create an [`Account`] with [`Account::create()`] or restore it from serialized data
 /// by passing deserialized [`AccountCredentials`] to [`Account::from_credentials()`].
 ///
-/// Alternatively, you can load an account using the private key using [`Account::load()`].
+/// Alternatively, you can load an account using the private key using [`Account::loadgit ()`].
 ///
 /// The [`Account`] type is cheap to clone.
 ///
@@ -511,7 +511,7 @@ impl Account {
         Self::create_inner(
             &ignored_account, // This field is ignored as per rfc8555 7.3.1
             (key, pkcs8),
-            None,             // This field is ignored as per rfc8555 7.3.1
+            None, // This field is ignored as per rfc8555 7.3.1
             client,
             server_url,
         )
