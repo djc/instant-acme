@@ -24,6 +24,8 @@ use hyper_util::client::legacy::Client as HyperClient;
 use hyper_util::client::legacy::connect::{Connect, HttpConnector};
 #[cfg(feature = "hyper-rustls")]
 use hyper_util::rt::TokioExecutor;
+#[cfg(feature = "rcgen")]
+use rcgen::{CertificateParams, DistinguishedName, KeyPair};
 use serde::Serialize;
 use serde::de::DeserializeOwned;
 use tokio::time::sleep;
@@ -76,12 +78,41 @@ impl Order {
         }
     }
 
+    /// Generate a Certificate Signing Request for the order's identifiers and request finalization
+    ///
+    /// Uses the rcgen crate to generate a Certificate Signing Request (CSR) converting the order's
+    /// identifiers to Subject Alternative Names, then calls [`Order::finalize_csr()`] with it.
+    /// Returns the generated private key, serialized as PEM.
+    ///
+    /// After this succeeds, call [`Order::certificate()`] to retrieve the certificate chain once
+    /// the order is in the appropriate state.
+    #[cfg(feature = "rcgen")]
+    pub async fn finalize(&mut self) -> Result<String, Error> {
+        let mut names = Vec::with_capacity(self.state.authorizations.len());
+        let mut identifiers = self.identifiers();
+        while let Some(result) = identifiers.next().await {
+            names.push(result?.to_string());
+        }
+
+        let mut params = CertificateParams::new(names).map_err(Error::from_rcgen)?;
+        params.distinguished_name = DistinguishedName::new();
+        let private_key = KeyPair::generate().map_err(Error::from_rcgen)?;
+        let csr = params
+            .serialize_request(&private_key)
+            .map_err(Error::from_rcgen)?;
+
+        self.finalize_csr(csr.der()).await?;
+        Ok(private_key.serialize_pem())
+    }
+
     /// Request a certificate from the given Certificate Signing Request (CSR)
     ///
-    /// Creating a CSR is outside of the scope of instant-acme. Make sure you pass in a
-    /// DER representation of the CSR in `csr_der`. Call `certificate()` to retrieve the
-    /// certificate chain once the order is in the appropriate state.
-    pub async fn finalize(&mut self, csr_der: &[u8]) -> Result<(), Error> {
+    /// `csr_der` contains the CSR representation serialized in DER encoding. If you don't need
+    /// custom certificate parameters, [`Order::finalize()`] can generate the CSR for you.
+    ///
+    /// After this succeeds, call [`Order::certificate()`] to retrieve the certificate chain once
+    /// the order is in the appropriate state.
+    pub async fn finalize_csr(&mut self, csr_der: &[u8]) -> Result<(), Error> {
         let rsp = self
             .account
             .post(
@@ -137,6 +168,21 @@ impl Order {
             String::from_utf8(body.to_vec())
                 .map_err(|_| "unable to decode certificate as UTF-8")?,
         ))
+    }
+
+    /// Retrieve the identifiers for this order
+    ///
+    /// This method will retrieve the identifiers attached to the authorizations for this order
+    /// if they have not been retrieved yet. If you have already consumed the stream generated
+    /// by [`Order::authorizations()`], this will not involve any network activity.
+    pub fn identifiers(&mut self) -> Identifiers<'_> {
+        Identifiers {
+            inner: AuthStream {
+                iter: self.state.authorizations.iter_mut(),
+                nonce: &mut self.nonce,
+                account: &self.account,
+            },
+        }
     }
 
     /// Poll the order with exponential backoff until in a final state
@@ -216,6 +262,26 @@ impl Authorizations<'_> {
             nonce: self.inner.nonce,
             account: self.inner.account,
         }))
+    }
+}
+
+/// An stream-like interface that yields an [`Order`]'s identifiers
+///
+/// Call [`next()`] to get the next authorization in the order. If the order state
+/// does not yet contain the state of the authorization, it will be fetched from the server.
+///
+/// [`next()`]: Identifiers::next()
+pub struct Identifiers<'a> {
+    inner: AuthStream<'a>,
+}
+
+impl<'a> Identifiers<'a> {
+    /// Yield the next [`Identifier`], fetching the authorization's state if we don't have it yet
+    pub async fn next(&mut self) -> Option<Result<AuthorizedIdentifier<'a>, Error>> {
+        Some(match self.inner.next().await? {
+            Ok((_, state)) => Ok(state.identifier()),
+            Err(err) => Err(err),
+        })
     }
 }
 

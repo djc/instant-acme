@@ -27,7 +27,6 @@ use instant_acme::{
 };
 #[cfg(all(feature = "time", feature = "x509-parser"))]
 use instant_acme::{CertificateIdentifier, RevocationRequest};
-use rcgen::{CertificateParams, DistinguishedName, KeyPair};
 use rustls::RootCertStore;
 use rustls::client::{verify_server_cert_signed_by_trust_anchor, verify_server_name};
 use rustls::crypto::CryptoProvider;
@@ -418,8 +417,7 @@ impl Environment {
         &mut self,
         new_order: &NewOrder<'_>,
     ) -> Result<CertificateDer<'static>, Box<dyn StdError + 'static>> {
-        let identifiers = new_order.identifiers();
-        debug!(?identifiers, "creating order");
+        debug!(identifiers = ?new_order.identifiers(), "creating order");
         let mut order = self.account.new_order(new_order).await?;
         info!(order_url = order.url(), "created order");
 
@@ -451,7 +449,7 @@ impl Environment {
         }
 
         // Issue a certificate for the names, returning the certificate chain.
-        let cert_chain = self.certificate(&mut order, identifiers).await?;
+        let cert_chain = self.certificate(&mut order).await?;
 
         // Split off and parse the EE cert, save the intermediates that follow.
         let (ee_cert_der, intermediates) = cert_chain.split_first().unwrap();
@@ -469,17 +467,16 @@ impl Environment {
         .unwrap();
 
         // Verify the EE cert is valid for each of the identifiers.
-        for ident in identifiers {
-            let domain = match ident {
-                Identifier::Dns(domain) => domain,
-                _ => unreachable!("unsupported identifier {ident:?}"),
-            };
+        let mut identifiers = order.identifiers();
+        while let Some(result) = identifiers.next().await {
+            let ident = result?;
 
             // When verifying a wildcard identifier, use a fixed label under the wildcard.
             // The wildcard identifier isn't a valid ServerName itself.
-            let server_name = match domain.strip_prefix("*.") {
-                Some(rest) => format!("foo.{rest}"),
-                None => domain.to_owned(),
+            let server_name = match (ident.identifier, ident.wildcard) {
+                (Identifier::Dns(domain), true) => format!("foo.{domain}"),
+                (Identifier::Dns(_), false) => ident.to_string(),
+                _ => unreachable!("unsupported identifier {ident:?}"),
             };
 
             verify_server_name(&ee_cert, &ServerName::try_from(server_name)?)?;
@@ -494,27 +491,12 @@ impl Environment {
     async fn certificate(
         &self,
         order: &mut Order,
-        identifiers: &[Identifier],
     ) -> Result<Vec<CertificateDer<'static>>, Box<dyn StdError>> {
-        info!(?identifiers, order_url = order.url(), "issuing certificate");
-
-        // Create a CSR for the identifiers corresponding to the order.
-        let mut params = CertificateParams::new(
-            identifiers
-                .iter()
-                .map(|ident| match ident {
-                    Identifier::Dns(domain) => domain.to_owned(),
-                    _ => unreachable!("unsupported identifier {ident:?}"),
-                })
-                .collect::<Vec<_>>(),
-        )?;
-        params.distinguished_name = DistinguishedName::new();
-        let private_key = KeyPair::generate()?;
-        let csr = params.serialize_request(&private_key)?;
+        info!(order_url = order.url(), "issuing certificate");
 
         // Finalize the order and fetch the issued certificate chain.
         debug!(order_url = order.url(), "finalizing order");
-        order.finalize(csr.der()).await.unwrap();
+        order.finalize().await?;
         debug!(order_url = order.url(), "fetching order certificate chain");
         let cert_chain_pem = loop {
             match order.certificate().await.unwrap() {
