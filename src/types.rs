@@ -507,6 +507,16 @@ pub struct NewAccount<'a> {
     pub only_return_existing: bool,
 }
 
+/// This is a special value for `NewAccount` that is supplied
+/// when loading an account from a private key.
+/// According to rfc8555 7.3.1 this field needs to be supplied,
+/// but MUST be ignored by the ACME server.
+pub(crate) static LOAD_EXISTING_ACCOUNT: NewAccount = NewAccount {
+    only_return_existing: true,
+    contact: &[],
+    terms_of_service_agreed: true,
+};
+
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct DirectoryUrls {

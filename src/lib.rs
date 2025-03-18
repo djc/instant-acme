@@ -29,6 +29,7 @@ use serde::de::DeserializeOwned;
 use tokio::time::sleep;
 
 mod types;
+use crate::types::LOAD_EXISTING_ACCOUNT;
 #[cfg(feature = "time")]
 pub use types::RenewalInfo;
 pub use types::{
@@ -425,6 +426,48 @@ impl Account {
         })
     }
 
+    /// Load a new account by private key, with a default or custom HTTP client
+    ///
+    /// https://www.rfc-editor.org/rfc/rfc8555#section-7.3.1
+    ///
+    /// the `DefaultClient::try_new()?` can be used as the http client by default.
+    /// The returned [`AccountCredentials`] can be serialized and stored for later use.
+    /// Use [`Account::from_credentials()`] to restore the account from the credentials.
+    #[cfg(feature = "hyper-rustls")]
+    pub async fn for_existing_account(
+        key: Key,
+        server_url: &str,
+    ) -> Result<(Account, AccountCredentials), Error> {
+        let http = Box::new(DefaultClient::try_new()?);
+
+        Self::for_existing_account_http(key, server_url, http)
+    }
+
+    /// Load a new account by private key, with a default or custom HTTP client
+    ///
+    /// https://www.rfc-editor.org/rfc/rfc8555#section-7.3.1
+    ///
+    /// the `DefaultClient::try_new()?` can be used as the http client by default.
+    /// The returned [`AccountCredentials`] can be serialized and stored for later use.
+    /// Use [`Account::from_credentials()`] to restore the account from the credentials.
+    pub async fn for_existing_account_http(
+        key: Key,
+        server_url: &str,
+        http: Box<dyn HttpClient>,
+    ) -> Result<(Account, AccountCredentials), Error> {
+        let client = Client::new(server_url, http).await?;
+        let pkcs8 = key.to_pkcs8_der()?;
+
+        Self::create_inner(
+            &LOAD_EXISTING_ACCOUNT,
+            (key, pkcs8),
+            None,
+            client,
+            server_url,
+        )
+        .await
+    }
+
     /// Restore an existing account from the given ID, private key, server URL and HTTP client
     ///
     /// The key must be provided in DER-encoded PKCS#8. This is usually how ECDSA keys are
@@ -479,40 +522,6 @@ impl Account {
             Key::generate()?,
             external_account,
             Client::new(server_url, http).await?,
-            server_url,
-        )
-        .await
-    }
-
-    /// Load a new account by private key, with a default or custom HTTP client
-    ///
-    /// https://www.rfc-editor.org/rfc/rfc8555#section-7.3.1
-    ///
-    /// The returned [`AccountCredentials`] can be serialized and stored for later use.
-    /// Use [`Account::from_credentials()`] to restore the account from the credentials.
-    pub async fn load(
-        private_key_pkcs8_der: &[u8],
-        server_url: &str,
-        http: Option<Box<dyn HttpClient>>,
-    ) -> Result<(Account, AccountCredentials), Error> {
-        let client = match http {
-            Some(http) => Client::new(server_url, http).await?,
-            None => Client::new(server_url, Box::new(DefaultClient::try_new()?)).await?,
-        };
-
-        let key = Key::from_pkcs8_der(private_key_pkcs8_der)?;
-        let pkcs8 = key.to_pkcs8_der()?;
-        let ignored_account = NewAccount {
-            only_return_existing: true,
-            contact: &[],
-            terms_of_service_agreed: true,
-        };
-
-        Self::create_inner(
-            &ignored_account, // This field is ignored as per rfc8555 7.3.1
-            (key, pkcs8),
-            None, // This field is ignored as per rfc8555 7.3.1
-            client,
             server_url,
         )
         .await
@@ -907,22 +916,22 @@ struct Key {
 }
 
 impl Key {
-    fn generate() -> Result<(Self, crypto::pkcs8::Document), Error> {
+    pub fn generate() -> Result<(Self, crypto::pkcs8::Document), Error> {
         let rng = crypto::SystemRandom::new();
         let pkcs8 =
             crypto::EcdsaKeyPair::generate_pkcs8(&crypto::ECDSA_P256_SHA256_FIXED_SIGNING, &rng)?;
         Self::new(pkcs8.as_ref(), rng).map(|key| (key, pkcs8))
     }
 
-    fn from_pkcs8_der(pkcs8_der: &[u8]) -> Result<Self, Error> {
+    pub fn from_pkcs8_der(pkcs8_der: &[u8]) -> Result<Self, Error> {
         Self::new(pkcs8_der, crypto::SystemRandom::new())
     }
 
-    fn to_pkcs8_der(&self) -> Result<crypto::pkcs8::Document, Error> {
+    pub fn to_pkcs8_der(&self) -> Result<crypto::pkcs8::Document, Error> {
         Ok(self.inner.to_pkcs8v1()?)
     }
 
-    fn new(pkcs8_der: &[u8], rng: crypto::SystemRandom) -> Result<Self, Error> {
+    pub fn new(pkcs8_der: &[u8], rng: crypto::SystemRandom) -> Result<Self, Error> {
         let inner = crypto::p256_key_pair_from_pkcs8(pkcs8_der, &rng)?;
         let thumb = BASE64_URL_SAFE_NO_PAD.encode(Jwk::thumb_sha256(&inner)?);
         Ok(Self {
