@@ -22,8 +22,8 @@ use hyper_util::client::legacy::Client as HyperClient;
 use hyper_util::client::legacy::connect::HttpConnector;
 use hyper_util::rt::TokioExecutor;
 use instant_acme::{
-    Account, AuthorizationStatus, Challenge, ChallengeType, Error, ExternalAccountKey, Identifier,
-    KeyAuthorization, NewAccount, NewOrder, Order, OrderStatus,
+    Account, AuthorizationStatus, ChallengeHandle, ChallengeType, Error, ExternalAccountKey,
+    Identifier, KeyAuthorization, NewAccount, NewOrder, Order, OrderStatus,
 };
 #[cfg(all(feature = "time", feature = "x509-parser"))]
 use instant_acme::{CertificateIdentifier, RevocationRequest};
@@ -437,13 +437,8 @@ impl Environment {
                 .challenge(A::TYPE)
                 .ok_or(format!("no {:?} challenge found", A::TYPE))?;
 
-            let Identifier::Dns(identifier) = challenge.identifier() else {
-                panic!("unsupported identifier type");
-            };
-
             let key_authz = challenge.key_authorization();
-            self.request_challenge::<A>(identifier, &challenge, &key_authz)
-                .await?;
+            self.request_challenge::<A>(&challenge, &key_authz).await?;
 
             debug!(challenge_url = challenge.url, "marking challenge ready");
             challenge.set_ready().await?;
@@ -559,14 +554,13 @@ impl Environment {
         Ok(roots)
     }
 
-    async fn request_challenge<A: AuthorizationMethod>(
+    async fn request_challenge<'a, A: AuthorizationMethod>(
         &self,
-        identifier: &str,
-        challenge: &Challenge,
+        challenge: &'a ChallengeHandle<'a>,
         key_auth: &KeyAuthorization,
     ) -> Result<(), Box<dyn StdError>> {
         let url = format!("http://[::1]:{}/{}", self.config.challtestsrv_port, A::PATH);
-        let body = serde_json::to_vec(&A::authz_request(identifier, challenge, key_auth))?;
+        let body = serde_json::to_vec(&A::authz_request(challenge, key_auth))?;
         self.client
             .request(
                 Request::builder()
@@ -591,8 +585,7 @@ struct Http01;
 
 impl AuthorizationMethod for Http01 {
     fn authz_request<'a>(
-        _identifier: &'a str,
-        challenge: &'a Challenge,
+        challenge: &'a ChallengeHandle<'a>,
         key_auth: &'a KeyAuthorization,
     ) -> impl Serialize + 'a {
         debug!(
@@ -621,11 +614,10 @@ struct Dns01;
 
 impl AuthorizationMethod for Dns01 {
     fn authz_request<'a>(
-        identifier: &'a str,
-        _challenge: &'a Challenge,
+        challenge: &'a ChallengeHandle<'_>,
         key_auth: &'a KeyAuthorization,
     ) -> impl Serialize + 'a {
-        let host = format!("_acme-challenge.{}.", identifier);
+        let host = format!("_acme-challenge.{}.", challenge.identifier());
         let value = key_auth.dns_value();
         debug!(host, value, "provisioning DNS-01 response");
 
@@ -646,24 +638,23 @@ struct Alpn01;
 
 impl AuthorizationMethod for Alpn01 {
     fn authz_request<'a>(
-        identifier: &'a str,
-        _challenge: &'a Challenge,
+        challenge: &'a ChallengeHandle<'a>,
         key_auth: &'a KeyAuthorization,
     ) -> impl Serialize + 'a {
         debug!(
-            identifier,
+            identifier = %challenge.identifier(),
             key_auth = key_auth.as_str(),
             "provisioning TLS-ALPN-01 response",
         );
 
         #[derive(Serialize)]
         struct AddAlpn01Request<'a> {
-            host: &'a str,
+            host: String,
             content: &'a str,
         }
 
         AddAlpn01Request {
-            host: identifier,
+            host: challenge.identifier().to_string(),
             // Note: pebble-challtestsrv wants to hash the key auth itself, so we
             // don't use key_auth.digest() here.
             content: key_auth.as_str(),
@@ -678,8 +669,7 @@ impl AuthorizationMethod for Alpn01 {
 trait AuthorizationMethod {
     /// Provision a challenge response for the given identifier, challenge, and key auth.
     fn authz_request<'a>(
-        identifier: &'a str,
-        challenge: &'a Challenge,
+        challenge: &'a ChallengeHandle<'a>,
         key_auth: &'a KeyAuthorization,
     ) -> impl Serialize + 'a;
 
