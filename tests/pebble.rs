@@ -6,8 +6,10 @@
 use std::collections::HashMap;
 use std::error::Error as StdError;
 use std::io::{self, Read};
+use std::net::IpAddr;
 use std::path::Path;
 use std::process::{Child, Command};
+use std::str::FromStr;
 use std::sync::atomic::{AtomicU16, Ordering};
 use std::time::Duration;
 use std::{env, fs};
@@ -50,9 +52,13 @@ use tracing_subscriber::{EnvFilter, fmt};
 async fn http_01() -> Result<(), Box<dyn StdError>> {
     try_tracing_init();
 
+    let mut identifiers = dns_identifiers(["http01.example.com"]);
+    identifiers.push(Identifier::Ip(IpAddr::from_str("::1").unwrap()));
+    identifiers.push(Identifier::Ip(IpAddr::from_str("127.0.0.1").unwrap()));
+
     Environment::new(EnvironmentConfig::default())
         .await?
-        .test::<Http01>(&NewOrder::new(&dns_identifiers(["http01.example.com"])))
+        .test::<Http01>(&NewOrder::new(&identifiers))
         .await
         .map(|_| ())
 }
@@ -476,6 +482,7 @@ impl Environment {
             let server_name = match (ident.identifier, ident.wildcard) {
                 (Identifier::Dns(domain), true) => format!("foo.{domain}"),
                 (Identifier::Dns(_), false) => ident.to_string(),
+                (Identifier::Ip(addr), _) => addr.to_string(),
                 _ => unreachable!("unsupported identifier {ident:?}"),
             };
 
