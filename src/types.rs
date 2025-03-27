@@ -1,6 +1,7 @@
 use std::borrow::Cow;
 use std::fmt;
 use std::fmt::Write;
+use std::net::IpAddr;
 
 use base64::prelude::{BASE64_URL_SAFE_NO_PAD, Engine};
 use bytes::Bytes;
@@ -616,6 +617,11 @@ pub enum AuthorizationStatus {
 #[serde(tag = "type", content = "value", rename_all = "camelCase")]
 pub enum Identifier {
     Dns(String),
+
+    /// An IP address (IPv4 or IPv6) identifier
+    ///
+    /// Note that not all ACME servers will accept an order with an IP address identifier.
+    Ip(IpAddr),
 }
 
 impl Identifier {
@@ -638,6 +644,9 @@ pub struct AuthorizedIdentifier<'a> {
     /// The source identifier, missing any wildcard context
     pub identifier: &'a Identifier,
     /// Whether the identifier should be interpreted as a wildcard
+    ///
+    /// This is only relevant for DNS identifiers and must be false for other
+    /// types of identifiers (e.g. IP addresses).
     pub wildcard: bool,
 }
 
@@ -646,6 +655,7 @@ impl fmt::Display for AuthorizedIdentifier<'_> {
         match (self.wildcard, self.identifier) {
             (true, Identifier::Dns(dns)) => f.write_fmt(format_args!("*.{dns}")),
             (false, Identifier::Dns(dns)) => f.write_str(dns),
+            (_, Identifier::Ip(addr)) => write!(f, "{addr}"),
         }
     }
 }
