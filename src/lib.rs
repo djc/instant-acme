@@ -655,11 +655,7 @@ impl Account {
         // "If the Server accepts a new-order request with a "replaces" field, it MUST reflect
         // that field in the response and in subsequent requests for the corresponding Order
         // object."
-        // In practice, Let's Encrypt staging/production are not properly reflecting this field
-        // so we enforce it matches only when the server sends it.
-        // TODO(@cpu): tighten this up once Let's Encrypt is fixed.
-        if order.replaces.is_some() && state.replaces.is_some() && order.replaces != state.replaces
-        {
+        if order.replaces.is_some() && order.replaces != state.replaces {
             return Err(Error::Other(
                 format!(
                     "replaces field mismatch: expected {expected:?}, found {found:?}",
