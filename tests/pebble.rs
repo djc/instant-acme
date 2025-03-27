@@ -351,13 +351,13 @@ impl Environment {
         let challtestsrv = Subprocess::new(
             Command::new(&challtestsrv_path)
                 .arg("-management")
-                .arg(format!("[::1]:{}", config.challtestsrv_port))
+                .arg(format!(":{}", config.challtestsrv_port))
                 .arg("-dns01")
-                .arg(format!("[::1]:{}", config.dns_port))
+                .arg(format!(":{}", config.dns_port))
                 .arg("-http01")
-                .arg(format!("[::1]:{}", config.pebble.http_port))
+                .arg(format!(":{}", config.pebble.http_port))
                 .arg("-tlsalpn01")
-                .arg(format!("[::1]:{}", config.pebble.tls_port))
+                .arg(format!(":{}", config.pebble.tls_port))
                 .arg("-https01")
                 .arg("") // Disable HTTP-01 over https:// redirect challenges.
                 .arg("-doh")
