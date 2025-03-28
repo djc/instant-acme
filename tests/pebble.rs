@@ -232,7 +232,7 @@ async fn replacement_order() -> Result<(), Box<dyn StdError>> {
     assert!(renewal_info.suggested_window.start < OffsetDateTime::now_utc());
 
     // So, let's go ahead and issue a replacement certificate.
-    env.test::<Http01>(NewOrder::new(&dns_identifiers(names)).replaces(initial_cert_id))
+    env.test::<Http01>(&NewOrder::new(&dns_identifiers(names)).replaces(initial_cert_id))
         .await?;
 
     Ok(())

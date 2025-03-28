@@ -433,7 +433,7 @@ impl<'a> NewOrder<'a> {
     /// present in the certificate being replaced. If the ACME CA does not support the
     /// ACME renewal information (ARI) extension, the [crate::Account::new_order()] method will
     /// return an error.
-    pub fn replaces(&mut self, replaces: CertificateIdentifier<'a>) -> &mut Self {
+    pub fn replaces(mut self, replaces: CertificateIdentifier<'a>) -> Self {
         self.replaces = Some(replaces);
         self
     }
