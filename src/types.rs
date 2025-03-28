@@ -408,6 +408,7 @@ pub struct NewOrder<'a> {
     pub(crate) replaces: Option<CertificateIdentifier<'a>>,
     /// Identifiers to be included in the order
     identifiers: &'a [Identifier],
+    profile: Option<&'a str>,
 }
 
 impl<'a> NewOrder<'a> {
@@ -418,6 +419,7 @@ impl<'a> NewOrder<'a> {
         Self {
             identifiers,
             replaces: None,
+            profile: None,
         }
     }
 
@@ -435,6 +437,15 @@ impl<'a> NewOrder<'a> {
     /// return an error.
     pub fn replaces(mut self, replaces: CertificateIdentifier<'a>) -> Self {
         self.replaces = Some(replaces);
+        self
+    }
+
+    /// Set the profile to be used for the order
+    ///
+    /// [`Account::new_order()`] will yield an error if the ACME server does not support
+    /// the profiles extension or if the specified profile is not supported.
+    pub fn profile(mut self, profile: &'a str) -> Self {
+        self.profile = Some(profile);
         self
     }
 

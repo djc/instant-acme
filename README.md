@@ -20,11 +20,13 @@ specification.
 * Support for external account binding
 * Support for certificate revocation
 * Support for the [ACME renewal information (ARI)] extension
+* Support for the [profiles] extension
 * Uses hyper with rustls and Tokio for HTTP requests
 * Uses *ring* or aws-lc-rs for ECDSA signing
 * Minimum supported Rust version (MSRV): 1.70
 
 [ACME renewal information (ARI)]: https://www.ietf.org/archive/id/draft-ietf-acme-ari-08.html
+[profiles]: https://datatracker.ietf.org/doc/draft-aaron-acme-profiles/
 
 ## Cargo features
 

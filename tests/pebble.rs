@@ -238,6 +238,28 @@ async fn replacement_order() -> Result<(), Box<dyn StdError>> {
     Ok(())
 }
 
+/// Test order profiles
+#[cfg(feature = "x509-parser")]
+#[tokio::test]
+#[ignore]
+async fn profiles() -> Result<(), Box<dyn StdError>> {
+    try_tracing_init();
+
+    // Creat an env/initial account
+    let mut env = Environment::new(EnvironmentConfig::default()).await?;
+    let identifiers = dns_identifiers(["example.com"]);
+    let cert = env
+        .test::<Http01>(&NewOrder::new(&identifiers).profile("shortlived"))
+        .await?;
+
+    let (_, cert) = x509_parser::parse_x509_certificate(cert.as_ref())?;
+    let validity = cert.validity.time_to_expiration().unwrap();
+    let default_profile = env.config.pebble.profiles.get("default").unwrap();
+    assert!(validity < default_profile.validity_period);
+
+    Ok(())
+}
+
 /// Test that it is possible to deactivate an order's authorizations
 #[tokio::test]
 #[ignore]
