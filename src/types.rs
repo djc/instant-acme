@@ -98,7 +98,7 @@ pub struct AccountCredentials {
     /// We never serialize `urls` by default, but we support deserializing them
     /// in order to support serialized data from older versions of the library.
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub(crate) urls: Option<DirectoryUrls>,
+    pub(crate) urls: Option<Directory>,
 }
 
 mod pkcs8_serde {
@@ -517,12 +517,12 @@ pub struct NewAccount<'a> {
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
-pub(crate) struct DirectoryUrls {
+pub(crate) struct Directory {
     pub(crate) new_nonce: String,
     pub(crate) new_account: String,
     pub(crate) new_order: String,
     // The fields below were added later and old `AccountCredentials` may not have it.
-    // Newer deserialized account credentials grab a fresh set of `DirectoryUrls` on
+    // Newer deserialized account credentials grab a fresh set of `Directory` on
     // deserialization, so they should be fine. Newer fields should be optional, too.
     pub(crate) new_authz: Option<String>,
     pub(crate) revoke_cert: Option<String>,

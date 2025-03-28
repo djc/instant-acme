@@ -40,7 +40,7 @@ pub use types::{
     RevocationRequest, ZeroSsl,
 };
 use types::{
-    DirectoryUrls, Empty, FinalizeRequest, Header, JoseJson, Jwk, KeyOrKeyId, NewAccountPayload,
+    Directory, Empty, FinalizeRequest, Header, JoseJson, Jwk, KeyOrKeyId, NewAccountPayload,
     Signer, SigningAlgorithm,
 };
 
@@ -582,7 +582,7 @@ impl Account {
                 .map(|eak| {
                     JoseJson::new(
                         Some(&Jwk::new(&key.inner)),
-                        eak.header(None, &client.urls.new_account),
+                        eak.header(None, &client.directory.new_account),
                         eak,
                     )
                 })
@@ -590,7 +590,7 @@ impl Account {
         };
 
         let rsp = client
-            .post(Some(&payload), None, &key, &client.urls.new_account)
+            .post(Some(&payload), None, &key, &client.directory.new_account)
             .await?;
 
         let account_url = rsp
@@ -630,13 +630,13 @@ impl Account {
     ///
     /// Returns an [`Order`] instance. Use the [`Order::state()`] method to inspect its state.
     pub async fn new_order(&self, order: &NewOrder<'_>) -> Result<Order, Error> {
-        if order.replaces.is_some() && self.inner.client.urls.renewal_info.is_none() {
+        if order.replaces.is_some() && self.inner.client.directory.renewal_info.is_none() {
             return Err(Error::Unsupported("ACME renewal information (ARI)"));
         }
 
         let rsp = self
             .inner
-            .post(Some(order), None, &self.inner.client.urls.new_order)
+            .post(Some(order), None, &self.inner.client.directory.new_order)
             .await?;
 
         let nonce = nonce_from_response(&rsp);
@@ -694,7 +694,7 @@ impl Account {
 
     /// Revokes a previously issued certificate
     pub async fn revoke<'a>(&'a self, payload: &RevocationRequest<'a>) -> Result<(), Error> {
-        let revoke_url = match self.inner.client.urls.revoke_cert.as_deref() {
+        let revoke_url = match self.inner.client.directory.revoke_cert.as_deref() {
             Some(url) => url,
             // This happens because the current account credentials were deserialized from an
             // older version which only serialized a subset of the directory URLs. You should
@@ -726,7 +726,7 @@ impl Account {
         &self,
         certificate_id: &CertificateIdentifier<'_>,
     ) -> Result<RenewalInfo, Error> {
-        let renewal_info_url = match self.inner.client.urls.renewal_info.as_deref() {
+        let renewal_info_url = match self.inner.client.directory.renewal_info.as_deref() {
             Some(url) => url,
             None => return Err(Error::Unsupported("ACME renewal information (ARI)")),
         };
@@ -793,7 +793,7 @@ impl AccountInner {
             key: Key::from_pkcs8_der(credentials.key_pkcs8.as_ref())?,
             client: match (credentials.directory, credentials.urls) {
                 (Some(server_url), _) => Client::new(&server_url, http).await?,
-                (None, Some(urls)) => Client { http, urls },
+                (None, Some(directory)) => Client { http, directory },
                 (None, None) => return Err("no server URLs found".into()),
             },
         })
@@ -839,7 +839,7 @@ impl Signer for AccountInner {
 
 struct Client {
     http: Box<dyn HttpClient>,
-    urls: DirectoryUrls,
+    directory: Directory,
 }
 
 impl Client {
@@ -852,7 +852,7 @@ impl Client {
         let body = rsp.body().await.map_err(Error::Other)?;
         Ok(Client {
             http,
-            urls: serde_json::from_slice(&body)?,
+            directory: serde_json::from_slice(&body)?,
         })
     }
 
@@ -918,7 +918,7 @@ impl Client {
 
         let request = Request::builder()
             .method(Method::HEAD)
-            .uri(&self.urls.new_nonce)
+            .uri(&self.directory.new_nonce)
             .body(Full::default())
             .expect("infallible error should not occur");
 
@@ -941,7 +941,7 @@ impl fmt::Debug for Client {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("Client")
             .field("client", &"..")
-            .field("urls", &self.urls)
+            .field("directory", &self.directory)
             .finish()
     }
 }
