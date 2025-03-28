@@ -1,6 +1,6 @@
 use std::borrow::Cow;
-use std::fmt;
-use std::fmt::Write;
+use std::collections::HashMap;
+use std::fmt::{self, Write};
 use std::net::IpAddr;
 
 use base64::prelude::{BASE64_URL_SAFE_NO_PAD, Engine};
@@ -366,6 +366,9 @@ pub struct OrderState {
     #[serde(deserialize_with = "deserialize_static_certificate_identifier")]
     #[serde(default)]
     pub replaces: Option<CertificateIdentifier<'static>>,
+    /// The profile to be used for the order
+    #[serde(default)]
+    pub profile: Option<String>,
 }
 
 /// A wrapper for [`AuthorizationState`] as held in the [`OrderState`]
@@ -542,6 +545,22 @@ pub(crate) struct Directory {
     //
     // <https://www.ietf.org/archive/id/draft-ietf-acme-ari-07.html>
     pub(crate) renewal_info: Option<String>,
+    #[serde(default)]
+    pub(crate) meta: Meta,
+}
+
+#[derive(Clone, Debug, Default, Deserialize, Serialize)]
+pub(crate) struct Meta {
+    #[serde(default)]
+    pub(crate) profiles: HashMap<String, String>,
+}
+
+/// Profile meta information from the server directory
+#[allow(missing_docs)]
+#[derive(Clone, Copy, Debug)]
+pub struct ProfileMeta<'a> {
+    pub name: &'a str,
+    pub description: &'a str,
 }
 
 #[derive(Serialize)]

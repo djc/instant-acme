@@ -36,8 +36,8 @@ pub use types::RenewalInfo;
 pub use types::{
     AccountCredentials, Authorization, AuthorizationState, AuthorizationStatus,
     AuthorizedIdentifier, CertificateIdentifier, Challenge, ChallengeType, Error, Identifier,
-    LetsEncrypt, NewAccount, NewOrder, OrderState, OrderStatus, Problem, RevocationReason,
-    RevocationRequest, ZeroSsl,
+    LetsEncrypt, NewAccount, NewOrder, OrderState, OrderStatus, Problem, ProfileMeta,
+    RevocationReason, RevocationRequest, ZeroSsl,
 };
 use types::{
     Directory, Empty, FinalizeRequest, Header, JoseJson, Jwk, KeyOrKeyId, NewAccountPayload,
@@ -769,6 +769,17 @@ impl Account {
             .await?;
 
         Ok(())
+    }
+
+    /// Yield the profiles supported according to the account's server directory
+    pub fn profiles(&self) -> impl Iterator<Item = ProfileMeta<'_>> {
+        self.inner
+            .client
+            .directory
+            .meta
+            .profiles
+            .iter()
+            .map(|(name, description)| ProfileMeta { name, description })
     }
 
     /// Get the account ID
