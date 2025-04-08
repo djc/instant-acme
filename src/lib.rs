@@ -447,9 +447,9 @@ impl ChallengeHandle<'_> {
 
         *self.nonce = nonce_from_response(&rsp);
 
-        let resoponse_payload = Problem::check::<Challenge>(rsp).await?;
+        let response_payload = Problem::check::<Challenge>(rsp).await?;
 
-        if let Some(problem_details) = resoponse_payload.error {
+        if let Some(problem_details) = response_payload.error {
             Err(Error::Api(problem_details))
         } else {
             Ok(())
