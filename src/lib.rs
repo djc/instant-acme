@@ -40,8 +40,8 @@ pub use types::{
     RevocationReason, RevocationRequest, ZeroSsl,
 };
 use types::{
-    Directory, Empty, FinalizeRequest, Header, JoseJson, Jwk, KeyOrKeyId, NewAccountPayload,
-    Signer, SigningAlgorithm,
+    AccountContactUpdatePayload, AccountPayload, Directory, Empty, FinalizeRequest, Header,
+    JoseJson, Jwk, KeyOrKeyId, NewAccountPayload, NewKeyPayload, Signer, SigningAlgorithm,
 };
 
 /// An ACME order as described in RFC 8555 (section 7.1.3)
@@ -446,8 +446,14 @@ impl ChallengeHandle<'_> {
             .await?;
 
         *self.nonce = nonce_from_response(&rsp);
-        let _ = Problem::check::<Challenge>(rsp).await?;
-        Ok(())
+
+        let resoponse_payload = Problem::check::<Challenge>(rsp).await?;
+
+        if let Some(problem_details) = resoponse_payload.error {
+            Err(Error::Api(problem_details))
+        } else {
+            Ok(())
+        }
     }
 
     /// Create a [`KeyAuthorization`] for this challenge
@@ -785,6 +791,58 @@ impl Account {
     /// Get the account ID
     pub fn id(&self) -> &str {
         &self.inner.id
+    }
+
+    /// Account key rollover
+    pub async fn key_change(&self, server_url: &str) -> Result<AccountCredentials, Error> {
+        let new_key_url = match self.inner.client.directory.key_change.as_deref() {
+            Some(url) => url,
+            None => return Err("Account key rollover not supported by ACME CA".into()),
+        };
+
+        let (new_key, new_key_pkcs8) = Key::generate()?;
+
+        let jwk_old = Jwk::new(&self.inner.key.inner);
+
+        let payload_inner = NewKeyPayload {
+            account: self.inner.id.clone(),
+            old_key: jwk_old,
+        };
+
+        let mut inner_header = new_key.header(Some("nonce"), &new_key_url);
+        inner_header.nonce = None;
+
+        let inner_body = JoseJson::new(Some(&payload_inner), inner_header, &new_key)?;
+
+        let rsp = self
+            .inner
+            .post(Some(&inner_body), None, &new_key_url)
+            .await?;
+
+        let _ = Problem::from_response(rsp).await?;
+
+        let credentials = AccountCredentials {
+            id: self.inner.id.clone(),
+            key_pkcs8: new_key_pkcs8.as_ref().to_vec(),
+            directory: Some(server_url.to_owned()),
+            urls: None,
+        };
+
+        Ok(credentials)
+    }
+
+    /// Updates the account settings
+    pub async fn update_contact<'a>(&self, contact: &'a [&'a str]) -> Result<(), Error> {
+        let payload = AccountContactUpdatePayload { contact };
+
+        let rsp = self
+            .inner
+            .post(Some(&payload), None, &self.inner.id)
+            .await?;
+
+        let _ = Problem::check::<AccountPayload>(rsp).await?;
+
+        Ok(())
     }
 }
 

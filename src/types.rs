@@ -929,6 +929,26 @@ pub(crate) enum SigningAlgorithm {
 #[derive(Debug, Serialize)]
 pub(crate) struct Empty {}
 
+/// Input data for [Account] update of contact
+
+#[derive(Clone, Debug, Serialize)]
+pub(crate) struct AccountContactUpdatePayload<'a> {
+    /// List of contacts
+    pub(crate) contact: &'a [&'a str],
+}
+
+#[derive(Debug, Serialize)]
+pub(crate) struct NewKeyPayload {
+    pub(crate) account: String,
+    #[serde(rename = "oldKey")]
+    pub(crate) old_key: Jwk,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub(crate) struct AccountPayload {
+    pub(crate) status: String,
+}
+
 #[cfg(test)]
 mod tests {
     #[cfg(feature = "x509-parser")]
