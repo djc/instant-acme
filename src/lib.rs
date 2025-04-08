@@ -40,8 +40,8 @@ pub use types::{
     RevocationReason, RevocationRequest, ZeroSsl,
 };
 use types::{
-    AccountContactUpdatePayload, AccountPayload, Directory, Empty, FinalizeRequest, Header,
-    JoseJson, Jwk, KeyOrKeyId, NewAccountPayload, NewKeyPayload, Signer, SigningAlgorithm,
+    Directory, Empty, FinalizeRequest, Header, JoseJson, Jwk, KeyOrKeyId, NewAccountPayload,
+    Signer, SigningAlgorithm,
 };
 
 /// An ACME order as described in RFC 8555 (section 7.1.3)
@@ -447,12 +447,11 @@ impl ChallengeHandle<'_> {
 
         *self.nonce = nonce_from_response(&rsp);
 
-        let response_payload = Problem::check::<Challenge>(rsp).await?;
+        let response = Problem::check::<Challenge>(rsp).await?;
 
-        if let Some(problem_details) = response_payload.error {
-            Err(Error::Api(problem_details))
-        } else {
-            Ok(())
+        match response.error {
+            Some(details) => Err(Error::Api(details)),
+            None => Ok(()),
         }
     }
 
@@ -794,7 +793,22 @@ impl Account {
     }
 
     /// Account key rollover
-    pub async fn key_change(&self, server_url: &str) -> Result<AccountCredentials, Error> {
+    ///
+    /// This is useful if you want to change the acme client key of an existing account, e.g.
+    /// to mitigate the risk of a key compromise. This method crates a new client key and changes
+    /// the key associated with the existing account. In case the key rollover succeeds the new
+    /// account credentials are returned for further usage. After that a new Account object with
+    /// the updated client key needs to be crated for further interaction with the acme account.
+    ///
+    /// See <https://datatracker.ietf.org/doc/html/rfc8555#section-7.3.5> for more information.
+    pub async fn change_key(&self, server_url: &str) -> Result<AccountCredentials, Error> {
+        #[derive(Debug, Serialize)]
+        struct NewKey<'a> {
+            account: &'a str,
+            #[serde(rename = "oldKey")]
+            old_key: Jwk,
+        }
+
         let new_key_url = match self.inner.client.directory.key_change.as_deref() {
             Some(url) => url,
             None => return Err("Account key rollover not supported by ACME CA".into()),
@@ -804,8 +818,8 @@ impl Account {
 
         let jwk_old = Jwk::new(&self.inner.key.inner);
 
-        let payload_inner = NewKeyPayload {
-            account: self.inner.id.clone(),
+        let payload_inner = NewKey {
+            account: &self.inner.id,
             old_key: jwk_old,
         };
 
@@ -831,18 +845,36 @@ impl Account {
         Ok(credentials)
     }
 
-    /// Updates the account settings
-    pub async fn update_contact<'a>(&self, contact: &'a [&'a str]) -> Result<(), Error> {
-        let payload = AccountContactUpdatePayload { contact };
+    /// Updates the account contacts
+    ///
+    /// This is useful if you want to update the contact information of an existing account
+    /// on the acme server. The contacts argument replaces existing contacts on
+    /// the server. By providing an empty array the contacts are removed from the server.
+    ///
+    /// See <https://datatracker.ietf.org/doc/html/rfc8555#section-7.3.2> for more information.
+    pub async fn update_contacts<'a>(&self, contacts: &'a [&'a str]) -> Result<(), Error> {
+        #[derive(Clone, Debug, Serialize)]
+        struct Contacts<'a> {
+            contact: &'a [&'a str],
+        }
+
+        let payload = Contacts { contact: contacts };
 
         let rsp = self
             .inner
             .post(Some(&payload), None, &self.inner.id)
             .await?;
 
-        let _ = Problem::check::<AccountPayload>(rsp).await?;
+        #[derive(Clone, Debug, serde::Deserialize)]
+        struct Account {
+            status: AuthorizationStatus,
+        }
 
-        Ok(())
+        let response = Problem::check::<Account>(rsp).await?;
+        match response.status {
+            AuthorizationStatus::Valid => Ok(()),
+            _ => Err("Unexpected account status after account key rollover".into()),
+        }
     }
 }
 
