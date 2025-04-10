@@ -823,14 +823,14 @@ impl Account {
             old_key: jwk_old,
         };
 
-        let mut inner_header = new_key.header(Some("nonce"), &new_key_url);
+        let mut inner_header = new_key.header(Some("nonce"), new_key_url);
         inner_header.nonce = None;
 
         let inner_body = JoseJson::new(Some(&payload_inner), inner_header, &new_key)?;
 
         let rsp = self
             .inner
-            .post(Some(&inner_body), None, &new_key_url)
+            .post(Some(&inner_body), None, new_key_url)
             .await?;
 
         let _ = Problem::from_response(rsp).await?;
@@ -873,7 +873,7 @@ impl Account {
         let response = Problem::check::<Account>(rsp).await?;
         match response.status {
             AuthorizationStatus::Valid => Ok(()),
-            _ => Err("Unexpected account status after account key rollover".into()),
+            _ => Err("Unexpected account status after update contacts information".into()),
         }
     }
 }

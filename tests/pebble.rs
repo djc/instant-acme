@@ -313,6 +313,49 @@ async fn account_deactivate() -> Result<(), Box<dyn StdError>> {
     Ok(())
 }
 
+#[tokio::test]
+#[ignore]
+async fn update_contacts() -> Result<(), Box<dyn StdError>> {
+    try_tracing_init();
+
+    // Creat an env/initial account
+    let env = Environment::new(EnvironmentConfig::default()).await?;
+
+    // Provide empty contacts information, this is fine for pebble
+    let result = env.account.update_contacts(&[]).await?;
+    assert_eq!(result, ());
+
+    // At the time of writing this testcase, pebble does not support contacts information.
+    let Err(Error::Api(problem)) = env.account.update_contacts(&["alice@example.com"]).await else {
+        panic!("unexpected result");
+    };
+
+    assert_eq!(
+        problem.r#type,
+        Some("urn:ietf:params:acme:error:unsupportedContact".to_string())
+    );
+    Ok(())
+}
+
+#[tokio::test]
+#[ignore]
+async fn change_key() -> Result<(), Box<dyn StdError>> {
+    try_tracing_init();
+
+    // Creat an env/initial account
+    let mut env = Environment::new(EnvironmentConfig::default()).await?;
+
+    // Change the account key
+    let result = env
+        .account
+        .clone()
+        .change_key("https://[::1]:14000/dir")
+        .await;
+    assert!(result.is_ok());
+
+    Ok(())
+}
+
 fn try_tracing_init() {
     let _ = tracing_subscriber::registry()
         .with(fmt::layer())
