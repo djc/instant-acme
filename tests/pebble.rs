@@ -307,8 +307,8 @@ async fn account_deactivate() -> Result<(), Box<dyn StdError>> {
     };
 
     assert_eq!(
-        problem.r#type,
-        Some("urn:ietf:params:acme:error:unauthorized".to_string())
+        problem.r#type.as_deref(),
+        Some("urn:ietf:params:acme:error:unauthorized")
     );
     Ok(())
 }
@@ -322,8 +322,7 @@ async fn update_contacts() -> Result<(), Box<dyn StdError>> {
     let env = Environment::new(EnvironmentConfig::default()).await?;
 
     // Provide empty contacts information, this is fine for pebble
-    let result = env.account.update_contacts(&[]).await?;
-    assert_eq!(result, ());
+    env.account.update_contacts(&[]).await?;
 
     // At the time of writing this testcase, pebble does not support contacts information.
     let Err(Error::Api(problem)) = env.account.update_contacts(&["alice@example.com"]).await else {
@@ -331,9 +330,10 @@ async fn update_contacts() -> Result<(), Box<dyn StdError>> {
     };
 
     assert_eq!(
-        problem.r#type,
-        Some("urn:ietf:params:acme:error:unsupportedContact".to_string())
+        problem.r#type.as_deref(),
+        Some("urn:ietf:params:acme:error:unsupportedContact")
     );
+
     Ok(())
 }
 
@@ -343,15 +343,10 @@ async fn change_key() -> Result<(), Box<dyn StdError>> {
     try_tracing_init();
 
     // Creat an env/initial account
-    let mut env = Environment::new(EnvironmentConfig::default()).await?;
+    let env = Environment::new(EnvironmentConfig::default()).await?;
 
     // Change the account key
-    let result = env
-        .account
-        .clone()
-        .change_key("https://[::1]:14000/dir")
-        .await;
-    assert!(result.is_ok());
+    env.account.change_key("https://[::1]:14000/dir").await?;
 
     Ok(())
 }

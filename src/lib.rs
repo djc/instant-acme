@@ -873,7 +873,7 @@ impl Account {
         let response = Problem::check::<Account>(rsp).await?;
         match response.status {
             AuthorizationStatus::Valid => Ok(()),
-            _ => Err("Unexpected account status after update contacts information".into()),
+            _ => Err("Unexpected account status after update of account contacts".into()),
         }
     }
 }
