@@ -343,10 +343,32 @@ async fn change_key() -> Result<(), Box<dyn StdError>> {
     try_tracing_init();
 
     // Creat an env/initial account
-    let env = Environment::new(EnvironmentConfig::default()).await?;
+    let mut env = Environment::new(EnvironmentConfig::default()).await?;
+
+    let dir = &format!("https://{}/dir", &env.config.pebble.listen_address);
 
     // Change the account key
-    env.account.change_key("https://[::1]:14000/dir").await?;
+    let new_credentials = env.account.change_key(dir).await?;
+
+    // Using the old ACME account key should now produce malformed error.
+    let Err(Error::Api(problem)) = env.account.update_contacts(&[]).await else {
+        panic!("unexpected error result");
+    };
+
+    assert_eq!(
+        problem.r#type.as_deref(),
+        Some("urn:ietf:params:acme:error:malformed")
+    );
+
+    // Change the Pebble environment to use the new ACME account key.
+    env.account = instant_acme::Account::from_credentials_and_http(
+        new_credentials,
+        Box::new(env.client.clone()),
+    )
+    .await?;
+
+    // Using the new ACME account key should not produce an error.
+    env.account.update_contacts(&[]).await?;
 
     Ok(())
 }

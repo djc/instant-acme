@@ -449,10 +449,9 @@ impl ChallengeHandle<'_> {
 
         let response = Problem::check::<Challenge>(rsp).await?;
 
-        match response.error {
-            Some(details) => Err(Error::Api(details)),
-            None => Ok(()),
-        }
+        Problem::check_challenge(response)?;
+
+        Ok(())
     }
 
     /// Create a [`KeyAuthorization`] for this challenge
@@ -794,11 +793,11 @@ impl Account {
 
     /// Account key rollover
     ///
-    /// This is useful if you want to change the acme client key of an existing account, e.g.
-    /// to mitigate the risk of a key compromise. This method crates a new client key and changes
+    /// This is useful if you want to change the ACME account key of an existing account, e.g.
+    /// to mitigate the risk of a key compromise. This method creates a new client key and changes
     /// the key associated with the existing account. In case the key rollover succeeds the new
     /// account credentials are returned for further usage. After that a new Account object with
-    /// the updated client key needs to be crated for further interaction with the acme account.
+    /// the updated client key needs to be crated for further interaction with the ACME account.
     ///
     /// See <https://datatracker.ietf.org/doc/html/rfc8555#section-7.3.5> for more information.
     pub async fn change_key(&self, server_url: &str) -> Result<AccountCredentials, Error> {
@@ -848,7 +847,7 @@ impl Account {
     /// Updates the account contacts
     ///
     /// This is useful if you want to update the contact information of an existing account
-    /// on the acme server. The contacts argument replaces existing contacts on
+    /// on the ACME server. The contacts argument replaces existing contacts on
     /// the server. By providing an empty array the contacts are removed from the server.
     ///
     /// See <https://datatracker.ietf.org/doc/html/rfc8555#section-7.3.2> for more information.
@@ -873,7 +872,7 @@ impl Account {
         let response = Problem::check::<Account>(rsp).await?;
         match response.status {
             AuthorizationStatus::Valid => Ok(()),
-            _ => Err("Unexpected account status after update of account contacts".into()),
+            _ => Err("Unexpected account status after updating contact information".into()),
         }
     }
 }
