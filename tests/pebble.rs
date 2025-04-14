@@ -324,15 +324,10 @@ async fn update_contacts() -> Result<(), Box<dyn StdError>> {
     // Provide empty contacts information, this is fine for pebble
     env.account.update_contacts(&[]).await?;
 
-    // At the time of writing this testcase, pebble does not support contacts information.
-    let Err(Error::Api(problem)) = env.account.update_contacts(&["alice@example.com"]).await else {
-        panic!("unexpected result");
-    };
-
-    assert_eq!(
-        problem.r#type.as_deref(),
-        Some("urn:ietf:params:acme:error:unsupportedContact")
-    );
+    // Provide an email address as contacts information
+    env.account
+        .update_contacts(&["mailto:alice@example.com"])
+        .await?;
 
     Ok(())
 }
@@ -351,7 +346,11 @@ async fn change_key() -> Result<(), Box<dyn StdError>> {
     let new_credentials = env.account.change_key(dir).await?;
 
     // Using the old ACME account key should now produce malformed error.
-    let Err(Error::Api(problem)) = env.account.update_contacts(&[]).await else {
+    let Err(Error::Api(problem)) = env
+        .account
+        .update_contacts(&["mailto:bob@example.com"])
+        .await
+    else {
         panic!("unexpected error result");
     };
 
@@ -368,7 +367,9 @@ async fn change_key() -> Result<(), Box<dyn StdError>> {
     .await?;
 
     // Using the new ACME account key should not produce an error.
-    env.account.update_contacts(&[]).await?;
+    env.account
+        .update_contacts(&["mailto:bob@example.com"])
+        .await?;
 
     Ok(())
 }
