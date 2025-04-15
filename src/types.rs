@@ -171,13 +171,6 @@ impl Problem {
             false => Err(serde_json::from_slice::<Problem>(&body)?.into()),
         }
     }
-
-    pub(crate) fn check_challenge(challenge: Challenge) -> Result<Challenge, Error> {
-        match challenge.error {
-            Some(details) => Err(Error::Api(details)),
-            None => Ok(challenge),
-        }
-    }
 }
 
 impl fmt::Display for Problem {

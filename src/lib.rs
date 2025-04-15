@@ -447,9 +447,7 @@ impl ChallengeHandle<'_> {
 
         *self.nonce = nonce_from_response(&rsp);
 
-        let response = Problem::check::<Challenge>(rsp).await?;
-
-        Problem::check_challenge(response)?;
+        let _ = Problem::check::<Challenge>(rsp).await?;
 
         Ok(())
     }
