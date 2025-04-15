@@ -446,8 +446,13 @@ impl ChallengeHandle<'_> {
             .await?;
 
         *self.nonce = nonce_from_response(&rsp);
-        let _ = Problem::check::<Challenge>(rsp).await?;
-        Ok(())
+
+        let response = Problem::check::<Challenge>(rsp).await?;
+
+        match response.error {
+            Some(details) => Err(Error::Api(details)),
+            None => Ok(()),
+        }
     }
 
     /// Create a [`KeyAuthorization`] for this challenge
