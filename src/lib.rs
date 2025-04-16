@@ -791,6 +791,91 @@ impl Account {
     pub fn id(&self) -> &str {
         &self.inner.id
     }
+
+    /// Account key rollover
+    ///
+    /// This is useful if you want to change the ACME account key of an existing account, e.g.
+    /// to mitigate the risk of a key compromise. This method creates a new client key and changes
+    /// the key associated with the existing account. In case the key rollover succeeds the new
+    /// account credentials are returned for further usage. After that a new Account object with
+    /// the updated client key needs to be crated for further interaction with the ACME account.
+    ///
+    /// See <https://datatracker.ietf.org/doc/html/rfc8555#section-7.3.5> for more information.
+    pub async fn change_key(&self, server_url: &str) -> Result<AccountCredentials, Error> {
+        #[derive(Debug, Serialize)]
+        struct NewKey<'a> {
+            account: &'a str,
+            #[serde(rename = "oldKey")]
+            old_key: Jwk,
+        }
+
+        let new_key_url = match self.inner.client.directory.key_change.as_deref() {
+            Some(url) => url,
+            None => return Err("Account key rollover not supported by ACME CA".into()),
+        };
+
+        let (new_key, new_key_pkcs8) = Key::generate()?;
+
+        let jwk_old = Jwk::new(&self.inner.key.inner);
+
+        let payload_inner = NewKey {
+            account: &self.inner.id,
+            old_key: jwk_old,
+        };
+
+        let mut inner_header = new_key.header(Some("nonce"), new_key_url);
+        inner_header.nonce = None;
+
+        let inner_body = JoseJson::new(Some(&payload_inner), inner_header, &new_key)?;
+
+        let rsp = self
+            .inner
+            .post(Some(&inner_body), None, new_key_url)
+            .await?;
+
+        let _ = Problem::from_response(rsp).await?;
+
+        let credentials = AccountCredentials {
+            id: self.inner.id.clone(),
+            key_pkcs8: new_key_pkcs8.as_ref().to_vec(),
+            directory: Some(server_url.to_owned()),
+            urls: None,
+        };
+
+        Ok(credentials)
+    }
+
+    /// Updates the account contacts
+    ///
+    /// This is useful if you want to update the contact information of an existing account
+    /// on the ACME server. The contacts argument replaces existing contacts on
+    /// the server. By providing an empty array the contacts are removed from the server.
+    ///
+    /// See <https://datatracker.ietf.org/doc/html/rfc8555#section-7.3.2> for more information.
+    pub async fn update_contacts<'a>(&self, contacts: &'a [&'a str]) -> Result<(), Error> {
+        #[derive(Clone, Debug, Serialize)]
+        struct Contacts<'a> {
+            contact: &'a [&'a str],
+        }
+
+        let payload = Contacts { contact: contacts };
+
+        let rsp = self
+            .inner
+            .post(Some(&payload), None, &self.inner.id)
+            .await?;
+
+        #[derive(Clone, Debug, serde::Deserialize)]
+        struct Account {
+            status: AuthorizationStatus,
+        }
+
+        let response = Problem::check::<Account>(rsp).await?;
+        match response.status {
+            AuthorizationStatus::Valid => Ok(()),
+            _ => Err("Unexpected account status after updating contact information".into()),
+        }
+    }
 }
 
 struct AccountInner {

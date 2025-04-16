@@ -21,6 +21,8 @@ specification.
 * Support for certificate revocation
 * Support for the [ACME renewal information (ARI)] extension
 * Support for the [profiles] extension
+* Support for account key rollover
+* Support for account contacts update
 * Uses hyper with rustls and Tokio for HTTP requests
 * Uses *ring* or aws-lc-rs for ECDSA signing
 * Minimum supported Rust version (MSRV): 1.70
