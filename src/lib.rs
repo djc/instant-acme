@@ -197,7 +197,9 @@ impl Order {
         loop {
             sleep(delay).await;
             let state = self.refresh().await?;
-            if let OrderStatus::Ready | OrderStatus::Invalid = state.status {
+            if let Some(error) = &state.error {
+                return Err(Error::Api(error.clone()));
+            } else if let OrderStatus::Ready | OrderStatus::Invalid = state.status {
                 return Ok(state.status);
             } else if tries <= 1 {
                 return Ok(state.status);
