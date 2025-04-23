@@ -14,17 +14,16 @@ specification.
 
 ## Features
 
+* Supported extensions:
+  * [ACME renewal information (ARI)]
+  * [Profiles]
+* Support for external account binding, key rollover, and contact updates
+* Support for certificate revocation
 * Store/recover your account credentials by serializing/deserializing
 * Fully async implementation with tracing support
 * Support for processing multiple orders concurrently
-* Support for external account binding
-* Support for certificate revocation
-* Support for the [ACME renewal information (ARI)] extension
-* Support for the [profiles] extension
-* Support for account key rollover
-* Support for account contacts update
 * Uses hyper with rustls and Tokio for HTTP requests
-* Uses *ring* or aws-lc-rs for ECDSA signing
+* Uses aws-lc-rs or *ring* for ECDSA signing
 * Minimum supported Rust version (MSRV): 1.70
 
 [ACME renewal information (ARI)]: https://www.ietf.org/archive/id/draft-ietf-acme-ari-08.html
