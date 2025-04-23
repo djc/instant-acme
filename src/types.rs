@@ -88,6 +88,7 @@ impl From<hyper_util::client::legacy::Error> for Error {
 /// server URLs from the relevant ACME server. This can be used to serialize
 /// the account credentials to a file or secret manager and restore the
 /// account from persistent storage.
+#[must_use]
 #[derive(Deserialize, Serialize)]
 pub struct AccountCredentials {
     pub(crate) id: String,
