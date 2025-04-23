@@ -332,7 +332,7 @@ impl Account {
         &self.inner.id
     }
 
-    /// Account key rollover
+    /// Update the account's authentication key
     ///
     /// This is useful if you want to change the ACME account key of an existing account, e.g.
     /// to mitigate the risk of a key compromise. This method creates a new client key and changes
@@ -340,7 +340,7 @@ impl Account {
     /// and a fresh set of [`AccountCredentials`] will be returned to update stored credentials.
     ///
     /// See <https://datatracker.ietf.org/doc/html/rfc8555#section-7.3.5> for more information.
-    pub async fn change_key(&mut self) -> Result<AccountCredentials, Error> {
+    pub async fn update_key(&mut self) -> Result<AccountCredentials, Error> {
         let new_key_url = match self.inner.client.directory.key_change.as_deref() {
             Some(url) => url,
             None => return Err("Account key rollover not supported by ACME CA".into()),
