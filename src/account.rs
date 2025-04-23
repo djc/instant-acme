@@ -287,51 +287,6 @@ impl Account {
         Problem::check::<RenewalInfo>(rsp).await
     }
 
-    /// Deactivate the account with the ACME server
-    ///
-    /// This is useful when you want to cancel an account with the ACME server
-    /// because you don't intend to use it further, or because the account key was
-    /// compromised.
-    ///
-    /// After this point no further operations can be performed with the account.
-    /// Any existing orders or authorizations created with the ACME server will be
-    /// invalidated.
-    pub async fn deactivate(self) -> Result<(), Error> {
-        #[derive(Serialize)]
-        struct DeactivateRequest<'a> {
-            status: &'a str,
-        }
-
-        let _ = self
-            .inner
-            .post(
-                Some(&DeactivateRequest {
-                    status: "deactivated",
-                }),
-                None,
-                self.id(),
-            )
-            .await?;
-
-        Ok(())
-    }
-
-    /// Yield the profiles supported according to the account's server directory
-    pub fn profiles(&self) -> impl Iterator<Item = ProfileMeta<'_>> {
-        self.inner
-            .client
-            .directory
-            .meta
-            .profiles
-            .iter()
-            .map(|(name, description)| ProfileMeta { name, description })
-    }
-
-    /// Get the account ID
-    pub fn id(&self) -> &str {
-        &self.inner.id
-    }
-
     /// Update the account's authentication key
     ///
     /// This is useful if you want to change the ACME account key of an existing account, e.g.
@@ -413,6 +368,51 @@ impl Account {
             AuthorizationStatus::Valid => Ok(()),
             _ => Err("Unexpected account status after updating contact information".into()),
         }
+    }
+
+    /// Deactivate the account with the ACME server
+    ///
+    /// This is useful when you want to cancel an account with the ACME server
+    /// because you don't intend to use it further, or because the account key was
+    /// compromised.
+    ///
+    /// After this point no further operations can be performed with the account.
+    /// Any existing orders or authorizations created with the ACME server will be
+    /// invalidated.
+    pub async fn deactivate(self) -> Result<(), Error> {
+        #[derive(Serialize)]
+        struct DeactivateRequest<'a> {
+            status: &'a str,
+        }
+
+        let _ = self
+            .inner
+            .post(
+                Some(&DeactivateRequest {
+                    status: "deactivated",
+                }),
+                None,
+                self.id(),
+            )
+            .await?;
+
+        Ok(())
+    }
+
+    /// Yield the profiles supported according to the account's server directory
+    pub fn profiles(&self) -> impl Iterator<Item = ProfileMeta<'_>> {
+        self.inner
+            .client
+            .directory
+            .meta
+            .profiles
+            .iter()
+            .map(|(name, description)| ProfileMeta { name, description })
+    }
+
+    /// Get the account ID
+    pub fn id(&self) -> &str {
+        &self.inner.id
     }
 }
 
