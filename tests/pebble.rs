@@ -484,7 +484,7 @@ impl Environment {
                 terms_of_service_agreed: true,
                 only_return_existing: false,
             },
-            &format!("https://{}/dir", &config.pebble.listen_address),
+            format!("https://{}/dir", &config.pebble.listen_address),
             config.eab_key.as_ref(),
             Box::new(client.clone()),
         )

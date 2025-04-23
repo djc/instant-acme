@@ -25,7 +25,7 @@ async fn main() -> anyhow::Result<()> {
             terms_of_service_agreed: true,
             only_return_existing: false,
         },
-        LetsEncrypt::Staging.url(),
+        LetsEncrypt::Staging.url().to_owned(),
         None,
     )
     .await?;

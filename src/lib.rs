@@ -524,14 +524,14 @@ impl Account {
     pub async fn from_parts(
         id: String,
         key_pkcs8_der: &[u8],
-        directory_url: &str,
+        server_url: String,
         http: Box<dyn HttpClient>,
     ) -> Result<Self, Error> {
         Ok(Self {
             inner: Arc::new(AccountInner {
                 id,
                 key: Key::from_pkcs8_der(key_pkcs8_der)?,
-                client: Arc::new(Client::new(directory_url, http).await?),
+                client: Arc::new(Client::new(server_url, http).await?),
             }),
         })
     }
@@ -543,14 +543,13 @@ impl Account {
     #[cfg(feature = "hyper-rustls")]
     pub async fn create(
         account: &NewAccount<'_>,
-        server_url: &str,
+        server_url: String,
         external_account: Option<&ExternalAccountKey>,
     ) -> Result<(Account, AccountCredentials), Error> {
         Self::create_inner(
             account,
             external_account,
             Client::new(server_url, Box::new(DefaultClient::try_new()?)).await?,
-            server_url,
         )
         .await
     }
@@ -561,7 +560,7 @@ impl Account {
     /// Use [`Account::from_credentials()`] to restore the account from the credentials.
     pub async fn create_with_http(
         account: &NewAccount<'_>,
-        server_url: &str,
+        server_url: String,
         external_account: Option<&ExternalAccountKey>,
         http: Box<dyn HttpClient>,
     ) -> Result<(Account, AccountCredentials), Error> {
@@ -569,7 +568,6 @@ impl Account {
             account,
             external_account,
             Client::new(server_url, http).await?,
-            server_url,
         )
         .await
     }
@@ -578,7 +576,6 @@ impl Account {
         account: &NewAccount<'_>,
         external_account: Option<&ExternalAccountKey>,
         client: Client,
-        server_url: &str,
     ) -> Result<(Account, AccountCredentials), Error> {
         let (key, key_pkcs8) = Key::generate()?;
         let payload = NewAccountPayload {
@@ -611,7 +608,7 @@ impl Account {
         let credentials = AccountCredentials {
             id: id.clone(),
             key_pkcs8: key_pkcs8.as_ref().to_vec(),
-            directory: Some(server_url.to_owned()),
+            directory: Some(client.server_url.clone().unwrap()), // New clients always have `server_url`
             // We support deserializing URLs for compatibility with versions pre 0.4,
             // but we prefer to get fresh URLs from the `server_url` for newer credentials.
             urls: None,
@@ -881,8 +878,12 @@ impl AccountInner {
             id: credentials.id,
             key: Key::from_pkcs8_der(credentials.key_pkcs8.as_ref())?,
             client: Arc::new(match (credentials.directory, credentials.urls) {
-                (Some(server_url), _) => Client::new(&server_url, http).await?,
-                (None, Some(directory)) => Client { http, directory },
+                (Some(server_url), _) => Client::new(server_url, http).await?,
+                (None, Some(directory)) => Client {
+                    http,
+                    directory,
+                    server_url: None,
+                },
                 (None, None) => return Err("no server URLs found".into()),
             }),
         })
@@ -929,12 +930,13 @@ impl Signer for AccountInner {
 struct Client {
     http: Box<dyn HttpClient>,
     directory: Directory,
+    server_url: Option<String>,
 }
 
 impl Client {
-    async fn new(server_url: &str, http: Box<dyn HttpClient>) -> Result<Self, Error> {
+    async fn new(server_url: String, http: Box<dyn HttpClient>) -> Result<Self, Error> {
         let req = Request::builder()
-            .uri(server_url)
+            .uri(&server_url)
             .body(Full::default())
             .expect("infallible error should not occur");
         let rsp = http.request(req).await?;
@@ -942,6 +944,7 @@ impl Client {
         Ok(Client {
             http,
             directory: serde_json::from_slice(&body)?,
+            server_url: Some(server_url),
         })
     }
 
