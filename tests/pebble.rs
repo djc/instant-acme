@@ -339,15 +339,13 @@ async fn change_key() -> Result<(), Box<dyn StdError>> {
 
     // Creat an env/initial account
     let mut env = Environment::new(EnvironmentConfig::default()).await?;
-
-    let dir = &format!("https://{}/dir", &env.config.pebble.listen_address);
+    let old_account = env.account.clone();
 
     // Change the account key
-    let new_credentials = env.account.change_key(dir).await?;
+    let new_credentials = env.account.change_key().await?;
 
     // Using the old ACME account key should now produce malformed error.
-    let Err(Error::Api(problem)) = env
-        .account
+    let Err(Error::Api(problem)) = old_account
         .update_contacts(&["mailto:bob@example.com"])
         .await
     else {

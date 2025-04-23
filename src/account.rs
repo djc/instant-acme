@@ -336,12 +336,11 @@ impl Account {
     ///
     /// This is useful if you want to change the ACME account key of an existing account, e.g.
     /// to mitigate the risk of a key compromise. This method creates a new client key and changes
-    /// the key associated with the existing account. In case the key rollover succeeds the new
-    /// account credentials are returned for further usage. After that a new Account object with
-    /// the updated client key needs to be crated for further interaction with the ACME account.
+    /// the key associated with the existing account. `self` will be updated with the new key,
+    /// and a fresh set of [`AccountCredentials`] will be returned to update stored credentials.
     ///
     /// See <https://datatracker.ietf.org/doc/html/rfc8555#section-7.3.5> for more information.
-    pub async fn change_key(&self, server_url: &str) -> Result<AccountCredentials, Error> {
+    pub async fn change_key(&mut self) -> Result<AccountCredentials, Error> {
         let new_key_url = match self.inner.client.directory.key_change.as_deref() {
             Some(url) => url,
             None => return Err("Account key rollover not supported by ACME CA".into()),
@@ -366,11 +365,22 @@ impl Account {
         let rsp = self.inner.post(Some(&body), None, new_key_url).await?;
         let _ = Problem::from_response(rsp).await?;
 
+        self.inner = Arc::new(AccountInner {
+            client: self.inner.client.clone(),
+            key: new_key,
+            id: self.inner.id.clone(),
+        });
+
+        let (directory, urls) = match &self.inner.client.server_url {
+            Some(server_url) => (Some(server_url.clone()), None),
+            None => (None, Some(self.inner.client.directory.clone())),
+        };
+
         Ok(AccountCredentials {
             id: self.inner.id.clone(),
             key_pkcs8: new_key_pkcs8.as_ref().to_vec(),
-            directory: Some(server_url.to_owned()),
-            urls: None,
+            directory,
+            urls,
         })
     }
 
