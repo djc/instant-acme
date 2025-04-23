@@ -334,7 +334,7 @@ async fn update_contacts() -> Result<(), Box<dyn StdError>> {
 
 #[tokio::test]
 #[ignore]
-async fn change_key() -> Result<(), Box<dyn StdError>> {
+async fn update_key() -> Result<(), Box<dyn StdError>> {
     try_tracing_init();
 
     // Creat an env/initial account
@@ -342,7 +342,7 @@ async fn change_key() -> Result<(), Box<dyn StdError>> {
     let old_account = env.account.clone();
 
     // Change the account key
-    let new_credentials = env.account.change_key().await?;
+    let new_credentials = env.account.update_key().await?;
 
     // Using the old ACME account key should now produce malformed error.
     let Err(Error::Api(problem)) = old_account
