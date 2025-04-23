@@ -531,7 +531,7 @@ impl Account {
             inner: Arc::new(AccountInner {
                 id,
                 key: Key::from_pkcs8_der(key_pkcs8_der)?,
-                client: Client::new(directory_url, http).await?,
+                client: Arc::new(Client::new(directory_url, http).await?),
             }),
         })
     }
@@ -618,7 +618,7 @@ impl Account {
         };
 
         let account = AccountInner {
-            client,
+            client: Arc::new(client),
             key,
             id: id.clone(),
         };
@@ -867,7 +867,7 @@ impl Account {
 }
 
 struct AccountInner {
-    client: Client,
+    client: Arc<Client>,
     key: Key,
     id: String,
 }
@@ -880,11 +880,11 @@ impl AccountInner {
         Ok(Self {
             id: credentials.id,
             key: Key::from_pkcs8_der(credentials.key_pkcs8.as_ref())?,
-            client: match (credentials.directory, credentials.urls) {
+            client: Arc::new(match (credentials.directory, credentials.urls) {
                 (Some(server_url), _) => Client::new(&server_url, http).await?,
                 (None, Some(directory)) => Client { http, directory },
                 (None, None) => return Err("no server URLs found".into()),
-            },
+            }),
         })
     }
 
