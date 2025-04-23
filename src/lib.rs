@@ -815,18 +815,15 @@ impl Account {
         }
 
         let (new_key, new_key_pkcs8) = Key::generate()?;
-        let mut inner_header = new_key.header(Some("nonce"), new_key_url);
-        inner_header.nonce = None;
-        let payload_inner = NewKey {
+        let mut header = new_key.header(Some("nonce"), new_key_url);
+        header.nonce = None;
+        let payload = NewKey {
             account: &self.inner.id,
             old_key: Jwk::new(&self.inner.key.inner),
         };
 
-        let inner_body = JoseJson::new(Some(&payload_inner), inner_header, &new_key)?;
-        let rsp = self
-            .inner
-            .post(Some(&inner_body), None, new_key_url)
-            .await?;
+        let body = JoseJson::new(Some(&payload), header, &new_key)?;
+        let rsp = self.inner.post(Some(&body), None, new_key_url).await?;
         let _ = Problem::from_response(rsp).await?;
 
         Ok(AccountCredentials {
