@@ -194,6 +194,92 @@ impl Order {
         Ok(&self.state)
     }
 
+    /// Poll the order with timeout until in a final state
+    ///
+    /// Refresh the order state from the server with a timeout `total_tmo`.
+    /// The polling interval has an exponential characteristic starting with `min_delay`.
+    /// The delay is increased by a factor of two till a maximum delay for polling is reached.
+    /// After that a constant delay `max_delay` is used until the provided timeout is reached.
+    ///
+    /// Yields the [`OrderStatus`] immediately if `Ready` or `Invalid`.
+    pub async fn poll_ready(
+        &mut self,
+        min_delay: Duration,
+        max_delay: Duration,
+        total_tmo: Duration,
+    ) -> Result<OrderStatus, Error> {
+        let mut polling: Duration = Duration::from_secs(0);
+
+        let mut delay: Duration = min_delay;
+
+        loop {
+            if delay > max_delay {
+                delay = max_delay;
+            }
+
+            // adjust the final polling interval
+            if polling + delay > total_tmo + min_delay {
+                polling = total_tmo - delay;
+            }
+
+            sleep(delay).await;
+
+            let state = self.refresh().await?;
+
+            polling += delay;
+
+            if let OrderStatus::Ready | OrderStatus::Invalid = state.status {
+                return Ok(state.status);
+            } else if polling >= total_tmo {
+                return Ok(state.status);
+            }
+
+            delay *= 2;
+        }
+    }
+
+    /// Wait for certificate with timeout
+    ///
+    /// Query the issued certificate from the server with a timeout `total_tmo`.
+    /// The polling interval has an exponential characteristic starting with `min_delay`.
+    /// The delay is increased by a factor of two till a maximum delay for polling is reached.
+    /// After that a constant delay `max_delay` is used until the provided timeout is reached.
+    ///
+    /// Yields the certificate for the order.
+    pub async fn poll_cert(
+        &mut self,
+        min_delay: Duration,
+        max_delay: Duration,
+        total_tmo: Duration,
+    ) -> Result<Option<String>, Error> {
+        let mut polling: Duration = Duration::from_secs(0);
+
+        let mut delay: Duration = min_delay;
+
+        loop {
+            if delay > max_delay {
+                delay = max_delay;
+            }
+
+            // adjust the final polling interval
+            if polling + delay > total_tmo + min_delay {
+                polling = total_tmo - delay;
+            }
+
+            sleep(delay).await;
+
+            let cert_chain = self.certificate().await?;
+
+            polling += delay;
+
+            if cert_chain.is_some() || polling >= total_tmo {
+                return Ok(cert_chain);
+            }
+
+            delay *= 2;
+        }
+    }
+
     /// Extract the URL and last known state from the `Order`
     pub fn into_parts(self) -> (String, OrderState) {
         (self.url, self.state)
