@@ -202,6 +202,29 @@ impl Order {
     ///
     /// Yields the [`OrderStatus`] immediately if `Ready` or `Invalid`.
     pub async fn wait_ready(&mut self, timeout: Duration) -> Result<OrderStatus, Error> {
+        self.wait_status_internal(timeout, &[OrderStatus::Ready, OrderStatus::Invalid])
+            .await
+    }
+
+    /// Wait for certificate with timeout
+    ///
+    /// Query the issued certificate from the server with a timeout `timeout`.
+    /// If a server sets the Retry-After header for rate-limiting access to the CA, the
+    /// provided value is used for polling as long as it fits into the boxed timeout window.
+    ///
+    /// Yields the certificate for the order.
+    pub async fn wait_certificate(&mut self, timeout: Duration) -> Result<Option<String>, Error> {
+        let _ = self
+            .wait_status_internal(timeout, &[OrderStatus::Valid, OrderStatus::Invalid])
+            .await?;
+        self.certificate().await
+    }
+
+    async fn wait_status_internal(
+        &mut self,
+        timeout: Duration,
+        order_states: &[OrderStatus],
+    ) -> Result<OrderStatus, Error> {
         let started = std::time::Instant::now();
 
         // Yields the order status immediately if Ready or Invalid.
@@ -213,16 +236,6 @@ impl Order {
         let boxed = started + timeout;
 
         loop {
-            let now = std::time::Instant::now();
-
-            if now > boxed {
-                break;
-            }
-
-            if now + next_retry > boxed {
-                next_retry = boxed - now;
-            }
-
             sleep(next_retry).await;
 
             let rsp = self
@@ -250,54 +263,22 @@ impl Order {
 
             self.state = Problem::check::<OrderState>(rsp).await?;
 
-            if let OrderStatus::Ready | OrderStatus::Invalid = self.state.status {
+            if order_states.contains(&self.state.status) {
                 return Ok(self.state.status);
             };
+
+            let now = std::time::Instant::now();
+
+            if now > boxed {
+                break;
+            }
+
+            if now + next_retry > boxed {
+                next_retry = boxed - now;
+            }
         }
 
         Ok(self.state.status)
-    }
-
-    /// Wait for certificate with timeout
-    ///
-    /// Query the issued certificate from the server with a timeout `total_tmo`.
-    /// The polling interval has an exponential characteristic starting with `min_delay`.
-    /// The delay is increased by a factor of two till a maximum delay for polling is reached.
-    /// After that a constant delay `max_delay` is used until the provided timeout is reached.
-    ///
-    /// Yields the certificate for the order.
-    pub async fn poll_cert(
-        &mut self,
-        min_delay: Duration,
-        max_delay: Duration,
-        total_tmo: Duration,
-    ) -> Result<Option<String>, Error> {
-        let mut polling: Duration = Duration::from_secs(0);
-
-        let mut delay: Duration = min_delay;
-
-        loop {
-            if delay > max_delay {
-                delay = max_delay;
-            }
-
-            // adjust the final polling interval
-            if polling + delay > total_tmo + min_delay {
-                polling = total_tmo - delay;
-            }
-
-            sleep(delay).await;
-
-            let cert_chain = self.certificate().await?;
-
-            polling += delay;
-
-            if cert_chain.is_some() || polling >= total_tmo {
-                return Ok(cert_chain);
-            }
-
-            delay *= 2;
-        }
     }
 
     /// Extract the URL and last known state from the `Order`
