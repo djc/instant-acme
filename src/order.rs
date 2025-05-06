@@ -14,7 +14,7 @@ use crate::types::{
     Authorization, AuthorizationState, AuthorizationStatus, AuthorizedIdentifier, Challenge,
     ChallengeType, Empty, FinalizeRequest, OrderState, OrderStatus, Problem,
 };
-use crate::{Error, Key, crypto, nonce_from_response};
+use crate::{Error, Key, crypto, nonce_from_response, retry_after_from_response};
 
 /// An ACME order as described in RFC 8555 (section 7.1.3)
 ///
