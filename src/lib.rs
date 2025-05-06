@@ -329,7 +329,6 @@ const JOSE_JSON: &str = "application/jose+json";
 const REPLAY_NONCE: &str = "Replay-Nonce";
 const RETRY_AFTER: &str = "Retry-After";
 
-
 #[cfg(test)]
 mod tests {
     use super::*;
