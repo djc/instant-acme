@@ -158,6 +158,13 @@ fn nonce_from_response(rsp: &BytesResponse) -> Option<String> {
         .and_then(|hv| String::from_utf8(hv.as_ref().to_vec()).ok())
 }
 
+fn retry_after_from_response(rsp: &BytesResponse) -> Option<String> {
+    rsp.parts
+        .headers
+        .get(RETRY_AFTER)
+        .and_then(|header_value| String::from_utf8(header_value.as_ref().to_vec()).ok())
+}
+
 #[cfg(feature = "hyper-rustls")]
 struct DefaultClient(HyperClient<hyper_rustls::HttpsConnector<HttpConnector>, Full<Bytes>>);
 
@@ -320,6 +327,8 @@ mod crypto {
 
 const JOSE_JSON: &str = "application/jose+json";
 const REPLAY_NONCE: &str = "Replay-Nonce";
+const RETRY_AFTER: &str = "Retry-After";
+
 
 #[cfg(test)]
 mod tests {

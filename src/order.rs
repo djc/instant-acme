@@ -196,46 +196,66 @@ impl Order {
 
     /// Poll the order with timeout until in a final state
     ///
-    /// Refresh the order state from the server with a timeout `total_tmo`.
-    /// The polling interval has an exponential characteristic starting with `min_delay`.
-    /// The delay is increased by a factor of two till a maximum delay for polling is reached.
-    /// After that a constant delay `max_delay` is used until the provided timeout is reached.
+    /// Refresh the order state from the server with a timeout `timeout`.
+    /// If a server sets the Retry-After header for rate-limiting access to the CA, the
+    /// provided value is used for polling as long as it fits into the boxed timeout window.
     ///
     /// Yields the [`OrderStatus`] immediately if `Ready` or `Invalid`.
-    pub async fn poll_ready(
-        &mut self,
-        min_delay: Duration,
-        max_delay: Duration,
-        total_tmo: Duration,
-    ) -> Result<OrderStatus, Error> {
-        let mut polling: Duration = Duration::from_secs(0);
+    pub async fn wait_ready(&mut self, timeout: Duration) -> Result<OrderStatus, Error> {
+        let started = std::time::Instant::now();
 
-        let mut delay: Duration = min_delay;
+        // Yields the order status immediately if Ready or Invalid.
+        let mut next_retry = Duration::from_secs(0);
+
+        // This is the same retry fallback as ACME4J
+        let fallback_retry = Duration::from_secs(3);
+
+        let boxed = started + timeout;
 
         loop {
-            if delay > max_delay {
-                delay = max_delay;
+            let now = std::time::Instant::now();
+
+            if now > boxed {
+                break;
             }
 
-            // adjust the final polling interval
-            if polling + delay > total_tmo + min_delay {
-                polling = total_tmo - delay;
+            if now + next_retry > boxed {
+                next_retry = boxed - now;
             }
 
-            sleep(delay).await;
+            sleep(next_retry).await;
 
-            let state = self.refresh().await?;
+            let rsp = self
+                .account
+                .post(None::<&Empty>, self.nonce.take(), &self.url)
+                .await?;
 
-            polling += delay;
+            self.nonce = nonce_from_response(&rsp);
 
-            if let OrderStatus::Ready | OrderStatus::Invalid = state.status {
-                return Ok(state.status);
-            } else if polling >= total_tmo {
-                return Ok(state.status);
+            next_retry = fallback_retry;
+
+            // Should retry_after become a member of Order that is updated in refresh()?
+
+            if let Some(retry_after) = retry_after_from_response(&rsp) {
+                if let Ok(retry_after_datetime) = httpdate::parse_http_date(&retry_after) {
+                    if let Ok(next_duration) =
+                        retry_after_datetime.duration_since(std::time::SystemTime::now())
+                    {
+                        next_retry = next_duration;
+                    }
+                } else if let Ok(retry_after_seconds) = retry_after.parse::<u64>() {
+                    next_retry = Duration::from_secs(retry_after_seconds);
+                }
             }
 
-            delay *= 2;
+            self.state = Problem::check::<OrderState>(rsp).await?;
+
+            if let OrderStatus::Ready | OrderStatus::Invalid = self.state.status {
+                return Ok(self.state.status);
+            };
         }
+
+        Ok(self.state.status)
     }
 
     /// Wait for certificate with timeout
