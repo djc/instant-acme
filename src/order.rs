@@ -14,7 +14,7 @@ use crate::types::{
     Authorization, AuthorizationState, AuthorizationStatus, AuthorizedIdentifier, Challenge,
     ChallengeType, Empty, FinalizeRequest, OrderState, OrderStatus, Problem,
 };
-use crate::{Error, Key, crypto, nonce_from_response};
+use crate::{Error, Key, crypto, nonce_from_response, retry_after_from_response};
 
 /// An ACME order as described in RFC 8555 (section 7.1.3)
 ///
@@ -192,6 +192,93 @@ impl Order {
         self.nonce = nonce_from_response(&rsp);
         self.state = Problem::check::<OrderState>(rsp).await?;
         Ok(&self.state)
+    }
+
+    /// Poll the order with timeout until in a final state
+    ///
+    /// Refresh the order state from the server with a timeout `timeout`.
+    /// If a server sets the Retry-After header for rate-limiting access to the CA, the
+    /// provided value is used for polling as long as it fits into the boxed timeout window.
+    ///
+    /// Yields the [`OrderStatus`] immediately if `Ready` or `Invalid`.
+    pub async fn wait_ready(&mut self, timeout: Duration) -> Result<OrderStatus, Error> {
+        self.wait_status_internal(timeout, &[OrderStatus::Ready, OrderStatus::Invalid])
+            .await
+    }
+
+    /// Wait for certificate with timeout
+    ///
+    /// Query the issued certificate from the server with a timeout `timeout`.
+    /// If a server sets the Retry-After header for rate-limiting access to the CA, the
+    /// provided value is used for polling as long as it fits into the boxed timeout window.
+    ///
+    /// Yields the certificate for the order.
+    pub async fn wait_certificate(&mut self, timeout: Duration) -> Result<Option<String>, Error> {
+        let _ = self
+            .wait_status_internal(timeout, &[OrderStatus::Valid, OrderStatus::Invalid])
+            .await?;
+        self.certificate().await
+    }
+
+    async fn wait_status_internal(
+        &mut self,
+        timeout: Duration,
+        order_states: &[OrderStatus],
+    ) -> Result<OrderStatus, Error> {
+        let started = std::time::Instant::now();
+
+        // Yields the order status immediately if Ready or Invalid.
+        let mut next_retry = Duration::from_secs(0);
+
+        // This is the same retry fallback as ACME4J
+        let fallback_retry = Duration::from_secs(3);
+
+        let boxed = started + timeout;
+
+        loop {
+            sleep(next_retry).await;
+
+            let rsp = self
+                .account
+                .post(None::<&Empty>, self.nonce.take(), &self.url)
+                .await?;
+
+            self.nonce = nonce_from_response(&rsp);
+
+            next_retry = fallback_retry;
+
+            // Should retry_after become a member of Order that is updated in refresh()?
+
+            if let Some(retry_after) = retry_after_from_response(&rsp) {
+                if let Ok(retry_after_datetime) = httpdate::parse_http_date(&retry_after) {
+                    if let Ok(next_duration) =
+                        retry_after_datetime.duration_since(std::time::SystemTime::now())
+                    {
+                        next_retry = next_duration;
+                    }
+                } else if let Ok(retry_after_seconds) = retry_after.parse::<u64>() {
+                    next_retry = Duration::from_secs(retry_after_seconds);
+                }
+            }
+
+            self.state = Problem::check::<OrderState>(rsp).await?;
+
+            if order_states.contains(&self.state.status) {
+                return Ok(self.state.status);
+            };
+
+            let now = std::time::Instant::now();
+
+            if now > boxed {
+                break;
+            }
+
+            if now + next_retry > boxed {
+                next_retry = boxed - now;
+            }
+        }
+
+        Ok(self.state.status)
     }
 
     /// Extract the URL and last known state from the `Order`
