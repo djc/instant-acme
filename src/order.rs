@@ -26,8 +26,37 @@ use crate::{Error, Key, crypto, nonce_from_response, retry_after_from_response};
 pub struct Order {
     pub(crate) account: Arc<AccountInner>,
     pub(crate) nonce: Option<String>,
+    pub(crate) retry_after: Option<Duration>,
     pub(crate) url: String,
     pub(crate) state: OrderState,
+}
+
+/// Definition of polling strategy to wait for an `Order` status
+#[derive(Debug, Clone)]
+pub enum PollingStrategy {
+    /// Exponential backoff
+    /// Retry polling the `Order` status from the ACME server for `tries` times,
+    /// waiting `delay` before the first attempt and increasing the delay
+    /// by a factor of 2 for each subsequent attempt.
+    /// This strategy is good to achieve a low latency for DNS-01 challenge.
+    /// (Empirically, we've had good results with 5 tries and an initial delay of 250ms.)
+    ExponentialBackoff {
+        /// Number of retries
+        tries: usize,
+        /// Initial delay that is doubled for subsequent attempts.
+        /// Note that a large value of tries
+        delay: Duration,
+    },
+    /// Total timeout with rate limiting
+    /// Refresh the order state from the ACME server with a timeout `total_timeout`.
+    /// If a server sets the `Retry-After` header for rate-limiting access to the CA, the
+    /// provided value is used for polling as long as it fits into the boxed timeout window.
+    /// If the ACME server does not provide `Retry-After` polling is repeated every 3 seconds.
+    /// Use this strategy if you want to achieve uniform distributed status polling.
+    TotalTimeoutWithRateLimiting {
+        /// A total timeout that is used for polling attempts
+        total_timeout: Duration,
+    },
 }
 
 impl Order {
@@ -113,6 +142,7 @@ impl Order {
                 .post(None::<&Empty>, self.nonce.take(), &self.url)
                 .await?;
             self.nonce = nonce_from_response(&rsp);
+            self.retry_after = retry_after_from_response(&rsp);
             self.state = Problem::check::<OrderState>(rsp).await?;
         }
 
@@ -157,29 +187,18 @@ impl Order {
         }
     }
 
-    /// Poll the order with exponential backoff until in a final state
+    /// Poll the order until in a final state
     ///
-    /// Refresh the order state from the server for `tries` times, waiting `delay` before the
-    /// first attempt and increasing the delay by a factor of 2 for each subsequent attempt.
+    /// Provide a polling strategy `polling_strategy` to adjust the frequency the ACME server
+    /// is polls the `OrderStatus`.
     ///
-    /// Yields the [`OrderStatus`] immediately if `Ready` or `Invalid`, or after `tries` attempts.
-    ///
-    /// (Empirically, we've had good results with 5 tries and an initial delay of 250ms.)
-    pub async fn poll(&mut self, mut tries: u8, mut delay: Duration) -> Result<OrderStatus, Error> {
-        loop {
-            sleep(delay).await;
-            let state = self.refresh().await?;
-            if let Some(error) = &state.error {
-                return Err(Error::Api(error.clone()));
-            } else if let OrderStatus::Ready | OrderStatus::Invalid = state.status {
-                return Ok(state.status);
-            } else if tries <= 1 {
-                return Ok(state.status);
-            }
-
-            delay *= 2;
-            tries -= 1;
-        }
+    /// Yields the [`OrderStatus`] immediately if `Ready` or `Invalid`.
+    pub async fn poll(&mut self, polling_strategy: PollingStrategy) -> Result<OrderStatus, Error> {
+        self.wait_status_internal(
+            polling_strategy,
+            &[OrderStatus::Ready, OrderStatus::Invalid],
+        )
+        .await
     }
 
     /// Refresh the current state of the order
@@ -190,91 +209,91 @@ impl Order {
             .await?;
 
         self.nonce = nonce_from_response(&rsp);
+        self.retry_after = retry_after_from_response(&rsp);
         self.state = Problem::check::<OrderState>(rsp).await?;
         Ok(&self.state)
     }
 
-    /// Poll the order with timeout until in a final state
-    ///
-    /// Refresh the order state from the server with a timeout `timeout`.
-    /// If a server sets the Retry-After header for rate-limiting access to the CA, the
-    /// provided value is used for polling as long as it fits into the boxed timeout window.
-    ///
-    /// Yields the [`OrderStatus`] immediately if `Ready` or `Invalid`.
-    pub async fn wait_ready(&mut self, timeout: Duration) -> Result<OrderStatus, Error> {
-        self.wait_status_internal(timeout, &[OrderStatus::Ready, OrderStatus::Invalid])
-            .await
-    }
-
     /// Wait for certificate with timeout
     ///
-    /// Query the issued certificate from the server with a timeout `timeout`.
-    /// If a server sets the Retry-After header for rate-limiting access to the CA, the
-    /// provided value is used for polling as long as it fits into the boxed timeout window.
+    /// Provide a polling strategy `polling_strategy` to adjust the frequency the ACME server
+    /// is polls the certificate.
     ///
     /// Yields the certificate for the order.
-    pub async fn wait_certificate(&mut self, timeout: Duration) -> Result<Option<String>, Error> {
+    pub async fn wait_certificate(
+        &mut self,
+        polling_strategy: PollingStrategy,
+    ) -> Result<Option<String>, Error> {
         let _ = self
-            .wait_status_internal(timeout, &[OrderStatus::Valid, OrderStatus::Invalid])
+            .wait_status_internal(
+                polling_strategy,
+                &[OrderStatus::Valid, OrderStatus::Invalid],
+            )
             .await?;
         self.certificate().await
     }
 
+    /// Wait by timeout until a defined order status is reached
+    ///
+    /// This method periodically polls the Order status. It yields the status immediately
+    /// if it is contained in the `order_states` array. Waiting ends if the `timeout` is
+    /// reached.
+    ///
+    /// Polling the status is optimized and respects a `Retry-After` header if the ACME server
+    /// is providing this HTTP header for rate-limiting access. The default polling interval is
+    /// three seconds if no such HTTP header is there.
     async fn wait_status_internal(
         &mut self,
-        timeout: Duration,
+        polling_strategy: PollingStrategy,
         order_states: &[OrderStatus],
     ) -> Result<OrderStatus, Error> {
         let started = std::time::Instant::now();
+        // let boxed = std::time::Instant::now() + timeout;
 
-        // Yields the order status immediately if Ready or Invalid.
-        let mut next_retry = Duration::from_secs(0);
+        // Yields the order status immediately if contained in order_states.
+        let mut next_retry = match polling_strategy {
+            PollingStrategy::TotalTimeoutWithRateLimiting { .. } => Duration::from_secs(0),
+            PollingStrategy::ExponentialBackoff { delay, .. } => delay,
+        };
 
         // This is the same retry fallback as ACME4J
         let fallback_retry = Duration::from_secs(3);
 
-        let boxed = started + timeout;
-
         loop {
             sleep(next_retry).await;
 
-            let rsp = self
-                .account
-                .post(None::<&Empty>, self.nonce.take(), &self.url)
-                .await?;
+            self.refresh().await?;
 
-            self.nonce = nonce_from_response(&rsp);
-
-            next_retry = fallback_retry;
-
-            // Should retry_after become a member of Order that is updated in refresh()?
-
-            if let Some(retry_after) = retry_after_from_response(&rsp) {
-                if let Ok(retry_after_datetime) = httpdate::parse_http_date(&retry_after) {
-                    if let Ok(next_duration) =
-                        retry_after_datetime.duration_since(std::time::SystemTime::now())
-                    {
-                        next_retry = next_duration;
-                    }
-                } else if let Ok(retry_after_seconds) = retry_after.parse::<u64>() {
-                    next_retry = Duration::from_secs(retry_after_seconds);
-                }
-            }
-
-            self.state = Problem::check::<OrderState>(rsp).await?;
-
-            if order_states.contains(&self.state.status) {
+            if let Some(error) = &self.state.error {
+                return Err(Error::Api(error.clone()));
+            } else if order_states.contains(&self.state.status) {
                 return Ok(self.state.status);
             };
 
-            let now = std::time::Instant::now();
+            match polling_strategy {
+                PollingStrategy::ExponentialBackoff {
+                    mut tries,
+                    delay: _,
+                } => {
+                    tries -= 1;
+                    if tries < 1 {
+                        break;
+                    }
+                    next_retry *= 2;
+                }
+                PollingStrategy::TotalTimeoutWithRateLimiting { total_timeout } => {
+                    next_retry = self.retry_after.take().unwrap_or(fallback_retry);
+                    let now = std::time::Instant::now();
 
-            if now > boxed {
-                break;
-            }
+                    if now > started + total_timeout {
+                        break;
+                    }
 
-            if now + next_retry > boxed {
-                next_retry = boxed - now;
+                    // Adjustment of the last retry to not exceed the total timeout.
+                    if now + next_retry > started + total_timeout {
+                        next_retry = started + total_timeout - now;
+                    }
+                }
             }
         }
 

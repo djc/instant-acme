@@ -19,7 +19,10 @@ use crate::types::{
 };
 #[cfg(feature = "time")]
 use crate::types::{CertificateIdentifier, RenewalInfo};
-use crate::{BytesResponse, Client, Error, HttpClient, crypto, nonce_from_response};
+use crate::{
+    BytesResponse, Client, Error, HttpClient, crypto, nonce_from_response,
+    retry_after_from_response,
+};
 
 /// An ACME account as described in RFC 8555 (section 7.1.2)
 ///
@@ -185,6 +188,7 @@ impl Account {
             .await?;
 
         let nonce = nonce_from_response(&rsp);
+        let retry_after = retry_after_from_response(&rsp);
         let order_url = rsp
             .parts
             .headers
@@ -214,6 +218,7 @@ impl Account {
         Ok(Order {
             account: self.inner.clone(),
             nonce,
+            retry_after,
             state,
             url: order_url.ok_or("no order URL found")?,
         })
@@ -229,6 +234,7 @@ impl Account {
         Ok(Order {
             account: self.inner.clone(),
             nonce: nonce_from_response(&rsp),
+            retry_after: retry_after_from_response(&rsp),
             // Order of fields matters! We return errors from Problem::check
             // before emitting an error if there is no order url. Or the
             // simple no url error hides the causing error in `Problem::check`.

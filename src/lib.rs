@@ -8,6 +8,7 @@ use std::error::Error as StdError;
 use std::fmt;
 use std::future::Future;
 use std::pin::Pin;
+use std::time::Duration;
 
 use async_trait::async_trait;
 use bytes::Bytes;
@@ -28,6 +29,7 @@ pub use account::{Account, ExternalAccountKey};
 mod order;
 pub use order::{
     AuthorizationHandle, Authorizations, ChallengeHandle, Identifiers, KeyAuthorization, Order,
+    PollingStrategy,
 };
 mod types;
 #[cfg(feature = "time")]
@@ -158,11 +160,22 @@ fn nonce_from_response(rsp: &BytesResponse) -> Option<String> {
         .and_then(|hv| String::from_utf8(hv.as_ref().to_vec()).ok())
 }
 
-fn retry_after_from_response(rsp: &BytesResponse) -> Option<String> {
+fn retry_after_from_response(rsp: &BytesResponse) -> Option<Duration> {
     rsp.parts
         .headers
         .get(RETRY_AFTER)
         .and_then(|header_value| String::from_utf8(header_value.as_ref().to_vec()).ok())
+        .and_then(|retry_after_header| {
+            if let Ok(retry_after_datetime) = httpdate::parse_http_date(&retry_after_header) {
+                retry_after_datetime
+                    .duration_since(std::time::SystemTime::now())
+                    .ok()
+            } else if let Ok(retry_after_seconds) = retry_after_header.parse::<u64>() {
+                Some(Duration::from_secs(retry_after_seconds))
+            } else {
+                None
+            }
+        })
 }
 
 #[cfg(feature = "hyper-rustls")]
