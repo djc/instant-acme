@@ -44,7 +44,7 @@ pub enum PollingStrategy {
         /// Number of retries
         tries: usize,
         /// Initial delay that is doubled for subsequent attempts.
-        /// Note that a large value of tries
+        /// Note that for a large `tries` value the delays become exponentially long.
         delay: Duration,
     },
     /// Total timeout with rate limiting
@@ -189,8 +189,8 @@ impl Order {
 
     /// Poll the order until in a final state
     ///
-    /// Provide a polling strategy `polling_strategy` to adjust the frequency the ACME server
-    /// is polls the `OrderStatus`.
+    /// Provide a polling strategy `polling_strategy` to adjust how frequently the ACME server
+    /// is polled until a final `OrderStatus` state (`Ready` or `Invalid`) is reached.
     ///
     /// Yields the [`OrderStatus`] immediately if `Ready` or `Invalid`.
     pub async fn poll(&mut self, polling_strategy: PollingStrategy) -> Result<OrderStatus, Error> {
@@ -216,8 +216,8 @@ impl Order {
 
     /// Wait for certificate with timeout
     ///
-    /// Provide a polling strategy `polling_strategy` to adjust the frequency the ACME server
-    /// is polls the certificate.
+    /// Provide a polling strategy `polling_strategy` to adjust how frequently the ACME server
+    /// is polled to yield a certificate.
     ///
     /// Yields the certificate for the order.
     pub async fn wait_certificate(
@@ -248,7 +248,6 @@ impl Order {
         order_states: &[OrderStatus],
     ) -> Result<OrderStatus, Error> {
         let started = std::time::Instant::now();
-        // let boxed = std::time::Instant::now() + timeout;
 
         // Yields the order status immediately if contained in order_states.
         let mut next_retry = match polling_strategy {
