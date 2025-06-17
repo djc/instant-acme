@@ -68,7 +68,10 @@ impl Client {
         signer: &impl Signer,
         url: &str,
     ) -> Result<BytesResponse, Error> {
-        let mut retries = 3;
+        // Less than 10 retries without a valid body should yield a valid request body
+        // under normal circumstances. Reaching this limit indicates a bad CA nonce behaviour
+        // that can result in an infinite loop.
+        let mut retries = 10;
         loop {
             let mut response = self
                 .post_attempt(payload, nonce.clone(), signer, url)
@@ -80,15 +83,17 @@ impl Client {
             let problem = serde_json::from_slice::<Problem>(&body)?;
             if let Some("urn:ietf:params:acme:error:badNonce") = problem.r#type.as_deref() {
                 retries -= 1;
-                if retries != 0 {
-                    // Retrieve the new nonce. If it isn't there (it
-                    // should be, the spec requires it) then we will
-                    // manually refresh a new one in `post_attempt`
-                    // due to `nonce` being `None` but getting it from
-                    // the response saves us making that request.
-                    nonce = nonce_from_response(&response);
-                    continue;
+                if retries == 0 {
+                    // To prevent an infinite loop (denial of service), an error is returned.
+                    return Err("Infinite bad nonce behaviour of ACME CA detected.".into());
                 }
+                // Retrieve the new nonce. If it isn't there (it
+                // should be, the spec requires it) then we will
+                // manually refresh a new one in `post_attempt`
+                // due to `nonce` being `None` but getting it from
+                // the response saves us making that request.
+                nonce = nonce_from_response(&response);
+                continue;
             }
 
             return Ok(BytesResponse {
