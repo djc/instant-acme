@@ -544,7 +544,7 @@ pub(crate) struct Directory {
     pub(crate) key_change: Option<String>,
     // Endpoint for the ACME renewal information (ARI) extension
     //
-    // <https://www.ietf.org/archive/id/draft-ietf-acme-ari-07.html>
+    // <https://www.rfc-editor.org/rfc/rfc9773.html>
     pub(crate) renewal_info: Option<String>,
     #[serde(default)]
     pub(crate) meta: Meta,
@@ -762,7 +762,7 @@ impl ZeroSsl {
 
 /// A unique certificate identifier for the ACME renewal information (ARI) extension
 ///
-/// See <https://www.ietf.org/archive/id/draft-ietf-acme-ari-07.html#section-4.1> for
+/// See <https://www.rfc-editor.org/rfc/rfc9773.html#section-4.1> for
 /// more information.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct CertificateIdentifier<'a> {
@@ -786,11 +786,11 @@ impl CertificateIdentifier<'_> {
     /// The combination uniquely identifies a certificate within all certificates issued by the
     /// same CA.
     ///
-    /// See [RFC 5280 §4.1.2.2], [RFC 5280 §4.2.1.1], and [draft-ietf-acme-ari-07 §4.1]
+    /// See [RFC 5280 §4.1.2.2], [RFC 5280 §4.2.1.1], and [RFC 9773 §4.1]
     ///
     /// [RFC 5280 §4.1.2.2]: https://www.rfc-editor.org/rfc/rfc5280#section-4.1.2.2
     /// [RFC 5280 §4.2.1.1]: https://www.rfc-editor.org/rfc/rfc5280#section-4.2.1.1
-    /// [draft-ietf-acme-ari-07 §4.1]: https://www.ietf.org/archive/id/draft-ietf-acme-ari-07.html#section-4.1
+    /// [RFC 9773 §4.1]: https://www.rfc-editor.org/rfc/rfc9773.html#section-4.1
     pub fn new(authority_key_identifier: Der<'_>, serial: Der<'_>) -> Self {
         Self {
             authority_key_identifier: BASE64_URL_SAFE_NO_PAD
@@ -881,7 +881,7 @@ impl fmt::Display for CertificateIdentifier<'_> {
 
 /// Information about a suggested renewal window for a certificate
 ///
-/// See <https://www.ietf.org/archive/id/draft-ietf-acme-ari-07.html#section-4.2>
+/// See <https://www.rfc-editor.org/rfc/rfc9773.html#section-4.2>
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 #[cfg(feature = "time")]
@@ -895,7 +895,7 @@ pub struct RenewalInfo {
 
 /// A suggested renewal window for a certificate
 ///
-/// See <https://www.ietf.org/archive/id/draft-ietf-acme-ari-07.html#section-4.2>
+/// See <https://www.rfc-editor.org/rfc/rfc9773.html#section-4.2>
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 #[cfg(feature = "time")]
@@ -1113,7 +1113,7 @@ mod tests {
         assert_eq!(format!("{obj}"), expected_display);
     }
 
-    // https://www.ietf.org/archive/id/draft-ietf-acme-ari-07.html#section-4.1
+    // https://www.rfc-editor.org/rfc/rfc9773.html#section-4.1
     #[test]
     fn certificate_identifier() {
         const ORDER: &str = r#"{
@@ -1179,7 +1179,7 @@ mod tests {
         assert_eq!(format!("{encoded}"), "wP_u.AMr-");
     }
 
-    // https://aarongable.github.io/draft-acme-ari/draft-ietf-acme-ari.html#section-4.2
+    // https://www.rfc-editor.org/rfc/rfc9773.html#section-4.2
     #[test]
     #[cfg(feature = "time")]
     fn renewal_info() {
