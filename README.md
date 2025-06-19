@@ -26,7 +26,7 @@ specification.
 * Uses aws-lc-rs or *ring* for ECDSA signing
 * Minimum supported Rust version (MSRV): 1.70
 
-[ACME renewal information (ARI)]: https://www.ietf.org/archive/id/draft-ietf-acme-ari-08.html
+[ACME renewal information (ARI)]: https://www.rfc-editor.org/rfc/rfc9773.html
 [profiles]: https://datatracker.ietf.org/doc/draft-aaron-acme-profiles/
 
 ## Cargo features

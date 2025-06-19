@@ -264,7 +264,7 @@ impl Account {
     /// This is only supported by some ACME servers. If the server does not support this feature,
     /// this method will return `Error::Unsupported`.
     ///
-    /// See <https://www.ietf.org/archive/id/draft-ietf-acme-ari-07.html#section-4.2-4> for more
+    /// See <https://www.rfc-editor.org/rfc/rfc9773.html#section-4.2-4> for more
     /// information.
     #[cfg(feature = "time")]
     pub async fn renewal_info(
