@@ -25,7 +25,7 @@ use hyper_util::client::legacy::connect::HttpConnector;
 use hyper_util::rt::TokioExecutor;
 use instant_acme::{
     Account, AuthorizationStatus, ChallengeHandle, ChallengeType, Error, ExternalAccountKey,
-    Identifier, KeyAuthorization, NewAccount, NewOrder, Order, OrderStatus,
+    Identifier, KeyAuthorization, NewAccount, NewOrder, Order, OrderStatus, PollingStrategy,
 };
 #[cfg(all(feature = "time", feature = "x509-parser"))]
 use instant_acme::{CertificateIdentifier, RevocationRequest};
@@ -59,6 +59,26 @@ async fn http_01() -> Result<(), Box<dyn StdError>> {
     Environment::new(EnvironmentConfig::default())
         .await?
         .test::<Http01>(&NewOrder::new(&identifiers))
+        .await
+        .map(|_| ())
+}
+
+#[tokio::test]
+#[ignore]
+async fn poll_with_timeout() -> Result<(), Box<dyn StdError>> {
+    try_tracing_init();
+
+    let mut identifiers = dns_identifiers(["http01.example.com"]);
+    identifiers.push(Identifier::Ip(IpAddr::from_str("::1").unwrap()));
+    identifiers.push(Identifier::Ip(IpAddr::from_str("127.0.0.1").unwrap()));
+
+    let mut env = Environment::new(EnvironmentConfig::default()).await?;
+
+    env.polling_strategy = PollingStrategy::TotalTimeoutWithRateLimiting {
+        total_timeout: Duration::from_secs(60),
+    };
+
+    env.test::<Http01>(&NewOrder::new(&identifiers))
         .await
         .map(|_| ())
 }
@@ -397,6 +417,7 @@ struct Environment {
     #[allow(dead_code)] // Held for the lifetime of the environment.
     challtestsrv: Subprocess,
     client: HyperClient<hyper_rustls::HttpsConnector<HttpConnector>, Full<Bytes>>,
+    polling_strategy: PollingStrategy,
 }
 
 impl Environment {
@@ -489,6 +510,11 @@ impl Environment {
         .await?;
         info!(account_id = account.id(), "created ACME account");
 
+        let polling_strategy = PollingStrategy::ExponentialBackoff {
+            tries: 10,
+            delay: Duration::from_millis(250),
+        };
+
         Ok(Self {
             account,
             config,
@@ -496,6 +522,7 @@ impl Environment {
             pebble,
             challtestsrv,
             client,
+            polling_strategy,
         })
     }
 
@@ -530,7 +557,7 @@ impl Environment {
         }
 
         // Poll until the order is ready.
-        let status = order.poll(10, Duration::from_millis(250)).await?;
+        let status = order.poll(self.polling_strategy.clone()).await?;
         if status != OrderStatus::Ready {
             return Err(format!("unexpected order status: {status:?}").into());
         }

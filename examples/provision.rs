@@ -7,7 +7,7 @@ use tracing::info;
 
 use instant_acme::{
     Account, AuthorizationStatus, ChallengeType, Identifier, LetsEncrypt, NewAccount, NewOrder,
-    OrderStatus,
+    OrderStatus, PollingStrategy,
 };
 
 #[tokio::main]
@@ -81,7 +81,11 @@ async fn main() -> anyhow::Result<()> {
 
     // Exponentially back off until the order becomes ready or invalid.
 
-    let status = order.poll(5, Duration::from_millis(250)).await?;
+    let polling_strategy = PollingStrategy::ExponentialBackoff {
+        tries: 5,
+        delay: Duration::from_millis(250),
+    };
+    let status = order.poll(polling_strategy).await?;
     if status != OrderStatus::Ready {
         return Err(anyhow::anyhow!("unexpected order status: {status:?}"));
     }
