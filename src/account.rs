@@ -93,6 +93,7 @@ impl Account {
         Ok(Order {
             account: self.inner.clone(),
             nonce,
+            retry_after: None,
             state,
             url: order_url.ok_or("no order URL found")?,
         })
@@ -108,6 +109,7 @@ impl Account {
         Ok(Order {
             account: self.inner.clone(),
             nonce: nonce_from_response(&rsp),
+            retry_after: None,
             // Order of fields matters! We return errors from Problem::check
             // before emitting an error if there is no order url. Or the
             // simple no url error hides the causing error in `Problem::check`.
