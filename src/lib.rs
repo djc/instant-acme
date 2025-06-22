@@ -168,7 +168,7 @@ impl DefaultClient {
         Ok(Self(
             HyperClient::builder(TokioExecutor::new()).build(
                 hyper_rustls::HttpsConnectorBuilder::new()
-                    .with_native_roots()
+                    .try_with_platform_verifier()
                     .map_err(|e| Error::Other(Box::new(e)))?
                     .https_only()
                     .enable_http1()
