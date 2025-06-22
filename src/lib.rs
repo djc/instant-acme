@@ -28,6 +28,7 @@ pub use account::{Account, ExternalAccountKey};
 mod order;
 pub use order::{
     AuthorizationHandle, Authorizations, ChallengeHandle, Identifiers, KeyAuthorization, Order,
+    RetryPolicy,
 };
 mod types;
 #[cfg(feature = "time")]
