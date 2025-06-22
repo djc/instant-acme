@@ -25,7 +25,7 @@ use hyper_util::client::legacy::connect::HttpConnector;
 use hyper_util::rt::TokioExecutor;
 use instant_acme::{
     Account, AuthorizationStatus, ChallengeHandle, ChallengeType, Error, ExternalAccountKey,
-    Identifier, KeyAuthorization, NewAccount, NewOrder, Order, OrderStatus,
+    Identifier, KeyAuthorization, NewAccount, NewOrder, Order, OrderStatus, RetryPolicy,
 };
 #[cfg(all(feature = "time", feature = "x509-parser"))]
 use instant_acme::{CertificateIdentifier, RevocationRequest};
@@ -530,7 +530,7 @@ impl Environment {
         }
 
         // Poll until the order is ready.
-        let status = order.poll(10, Duration::from_millis(250)).await?;
+        let status = order.poll(&RETRY_POLICY).await?;
         if status != OrderStatus::Ready {
             return Err(format!("unexpected order status: {status:?}").into());
         }
@@ -900,3 +900,4 @@ impl Drop for Subprocess {
 }
 
 static NEXT_PORT: AtomicU16 = AtomicU16::new(5555);
+const RETRY_POLICY: RetryPolicy = RetryPolicy::new().tries(10);

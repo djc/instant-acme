@@ -1,4 +1,4 @@
-use std::ops::Deref;
+use std::ops::{ControlFlow, Deref};
 use std::sync::Arc;
 use std::time::Duration;
 use std::{fmt, slice};
@@ -157,28 +157,22 @@ impl Order {
         }
     }
 
-    /// Poll the order with exponential backoff until in a final state
-    ///
-    /// Refresh the order state from the server for `tries` times, waiting `delay` before the
-    /// first attempt and increasing the delay by a factor of 2 for each subsequent attempt.
+    /// Poll the order with the given [`RetryPolicy`]
     ///
     /// Yields the [`OrderStatus`] immediately if `Ready` or `Invalid`, or after `tries` attempts.
-    ///
-    /// (Empirically, we've had good results with 5 tries and an initial delay of 250ms.)
-    pub async fn poll(&mut self, mut tries: u8, mut delay: Duration) -> Result<OrderStatus, Error> {
+    pub async fn poll(&mut self, retries: &RetryPolicy) -> Result<OrderStatus, Error> {
+        let mut retrying = retries.state();
         loop {
-            sleep(delay).await;
+            if let ControlFlow::Break(()) = retrying.wait().await {
+                return Ok(self.state.status);
+            }
+
             let state = self.refresh().await?;
             if let Some(error) = &state.error {
                 return Err(Error::Api(error.clone()));
             } else if let OrderStatus::Ready | OrderStatus::Invalid = state.status {
                 return Ok(state.status);
-            } else if tries <= 1 {
-                return Ok(state.status);
             }
-
-            delay *= 2;
-            tries -= 1;
         }
     }
 
@@ -489,5 +483,73 @@ impl KeyAuthorization {
 impl fmt::Debug for KeyAuthorization {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_tuple("KeyAuthorization").finish()
+    }
+}
+
+/// A policy for retrying API requests
+///
+/// Refresh the order state from the server for `tries` times, waiting `delay` before the
+/// first attempt and increasing the delay by a factor of 2 for each subsequent attempt.
+#[derive(Debug, Clone, Copy)]
+pub struct RetryPolicy {
+    tries: u8,
+    delay: Duration,
+}
+
+impl RetryPolicy {
+    /// A constructor for the default `RetryPolicy`
+    ///
+    /// Will retry 5 times with an initial delay of 250ms.
+    pub const fn new() -> Self {
+        Self {
+            tries: 5,
+            delay: Duration::from_millis(250),
+        }
+    }
+
+    /// Set the initial delay
+    ///
+    /// This is the delay before the first retry attempt. The delay will be doubled for each
+    /// subsequent retry attempt.
+    pub const fn initial_delay(mut self, delay: Duration) -> Self {
+        self.delay = delay;
+        self
+    }
+
+    /// Set the number of retry attempts
+    pub const fn tries(mut self, tries: u8) -> Self {
+        self.tries = tries;
+        self
+    }
+
+    fn state(&self) -> RetryState {
+        RetryState {
+            tries: self.tries,
+            delay: self.delay,
+        }
+    }
+}
+
+impl Default for RetryPolicy {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+struct RetryState {
+    tries: u8,
+    delay: Duration,
+}
+
+impl RetryState {
+    async fn wait(&mut self) -> ControlFlow<(), ()> {
+        if self.tries == 0 {
+            return ControlFlow::Break(());
+        }
+
+        sleep(self.delay).await;
+        self.delay *= 2;
+        self.tries -= 1;
+        ControlFlow::Continue(())
     }
 }
