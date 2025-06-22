@@ -23,8 +23,10 @@ use crate::{BytesResponse, Client, Error, HttpClient, crypto, nonce_from_respons
 
 /// An ACME account as described in RFC 8555 (section 7.1.2)
 ///
-/// Create an [`Account`] with [`Account::create()`] or restore it from serialized data
-/// by passing deserialized [`AccountCredentials`] to [`Account::from_credentials()`].
+/// Create an [`Account`] via [`Account::builder()`] or [`Account::builder_with_http()`],
+/// then use [`AccountBuilder::create()`] to create a new account or restore one from
+/// serialized data by passing deserialized [`AccountCredentials`] to
+/// [`AccountBuilder::from_credentials()`].
 ///
 /// The [`Account`] type is cheap to clone.
 ///
@@ -35,140 +37,17 @@ pub struct Account {
 }
 
 impl Account {
-    /// Restore an existing account from the given credentials
-    ///
-    /// The [`AccountCredentials`] type is opaque, but supports deserialization.
+    /// Create an account builder with the default HTTP client
     #[cfg(feature = "hyper-rustls")]
-    pub async fn from_credentials(credentials: AccountCredentials) -> Result<Self, Error> {
-        Ok(Self {
-            inner: Arc::new(
-                AccountInner::from_credentials(credentials, Box::new(DefaultClient::try_new()?))
-                    .await?,
-            ),
+    pub fn builder() -> Result<AccountBuilder, Error> {
+        Ok(AccountBuilder {
+            http: Box::new(DefaultClient::try_new()?),
         })
     }
 
-    /// Restore an existing account from the given credentials and HTTP client
-    ///
-    /// The [`AccountCredentials`] type is opaque, but supports deserialization.
-    pub async fn from_credentials_and_http(
-        credentials: AccountCredentials,
-        http: Box<dyn HttpClient>,
-    ) -> Result<Self, Error> {
-        Ok(Self {
-            inner: Arc::new(AccountInner::from_credentials(credentials, http).await?),
-        })
-    }
-
-    /// Restore an existing account from the given ID, private key, server URL and HTTP client
-    ///
-    /// The key must be provided in DER-encoded PKCS#8. This is usually how ECDSA keys are
-    /// encoded in PEM files. Use a crate like rustls-pemfile to decode from PEM to DER.
-    pub async fn from_parts(
-        id: String,
-        key_pkcs8_der: &[u8],
-        server_url: String,
-        http: Box<dyn HttpClient>,
-    ) -> Result<Self, Error> {
-        Ok(Self {
-            inner: Arc::new(AccountInner {
-                id,
-                key: Key::from_pkcs8_der(key_pkcs8_der)?,
-                client: Arc::new(Client::new(server_url, http).await?),
-            }),
-        })
-    }
-
-    /// Create a new account on the `server_url` with the information in [`NewAccount`]
-    ///
-    /// The returned [`AccountCredentials`] can be serialized and stored for later use.
-    /// Use [`Account::from_credentials()`] to restore the account from the credentials.
-    #[cfg(feature = "hyper-rustls")]
-    pub async fn create(
-        account: &NewAccount<'_>,
-        server_url: String,
-        external_account: Option<&ExternalAccountKey>,
-    ) -> Result<(Account, AccountCredentials), Error> {
-        Self::create_inner(
-            account,
-            external_account,
-            Client::new(server_url, Box::new(DefaultClient::try_new()?)).await?,
-        )
-        .await
-    }
-
-    /// Create a new account with a custom HTTP client
-    ///
-    /// The returned [`AccountCredentials`] can be serialized and stored for later use.
-    /// Use [`Account::from_credentials()`] to restore the account from the credentials.
-    pub async fn create_with_http(
-        account: &NewAccount<'_>,
-        server_url: String,
-        external_account: Option<&ExternalAccountKey>,
-        http: Box<dyn HttpClient>,
-    ) -> Result<(Account, AccountCredentials), Error> {
-        Self::create_inner(
-            account,
-            external_account,
-            Client::new(server_url, http).await?,
-        )
-        .await
-    }
-
-    async fn create_inner(
-        account: &NewAccount<'_>,
-        external_account: Option<&ExternalAccountKey>,
-        client: Client,
-    ) -> Result<(Account, AccountCredentials), Error> {
-        let (key, key_pkcs8) = Key::generate()?;
-        let payload = NewAccountPayload {
-            new_account: account,
-            external_account_binding: external_account
-                .map(|eak| {
-                    JoseJson::new(
-                        Some(&Jwk::new(&key.inner)),
-                        eak.header(None, &client.directory.new_account),
-                        eak,
-                    )
-                })
-                .transpose()?,
-        };
-
-        let rsp = client
-            .post(Some(&payload), None, &key, &client.directory.new_account)
-            .await?;
-
-        let account_url = rsp
-            .parts
-            .headers
-            .get(LOCATION)
-            .and_then(|hv| hv.to_str().ok())
-            .map(|s| s.to_owned());
-
-        // The response redirects, we don't need the body
-        let _ = Problem::from_response(rsp).await?;
-        let id = account_url.ok_or("failed to get account URL")?;
-        let credentials = AccountCredentials {
-            id: id.clone(),
-            key_pkcs8: key_pkcs8.as_ref().to_vec(),
-            directory: Some(client.server_url.clone().unwrap()), // New clients always have `server_url`
-            // We support deserializing URLs for compatibility with versions pre 0.4,
-            // but we prefer to get fresh URLs from the `server_url` for newer credentials.
-            urls: None,
-        };
-
-        let account = AccountInner {
-            client: Arc::new(client),
-            key,
-            id: id.clone(),
-        };
-
-        Ok((
-            Self {
-                inner: Arc::new(account),
-            },
-            credentials,
-        ))
+    /// Create an account builder with the given HTTP client
+    pub fn builder_with_http(http: Box<dyn HttpClient>) -> AccountBuilder {
+        AccountBuilder { http }
     }
 
     /// Create a new order based on the given [`NewOrder`]
@@ -477,6 +356,120 @@ impl Signer for AccountInner {
 
     fn sign(&self, payload: &[u8]) -> Result<Self::Signature, Error> {
         self.key.sign(payload)
+    }
+}
+
+/// Builder for `Account` values
+///
+/// Create one via [`Account::builder()`] or [`Account::builder_with_http()`].
+pub struct AccountBuilder {
+    http: Box<dyn HttpClient>,
+}
+
+impl AccountBuilder {
+    /// Restore an existing account from the given credentials
+    ///
+    /// The [`AccountCredentials`] type is opaque, but supports deserialization.
+    #[allow(clippy::wrong_self_convention)]
+    pub async fn from_credentials(self, credentials: AccountCredentials) -> Result<Account, Error> {
+        Ok(Account {
+            inner: Arc::new(AccountInner::from_credentials(credentials, self.http).await?),
+        })
+    }
+
+    /// Create a new account on the `server_url` with the information in [`NewAccount`]
+    ///
+    /// The returned [`AccountCredentials`] can be serialized and stored for later use.
+    /// Use [`AccountBuilder::from_credentials()`] to restore the account from the credentials.
+    #[cfg(feature = "hyper-rustls")]
+    pub async fn create(
+        self,
+        account: &NewAccount<'_>,
+        server_url: String,
+        external_account: Option<&ExternalAccountKey>,
+    ) -> Result<(Account, AccountCredentials), Error> {
+        Self::create_inner(
+            account,
+            external_account,
+            Client::new(server_url, self.http).await?,
+        )
+        .await
+    }
+
+    /// Restore an existing account from the given ID, private key, server URL and HTTP client
+    ///
+    /// The key must be provided in DER-encoded PKCS#8. This is usually how ECDSA keys are
+    /// encoded in PEM files. Use a crate like rustls-pemfile to decode from PEM to DER.
+    #[allow(clippy::wrong_self_convention)]
+    pub async fn from_parts(
+        self,
+        id: String,
+        key_pkcs8_der: &[u8],
+        server_url: String,
+    ) -> Result<Account, Error> {
+        Ok(Account {
+            inner: Arc::new(AccountInner {
+                id,
+                key: Key::from_pkcs8_der(key_pkcs8_der)?,
+                client: Arc::new(Client::new(server_url, self.http).await?),
+            }),
+        })
+    }
+
+    async fn create_inner(
+        account: &NewAccount<'_>,
+        external_account: Option<&ExternalAccountKey>,
+        client: Client,
+    ) -> Result<(Account, AccountCredentials), Error> {
+        let (key, key_pkcs8) = Key::generate()?;
+        let payload = NewAccountPayload {
+            new_account: account,
+            external_account_binding: external_account
+                .map(|eak| {
+                    JoseJson::new(
+                        Some(&Jwk::new(&key.inner)),
+                        eak.header(None, &client.directory.new_account),
+                        eak,
+                    )
+                })
+                .transpose()?,
+        };
+
+        let rsp = client
+            .post(Some(&payload), None, &key, &client.directory.new_account)
+            .await?;
+
+        let account_url = rsp
+            .parts
+            .headers
+            .get(LOCATION)
+            .and_then(|hv| hv.to_str().ok())
+            .map(|s| s.to_owned());
+
+        // The response redirects, we don't need the body
+        let _ = Problem::from_response(rsp).await?;
+        let id = account_url.ok_or("failed to get account URL")?;
+        let credentials = AccountCredentials {
+            id: id.clone(),
+            key_pkcs8: key_pkcs8.as_ref().to_vec(),
+            directory: Some(client.server_url.clone().unwrap()), // New clients always have `server_url`
+            // We support deserializing URLs for compatibility with versions pre 0.4,
+            // but we prefer to get fresh URLs from the `server_url` for newer credentials.
+            urls: None,
+        };
+
+        let account = AccountInner {
+            client: Arc::new(client),
+            key,
+            id: id.clone(),
+        };
+
+        Ok((
+            Account {
+                inner: Arc::new(account),
+            },
+            credentials,
+        ))
     }
 }
 

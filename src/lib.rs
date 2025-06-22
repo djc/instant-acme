@@ -24,7 +24,7 @@ use serde::Serialize;
 
 mod account;
 use account::Key;
-pub use account::{Account, ExternalAccountKey};
+pub use account::{Account, AccountBuilder, ExternalAccountKey};
 mod order;
 pub use order::{
     AuthorizationHandle, Authorizations, ChallengeHandle, Identifiers, KeyAuthorization, Order,
@@ -329,14 +329,18 @@ mod tests {
     #[tokio::test]
     async fn deserialize_old_credentials() -> Result<(), Error> {
         const CREDENTIALS: &str = r#"{"id":"id","key_pkcs8":"MIGHAgEAMBMGByqGSM49AgEGCCqGSM49AwEHBG0wawIBAQQgJVWC_QzOTCS5vtsJp2IG-UDc8cdDfeoKtxSZxaznM-mhRANCAAQenCPoGgPFTdPJ7VLLKt56RxPlYT1wNXnHc54PEyBg3LxKaH0-sJkX0mL8LyPEdsfL_Oz4TxHkWLJGrXVtNhfH","urls":{"newNonce":"new-nonce","newAccount":"new-acct","newOrder":"new-order", "revokeCert": "revoke-cert"}}"#;
-        Account::from_credentials(serde_json::from_str::<AccountCredentials>(CREDENTIALS)?).await?;
+        Account::builder()?
+            .from_credentials(serde_json::from_str::<AccountCredentials>(CREDENTIALS)?)
+            .await?;
         Ok(())
     }
 
     #[tokio::test]
     async fn deserialize_new_credentials() -> Result<(), Error> {
         const CREDENTIALS: &str = r#"{"id":"id","key_pkcs8":"MIGHAgEAMBMGByqGSM49AgEGCCqGSM49AwEHBG0wawIBAQQgJVWC_QzOTCS5vtsJp2IG-UDc8cdDfeoKtxSZxaznM-mhRANCAAQenCPoGgPFTdPJ7VLLKt56RxPlYT1wNXnHc54PEyBg3LxKaH0-sJkX0mL8LyPEdsfL_Oz4TxHkWLJGrXVtNhfH","directory":"https://acme-staging-v02.api.letsencrypt.org/directory"}"#;
-        Account::from_credentials(serde_json::from_str::<AccountCredentials>(CREDENTIALS)?).await?;
+        Account::builder()?
+            .from_credentials(serde_json::from_str::<AccountCredentials>(CREDENTIALS)?)
+            .await?;
         Ok(())
     }
 }
