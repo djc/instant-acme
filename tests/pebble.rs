@@ -358,11 +358,9 @@ async fn update_key() -> Result<(), Box<dyn StdError>> {
     );
 
     // Change the Pebble environment to use the new ACME account key.
-    env.account = instant_acme::Account::from_credentials_and_http(
-        new_credentials,
-        Box::new(env.client.clone()),
-    )
-    .await?;
+    env.account = instant_acme::Account::builder_with_http(Box::new(env.client.clone()))
+        .from_credentials(new_credentials)
+        .await?;
 
     // Using the new ACME account key should not produce an error.
     env.account
@@ -476,17 +474,17 @@ impl Environment {
 
         // Create a new `Account` with the ACME server.
         debug!("creating test account");
-        let (account, _) = Account::create_with_http(
-            &NewAccount {
-                contact: &[],
-                terms_of_service_agreed: true,
-                only_return_existing: false,
-            },
-            format!("https://{}/dir", &config.pebble.listen_address),
-            config.eab_key.as_ref(),
-            Box::new(client.clone()),
-        )
-        .await?;
+        let (account, _) = Account::builder_with_http(Box::new(client.clone()))
+            .create(
+                &NewAccount {
+                    contact: &[],
+                    terms_of_service_agreed: true,
+                    only_return_existing: false,
+                },
+                format!("https://{}/dir", &config.pebble.listen_address),
+                config.eab_key.as_ref(),
+            )
+            .await?;
         info!(account_id = account.id(), "created ACME account");
 
         Ok(Self {

@@ -19,16 +19,17 @@ async fn main() -> anyhow::Result<()> {
     // Alternatively, restore an account from serialized credentials by
     // using `Account::from_credentials()`.
 
-    let (account, credentials) = Account::create(
-        &NewAccount {
-            contact: &[],
-            terms_of_service_agreed: true,
-            only_return_existing: false,
-        },
-        LetsEncrypt::Staging.url().to_owned(),
-        None,
-    )
-    .await?;
+    let (account, credentials) = Account::builder()?
+        .create(
+            &NewAccount {
+                contact: &[],
+                terms_of_service_agreed: true,
+                only_return_existing: false,
+            },
+            LetsEncrypt::Staging.url().to_owned(),
+            None,
+        )
+        .await?;
     info!(
         "account credentials:\n\n{}",
         serde_json::to_string_pretty(&credentials)?
