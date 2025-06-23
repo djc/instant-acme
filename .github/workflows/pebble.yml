@@ -7,6 +7,10 @@ on:
   schedule:
     - cron: "25 6 * * 5"
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
 jobs:
   pebble:
     runs-on: ubuntu-latest
