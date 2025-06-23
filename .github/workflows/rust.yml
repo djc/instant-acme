@@ -66,6 +66,16 @@ jobs:
       - run: cargo fmt --all -- --check
       - run: cargo clippy --all-targets --all-features -- -D warnings
 
+  docs:
+    name: Check for documentation errors
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - run: cargo doc --locked --all-features --no-deps --document-private-items
+        env:
+          RUSTDOCFLAGS: -Dwarnings
+
   audit:
     runs-on: ubuntu-latest
     steps:

@@ -18,9 +18,10 @@ use crate::{Error, Key, crypto, nonce_from_response};
 
 /// An ACME order as described in RFC 8555 (section 7.1.3)
 ///
-/// An order is created from an [`Account`] by calling [`Account::new_order()`]. The `Order`
-/// type represents the stable identity of an order, while the [`Order::state()`] method
-/// gives you access to the current state of the order according to the server.
+/// An order is created from an [`Account`][crate::Account] by calling
+/// [`Account::new_order()`][crate::Account::new_order()]. The `Order` type represents the stable
+/// identity of an order, while the [`Order::state()`] method gives you access to the current
+/// state of the order according to the server.
 ///
 /// <https://datatracker.ietf.org/doc/html/rfc8555#section-7.1.3>
 pub struct Order {
@@ -244,7 +245,8 @@ pub struct Identifiers<'a> {
 }
 
 impl<'a> Identifiers<'a> {
-    /// Yield the next [`Identifier`], fetching the authorization's state if we don't have it yet
+    /// Yield the next [`Identifier`][crate::Identifier], fetching the authorization's state if
+    /// we don't have it yet
     pub async fn next(&mut self) -> Option<Result<AuthorizedIdentifier<'a>, Error>> {
         Some(match self.inner.next().await? {
             Ok((_, state)) => Ok(state.identifier()),
