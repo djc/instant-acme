@@ -29,10 +29,10 @@ jobs:
       - name: Install NASM for aws-lc-rs on Windows
         if: runner.os == 'Windows'
         uses: ilammy/setup-nasm@v1
-      - run: cargo check --no-default-features --features aws-lc-rs
-      - run: cargo check --no-default-features --features ring
-      - run: cargo check # hyper-rustls, ring
-      - run: cargo test
+      - run: cargo check --locked --no-default-features --features aws-lc-rs
+      - run: cargo check --locked --no-default-features --features ring
+      - run: cargo check --locked # hyper-rustls, ring
+      - run: cargo test --locked
 
   fips:
     runs-on: ubuntu-latest
@@ -41,7 +41,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@master
         with:
           toolchain: 1.71.0
-      - run: cargo check --lib --features fips
+      - run: cargo check --locked --lib --features fips
 
   msrv:
     runs-on: ubuntu-latest
@@ -50,7 +50,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@master
         with:
           toolchain: 1.71.0
-      - run: cargo check --lib --all-features
+      - run: cargo check --locked --lib --all-features
 
   lint:
     runs-on: ubuntu-latest
