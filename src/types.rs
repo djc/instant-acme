@@ -446,8 +446,9 @@ impl<'a> NewOrder<'a> {
 
     /// Set the profile to be used for the order
     ///
-    /// [`Account::new_order()`] will yield an error if the ACME server does not support
-    /// the profiles extension or if the specified profile is not supported.
+    /// [`Account::new_order()`][crate::Account::new_order()] will yield an error if the ACME
+    /// server does not support the profiles extension or if the specified profile is not
+    /// supported.
     pub fn profile(mut self, profile: &'a str) -> Self {
         self.profile = Some(profile);
         self
