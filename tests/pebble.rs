@@ -65,6 +65,28 @@ async fn http_01() -> Result<(), Box<dyn StdError>> {
 
 #[tokio::test]
 #[ignore]
+async fn retry_policy() -> Result<(), Box<dyn StdError>> {
+    try_tracing_init();
+
+    let mut identifiers = dns_identifiers(["http01.example.com"]);
+    identifiers.push(Identifier::Ip(IpAddr::from_str("::1").unwrap()));
+    identifiers.push(Identifier::Ip(IpAddr::from_str("127.0.0.1").unwrap()));
+
+    Environment::new(EnvironmentConfig {
+        retry_policy: RetryPolicy::new()
+            .tries(10)
+            .initial_delay(Duration::from_secs(3))
+            .backpressure_factor(1.0),
+        ..EnvironmentConfig::default()
+    })
+    .await?
+    .test::<Http01>(&NewOrder::new(&identifiers))
+    .await
+    .map(|_| ())
+}
+
+#[tokio::test]
+#[ignore]
 async fn dns_01() -> Result<(), Box<dyn StdError>> {
     try_tracing_init();
 
@@ -530,7 +552,7 @@ impl Environment {
         }
 
         // Poll until the order is ready.
-        let status = order.poll(&RETRY_POLICY).await?;
+        let status = order.poll(&self.config.retry_policy).await?;
         if status != OrderStatus::Ready {
             return Err(format!("unexpected order status: {status:?}").into());
         }
@@ -783,6 +805,7 @@ struct EnvironmentConfig {
     ///
     /// See <https://github.com/letsencrypt/pebble?tab=readme-ov-file#valid-authorization-reuse>
     authz_reuse: u8,
+    retry_policy: RetryPolicy,
 }
 
 impl Default for EnvironmentConfig {
@@ -793,6 +816,7 @@ impl Default for EnvironmentConfig {
             challtestsrv_port: NEXT_PORT.fetch_add(1, Ordering::SeqCst),
             eab_key: None,
             authz_reuse: 50,
+            retry_policy: RETRY_POLICY,
         }
     }
 }

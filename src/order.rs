@@ -496,6 +496,7 @@ impl fmt::Debug for KeyAuthorization {
 pub struct RetryPolicy {
     tries: u8,
     delay: Duration,
+    backpressure_factor: f32,
 }
 
 impl RetryPolicy {
@@ -506,15 +507,26 @@ impl RetryPolicy {
         Self {
             tries: 5,
             delay: Duration::from_millis(250),
+            backpressure_factor: 2.0,
         }
     }
 
     /// Set the initial delay
     ///
-    /// This is the delay before the first retry attempt. The delay will be doubled for each
-    /// subsequent retry attempt.
+    /// This is the delay before the first retry attempt. The delay will be multiplied by the
+    /// backpressure factor for each subsequent retry attempt.
     pub const fn initial_delay(mut self, delay: Duration) -> Self {
         self.delay = delay;
+        self
+    }
+
+    /// Set the backpressure factor
+    ///
+    /// The backpressure is used to derive a follow-up retry delay.
+    /// The next retry duration is obtained from the current delay by multiplication with the
+    /// backpressure factor.
+    pub const fn backpressure_factor(mut self, backpressure_factor: f32) -> Self {
+        self.backpressure_factor = backpressure_factor;
         self
     }
 
@@ -528,6 +540,7 @@ impl RetryPolicy {
         RetryState {
             tries: self.tries,
             delay: self.delay,
+            backpressure_factor: self.backpressure_factor,
         }
     }
 }
@@ -541,6 +554,7 @@ impl Default for RetryPolicy {
 struct RetryState {
     tries: u8,
     delay: Duration,
+    backpressure_factor: f32,
 }
 
 impl RetryState {
@@ -550,7 +564,8 @@ impl RetryState {
         }
 
         sleep(self.delay).await;
-        self.delay *= 2;
+
+        self.delay = self.delay.mul_f32(self.backpressure_factor);
         self.tries -= 1;
         ControlFlow::Continue(())
     }
