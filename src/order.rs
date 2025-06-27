@@ -1,7 +1,7 @@
 use std::ops::{ControlFlow, Deref};
 use std::str::FromStr;
 use std::sync::Arc;
-use std::time::{Duration, SystemTime};
+use std::time::{Duration, Instant, SystemTime};
 use std::{fmt, slice};
 
 use base64::prelude::{BASE64_URL_SAFE_NO_PAD, Engine};
@@ -496,24 +496,24 @@ impl fmt::Debug for KeyAuthorization {
 
 /// A policy for retrying API requests
 ///
-/// Refresh the order state from the server for `tries` times, waiting `delay` before the
-/// first attempt and increasing the delay by a factor of `backoff` after each attempt.
+/// Refresh the order state repeatedly, waiting `delay` before the first attempt and increasing
+/// the delay by a factor of `backoff` after each attempt, until the `timeout` is reached.
 #[derive(Debug, Clone, Copy)]
 pub struct RetryPolicy {
-    tries: u8,
     delay: Duration,
     backoff: f32,
+    timeout: Duration,
 }
 
 impl RetryPolicy {
     /// A constructor for the default `RetryPolicy`
     ///
-    /// Will retry 5 times with an initial delay of 250ms and a backoff factor of 2.0.
+    /// Will retry for 5s with an initial delay of 250ms and a backoff factor of 2.0.
     pub const fn new() -> Self {
         Self {
-            tries: 5,
             delay: Duration::from_millis(250),
             backoff: 2.0,
+            timeout: Duration::from_secs(30),
         }
     }
 
@@ -526,12 +526,6 @@ impl RetryPolicy {
         self
     }
 
-    /// Set the number of retry attempts
-    pub const fn tries(mut self, tries: u8) -> Self {
-        self.tries = tries;
-        self
-    }
-
     /// Set the backoff factor
     ///
     /// The delay will be multiplied by this factor after each retry attempt.
@@ -540,11 +534,20 @@ impl RetryPolicy {
         self
     }
 
+    /// Set the timeout for retries
+    ///
+    /// After this duration has passed, no more retries will be attempted.
+    pub const fn timeout(mut self, timeout: Duration) -> Self {
+        self.timeout = timeout;
+        self
+    }
+
     fn state(&self) -> RetryState {
         RetryState {
-            tries: self.tries,
             delay: self.delay,
             backoff: self.backoff,
+            timeout: self.timeout,
+            start: Instant::now(),
         }
     }
 }
@@ -556,28 +559,27 @@ impl Default for RetryPolicy {
 }
 
 struct RetryState {
-    tries: u8,
     delay: Duration,
     backoff: f32,
+    timeout: Duration,
+    start: Instant,
 }
 
 impl RetryState {
     async fn wait(&mut self, after: Option<SystemTime>) -> ControlFlow<(), ()> {
-        if self.tries == 0 {
+        if self.start.elapsed() > self.timeout {
             return ControlFlow::Break(());
         }
 
         if let Some(after) = after {
             if let Ok(delay) = after.duration_since(SystemTime::now()) {
                 sleep(delay).await;
-                self.tries -= 1;
                 return ControlFlow::Continue(());
             }
         }
 
         sleep(self.delay).await;
         self.delay = self.delay.mul_f32(self.backoff);
-        self.tries -= 1;
         ControlFlow::Continue(())
     }
 }
