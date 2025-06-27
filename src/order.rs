@@ -1,9 +1,12 @@
 use std::ops::{ControlFlow, Deref};
+use std::str::FromStr;
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, SystemTime};
 use std::{fmt, slice};
 
 use base64::prelude::{BASE64_URL_SAFE_NO_PAD, Engine};
+use http::header::RETRY_AFTER;
+use httpdate::HttpDate;
 #[cfg(feature = "rcgen")]
 use rcgen::{CertificateParams, DistinguishedName, KeyPair};
 use serde::Serialize;
@@ -14,7 +17,7 @@ use crate::types::{
     Authorization, AuthorizationState, AuthorizationStatus, AuthorizedIdentifier, Challenge,
     ChallengeType, Empty, FinalizeRequest, OrderState, OrderStatus, Problem,
 };
-use crate::{Error, Key, crypto, nonce_from_response};
+use crate::{BytesResponse, Error, Key, crypto, nonce_from_response};
 
 /// An ACME order as described in RFC 8555 (section 7.1.3)
 ///
@@ -27,6 +30,7 @@ use crate::{Error, Key, crypto, nonce_from_response};
 pub struct Order {
     pub(crate) account: Arc<AccountInner>,
     pub(crate) nonce: Option<String>,
+    pub(crate) retry_after: Option<SystemTime>,
     pub(crate) url: String,
     pub(crate) state: OrderState,
 }
@@ -163,8 +167,9 @@ impl Order {
     /// Yields the [`OrderStatus`] immediately if `Ready` or `Invalid`, or after `tries` attempts.
     pub async fn poll(&mut self, retries: &RetryPolicy) -> Result<OrderStatus, Error> {
         let mut retrying = retries.state();
+        self.retry_after = None;
         loop {
-            if let ControlFlow::Break(()) = retrying.wait().await {
+            if let ControlFlow::Break(()) = retrying.wait(self.retry_after.take()).await {
                 return Ok(self.state.status);
             }
 
@@ -185,6 +190,7 @@ impl Order {
             .await?;
 
         self.nonce = nonce_from_response(&rsp);
+        self.retry_after = retry_after(&rsp);
         self.state = Problem::check::<OrderState>(rsp).await?;
         Ok(&self.state)
     }
@@ -496,7 +502,7 @@ impl fmt::Debug for KeyAuthorization {
 pub struct RetryPolicy {
     tries: u8,
     delay: Duration,
-    backpressure_factor: f32,
+    backpressure: f32,
 }
 
 impl RetryPolicy {
@@ -507,7 +513,7 @@ impl RetryPolicy {
         Self {
             tries: 5,
             delay: Duration::from_millis(250),
-            backpressure_factor: 2.0,
+            backpressure: 2.0,
         }
     }
 
@@ -525,8 +531,8 @@ impl RetryPolicy {
     /// The backpressure is used to derive a follow-up retry delay.
     /// The next retry duration is obtained from the current delay by multiplication with the
     /// backpressure factor.
-    pub const fn backpressure_factor(mut self, backpressure_factor: f32) -> Self {
-        self.backpressure_factor = backpressure_factor;
+    pub const fn backpressure(mut self, backpressure: f32) -> Self {
+        self.backpressure = backpressure;
         self
     }
 
@@ -540,7 +546,7 @@ impl RetryPolicy {
         RetryState {
             tries: self.tries,
             delay: self.delay,
-            backpressure_factor: self.backpressure_factor,
+            backpressure: self.backpressure,
         }
     }
 }
@@ -554,19 +560,49 @@ impl Default for RetryPolicy {
 struct RetryState {
     tries: u8,
     delay: Duration,
-    backpressure_factor: f32,
+    backpressure: f32,
 }
 
 impl RetryState {
-    async fn wait(&mut self) -> ControlFlow<(), ()> {
+    async fn wait(&mut self, after: Option<SystemTime>) -> ControlFlow<(), ()> {
         if self.tries == 0 {
             return ControlFlow::Break(());
         }
 
+        if let Some(after) = after {
+            if let Ok(delay) = after.duration_since(SystemTime::now()) {
+                sleep(delay).await;
+                self.tries -= 1;
+                return ControlFlow::Continue(());
+            }
+        }
+
         sleep(self.delay).await;
 
-        self.delay = self.delay.mul_f32(self.backpressure_factor);
+        self.delay = self.delay.mul_f32(self.backpressure);
         self.tries -= 1;
         ControlFlow::Continue(())
     }
+}
+
+/// Parse the `Retry-After` header from the response
+///
+/// <https://httpwg.org/specs/rfc9110.html#field.retry-after>
+///
+/// # Syntax
+///
+/// Retry-After = HTTP-date / delay-seconds
+/// delay-seconds  = 1*DIGIT
+fn retry_after(rsp: &BytesResponse) -> Option<SystemTime> {
+    let value = rsp.parts.headers.get(RETRY_AFTER)?.to_str().ok()?.trim();
+    if value.is_empty() {
+        return None;
+    }
+
+    Some(match u64::from_str(value) {
+        // `delay-seconds` is a number of seconds to wait
+        Ok(secs) => SystemTime::now() + Duration::from_secs(secs),
+        // `HTTP-date` looks like `Fri, 31 Dec 1999 23:59:59 GMT`
+        Err(_) => SystemTime::from(HttpDate::from_str(value).ok()?),
+    })
 }

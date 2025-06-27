@@ -65,28 +65,6 @@ async fn http_01() -> Result<(), Box<dyn StdError>> {
 
 #[tokio::test]
 #[ignore]
-async fn retry_policy() -> Result<(), Box<dyn StdError>> {
-    try_tracing_init();
-
-    let mut identifiers = dns_identifiers(["http01.example.com"]);
-    identifiers.push(Identifier::Ip(IpAddr::from_str("::1").unwrap()));
-    identifiers.push(Identifier::Ip(IpAddr::from_str("127.0.0.1").unwrap()));
-
-    Environment::new(EnvironmentConfig {
-        retry_policy: RetryPolicy::new()
-            .tries(10)
-            .initial_delay(Duration::from_secs(3))
-            .backpressure_factor(1.0),
-        ..EnvironmentConfig::default()
-    })
-    .await?
-    .test::<Http01>(&NewOrder::new(&identifiers))
-    .await
-    .map(|_| ())
-}
-
-#[tokio::test]
-#[ignore]
 async fn dns_01() -> Result<(), Box<dyn StdError>> {
     try_tracing_init();
 
@@ -380,11 +358,9 @@ async fn update_key() -> Result<(), Box<dyn StdError>> {
     );
 
     // Change the Pebble environment to use the new ACME account key.
-    env.account = instant_acme::Account::from_credentials_and_http(
-        new_credentials,
-        Box::new(env.client.clone()),
-    )
-    .await?;
+    env.account = instant_acme::Account::builder_with_http(Box::new(env.client.clone()))
+        .from_credentials(new_credentials)
+        .await?;
 
     // Using the new ACME account key should not produce an error.
     env.account
@@ -498,17 +474,17 @@ impl Environment {
 
         // Create a new `Account` with the ACME server.
         debug!("creating test account");
-        let (account, _) = Account::create_with_http(
-            &NewAccount {
-                contact: &[],
-                terms_of_service_agreed: true,
-                only_return_existing: false,
-            },
-            format!("https://{}/dir", &config.pebble.listen_address),
-            config.eab_key.as_ref(),
-            Box::new(client.clone()),
-        )
-        .await?;
+        let (account, _) = Account::builder_with_http(Box::new(client.clone()))
+            .create(
+                &NewAccount {
+                    contact: &[],
+                    terms_of_service_agreed: true,
+                    only_return_existing: false,
+                },
+                format!("https://{}/dir", &config.pebble.listen_address),
+                config.eab_key.as_ref(),
+            )
+            .await?;
         info!(account_id = account.id(), "created ACME account");
 
         Ok(Self {
@@ -552,7 +528,7 @@ impl Environment {
         }
 
         // Poll until the order is ready.
-        let status = order.poll(&self.config.retry_policy).await?;
+        let status = order.poll(&RETRY_POLICY).await?;
         if status != OrderStatus::Ready {
             return Err(format!("unexpected order status: {status:?}").into());
         }
@@ -805,7 +781,6 @@ struct EnvironmentConfig {
     ///
     /// See <https://github.com/letsencrypt/pebble?tab=readme-ov-file#valid-authorization-reuse>
     authz_reuse: u8,
-    retry_policy: RetryPolicy,
 }
 
 impl Default for EnvironmentConfig {
@@ -816,7 +791,6 @@ impl Default for EnvironmentConfig {
             challtestsrv_port: NEXT_PORT.fetch_add(1, Ordering::SeqCst),
             eab_key: None,
             authz_reuse: 50,
-            retry_policy: RETRY_POLICY,
         }
     }
 }

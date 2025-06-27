@@ -517,7 +517,7 @@ pub(crate) struct NewAccountPayload<'a> {
 
 /// Input data for [Account](crate::Account) creation
 ///
-/// To be passed into [Account::create()](crate::Account::create()).
+/// To be passed into [AccountBuilder::create()](crate::AccountBuilder::create()).
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct NewAccount<'a> {
