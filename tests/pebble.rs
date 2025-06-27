@@ -898,4 +898,4 @@ impl Drop for Subprocess {
 }
 
 static NEXT_PORT: AtomicU16 = AtomicU16::new(5555);
-const RETRY_POLICY: RetryPolicy = RetryPolicy::new().tries(10);
+const RETRY_POLICY: RetryPolicy = RetryPolicy::new().timeout(Duration::from_secs(60));

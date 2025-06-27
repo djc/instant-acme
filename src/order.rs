@@ -500,9 +500,9 @@ impl fmt::Debug for KeyAuthorization {
 /// first attempt and increasing the delay by a factor of 2 for each subsequent attempt.
 #[derive(Debug, Clone, Copy)]
 pub struct RetryPolicy {
-    tries: u8,
     delay: Duration,
     backpressure: f32,
+    timeout: Duration,
 }
 
 impl RetryPolicy {
@@ -511,9 +511,9 @@ impl RetryPolicy {
     /// Will retry 5 times with an initial delay of 250ms.
     pub const fn new() -> Self {
         Self {
-            tries: 5,
             delay: Duration::from_millis(250),
             backpressure: 2.0,
+            timeout: Duration::from_secs(8),
         }
     }
 
@@ -536,17 +536,17 @@ impl RetryPolicy {
         self
     }
 
-    /// Set the number of retry attempts
-    pub const fn tries(mut self, tries: u8) -> Self {
-        self.tries = tries;
+    /// Set the total polling timeout
+    pub const fn timeout(mut self, timeout: Duration) -> Self {
+        self.timeout = timeout;
         self
     }
 
     fn state(&self) -> RetryState {
         RetryState {
-            tries: self.tries,
             delay: self.delay,
             backpressure: self.backpressure,
+            end: SystemTime::now() + self.timeout,
         }
     }
 }
@@ -558,29 +558,33 @@ impl Default for RetryPolicy {
 }
 
 struct RetryState {
-    tries: u8,
     delay: Duration,
     backpressure: f32,
+    end: SystemTime,
 }
 
 impl RetryState {
     async fn wait(&mut self, after: Option<SystemTime>) -> ControlFlow<(), ()> {
-        if self.tries == 0 {
+        if (self.end).duration_since(SystemTime::now()).is_err() {
+            // timeout reached
             return ControlFlow::Break(());
         }
 
-        if let Some(after) = after {
+        if let Some(mut after) = after {
+            if after.duration_since(self.end).is_ok() {
+                // after exceeds total timeout: adjust the last sleep not to exceed total timeout
+                after = self.end;
+            }
             if let Ok(delay) = after.duration_since(SystemTime::now()) {
                 sleep(delay).await;
-                self.tries -= 1;
-                return ControlFlow::Continue(());
             }
+            return ControlFlow::Continue(());
         }
 
         sleep(self.delay).await;
 
         self.delay = self.delay.mul_f32(self.backpressure);
-        self.tries -= 1;
+
         ControlFlow::Continue(())
     }
 }
