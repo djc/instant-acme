@@ -182,7 +182,7 @@ impl fmt::Display for Problem {
         }
 
         if let Some(r#type) = &self.r#type {
-            write!(f, " ({})", r#type)?;
+            write!(f, " ({type})")?;
         }
 
         if !self.subproblems.is_empty() {
@@ -228,7 +228,7 @@ impl fmt::Display for Subproblem {
         }
 
         if let Some(r#type) = &self.r#type {
-            write!(f, " ({})", r#type)?;
+            write!(f, " ({type})")?;
         }
 
         Ok(())
