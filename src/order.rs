@@ -491,28 +491,30 @@ impl fmt::Debug for KeyAuthorization {
 /// A policy for retrying API requests
 ///
 /// Refresh the order state from the server for `tries` times, waiting `delay` before the
-/// first attempt and increasing the delay by a factor of 2 for each subsequent attempt.
+/// first attempt and increasing the delay by a factor of `backoff` after each attempt.
 #[derive(Debug, Clone, Copy)]
 pub struct RetryPolicy {
     tries: u8,
     delay: Duration,
+    backoff: f32,
 }
 
 impl RetryPolicy {
     /// A constructor for the default `RetryPolicy`
     ///
-    /// Will retry 5 times with an initial delay of 250ms.
+    /// Will retry 5 times with an initial delay of 250ms and a backoff factor of 2.0.
     pub const fn new() -> Self {
         Self {
             tries: 5,
             delay: Duration::from_millis(250),
+            backoff: 2.0,
         }
     }
 
     /// Set the initial delay
     ///
-    /// This is the delay before the first retry attempt. The delay will be doubled for each
-    /// subsequent retry attempt.
+    /// This is the delay before the first retry attempt. The delay will be multiplied by the
+    /// backoff factor after each attempt.
     pub const fn initial_delay(mut self, delay: Duration) -> Self {
         self.delay = delay;
         self
@@ -524,10 +526,19 @@ impl RetryPolicy {
         self
     }
 
+    /// Set the backoff factor
+    ///
+    /// The delay will be multiplied by this factor after each retry attempt.
+    pub const fn backoff(mut self, backoff: f32) -> Self {
+        self.backoff = backoff;
+        self
+    }
+
     fn state(&self) -> RetryState {
         RetryState {
             tries: self.tries,
             delay: self.delay,
+            backoff: self.backoff,
         }
     }
 }
@@ -541,6 +552,7 @@ impl Default for RetryPolicy {
 struct RetryState {
     tries: u8,
     delay: Duration,
+    backoff: f32,
 }
 
 impl RetryState {
@@ -550,7 +562,7 @@ impl RetryState {
         }
 
         sleep(self.delay).await;
-        self.delay *= 2;
+        self.delay = self.delay.mul_f32(self.backoff);
         self.tries -= 1;
         ControlFlow::Continue(())
     }
