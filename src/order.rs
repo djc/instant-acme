@@ -546,8 +546,7 @@ impl RetryPolicy {
         RetryState {
             delay: self.delay,
             backoff: self.backoff,
-            timeout: self.timeout,
-            start: Instant::now(),
+            deadline: Instant::now() + self.timeout,
         }
     }
 }
@@ -561,18 +560,14 @@ impl Default for RetryPolicy {
 struct RetryState {
     delay: Duration,
     backoff: f32,
-    timeout: Duration,
-    start: Instant,
+    deadline: Instant,
 }
 
 impl RetryState {
     async fn wait(&mut self, after: Option<SystemTime>) -> ControlFlow<(), ()> {
-        if self.start.elapsed() > self.timeout {
-            return ControlFlow::Break(());
-        }
-
         if let Some(after) = after {
-            if let Ok(delay) = after.duration_since(SystemTime::now()) {
+            let now = SystemTime::now();
+            if let Ok(delay) = after.duration_since(now) {
                 sleep(delay).await;
                 return ControlFlow::Continue(());
             }
@@ -580,7 +575,10 @@ impl RetryState {
 
         sleep(self.delay).await;
         self.delay = self.delay.mul_f32(self.backoff);
-        ControlFlow::Continue(())
+        match Instant::now() + self.delay > self.deadline {
+            true => ControlFlow::Break(()),
+            false => ControlFlow::Continue(()),
+        }
     }
 }
 
