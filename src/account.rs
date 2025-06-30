@@ -311,7 +311,10 @@ impl AccountInner {
     ) -> Result<Self, Error> {
         Ok(Self {
             id: credentials.id,
-            key: Key::from_pkcs8_der(credentials.key_pkcs8.secret_der())?,
+            key: match credentials.key_pkcs8 {
+                PrivateKeyDer::Pkcs8(inner) => Key::from_pkcs8_der(inner)?,
+                _ => return Err("unsupported key format, expected PKCS#8".into()),
+            },
             client: Arc::new(match (credentials.directory, credentials.urls) {
                 (Some(server_url), _) => Client::new(server_url, http).await?,
                 (None, Some(directory)) => Client {
@@ -407,7 +410,7 @@ impl AccountBuilder {
     pub async fn from_parts(
         self,
         id: String,
-        key_pkcs8_der: &[u8],
+        key_pkcs8_der: PrivatePkcs8KeyDer<'_>,
         server_url: String,
     ) -> Result<Account, Error> {
         Ok(Account {
@@ -476,7 +479,8 @@ impl AccountBuilder {
     }
 }
 
-pub(crate) struct Key {
+/// Private account key used to sign requests
+pub struct Key {
     rng: crypto::SystemRandom,
     signing_algorithm: SigningAlgorithm,
     inner: crypto::EcdsaKeyPair,
@@ -484,19 +488,22 @@ pub(crate) struct Key {
 }
 
 impl Key {
-    fn generate() -> Result<(Self, PrivateKeyDer<'static>), Error> {
+    /// Generate a new ECDSA P-256 key pair
+    pub fn generate() -> Result<(Self, PrivateKeyDer<'static>), Error> {
         let rng = crypto::SystemRandom::new();
         let pkcs8 =
             crypto::EcdsaKeyPair::generate_pkcs8(&crypto::ECDSA_P256_SHA256_FIXED_SIGNING, &rng)?;
-
         Ok((
             Self::new(pkcs8.as_ref(), rng)?,
             PrivatePkcs8KeyDer::from(pkcs8.as_ref().to_vec()).into(),
         ))
     }
 
-    fn from_pkcs8_der(pkcs8_der: &[u8]) -> Result<Self, Error> {
-        Self::new(pkcs8_der, crypto::SystemRandom::new())
+    /// Create a new key from the given PKCS#8 DER-encoded private key
+    ///
+    /// Currently, only ECDSA P-256 keys are supported.
+    pub fn from_pkcs8_der(pkcs8_der: PrivatePkcs8KeyDer<'_>) -> Result<Self, Error> {
+        Self::new(pkcs8_der.secret_pkcs8_der(), crypto::SystemRandom::new())
     }
 
     fn new(pkcs8_der: &[u8], rng: crypto::SystemRandom) -> Result<Self, Error> {

@@ -23,7 +23,7 @@ use hyper_util::rt::TokioExecutor;
 use serde::Serialize;
 
 mod account;
-use account::Key;
+pub use account::Key;
 pub use account::{Account, AccountBuilder, ExternalAccountKey};
 mod order;
 pub use order::{
