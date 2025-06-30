@@ -387,7 +387,6 @@ impl AccountBuilder {
     ///
     /// The returned [`AccountCredentials`] can be serialized and stored for later use.
     /// Use [`AccountBuilder::from_credentials()`] to restore the account from the credentials.
-    #[cfg(feature = "hyper-rustls")]
     pub async fn create(
         self,
         account: &NewAccount<'_>,
