@@ -25,7 +25,7 @@ use hyper_util::client::legacy::connect::HttpConnector;
 use hyper_util::rt::TokioExecutor;
 use instant_acme::{
     Account, AuthorizationStatus, ChallengeHandle, ChallengeType, Error, ExternalAccountKey,
-    Identifier, KeyAuthorization, NewAccount, NewOrder, Order, OrderStatus, RetryPolicy,
+    Identifier, Key, KeyAuthorization, NewAccount, NewOrder, Order, OrderStatus, RetryPolicy,
 };
 #[cfg(all(feature = "time", feature = "x509-parser"))]
 use instant_acme::{CertificateIdentifier, RevocationRequest};
@@ -35,8 +35,8 @@ use rustls::crypto::CryptoProvider;
 use rustls::pki_types::pem::PemObject;
 use rustls::pki_types::{CertificateDer, ServerName};
 use rustls::server::ParsedCertificate;
-use rustls_pki_types::UnixTime;
-use serde::{Serialize, Serializer};
+use rustls_pki_types::{PrivateKeyDer, PrivatePkcs8KeyDer, UnixTime};
+use serde::{Deserialize, Serialize, Serializer};
 use tempfile::NamedTempFile;
 #[cfg(all(feature = "time", feature = "x509-parser"))]
 use time::OffsetDateTime;
@@ -366,6 +366,75 @@ async fn update_key() -> Result<(), Box<dyn StdError>> {
     env.account
         .update_contacts(&["mailto:bob@example.com"])
         .await?;
+
+    Ok(())
+}
+
+/// Test account loading by private key
+#[tokio::test]
+#[ignore]
+async fn account_from_key() -> Result<(), Box<dyn StdError>> {
+    try_tracing_init();
+
+    // Creat an env/initial account
+
+    let env = Environment::new(EnvironmentConfig::default()).await?;
+    let server_url = format!("https://{}/dir", &env.config.pebble.listen_address);
+
+    let (account1, credentials) = Account::builder_with_http(Box::new(env.client.clone()))
+        .create(
+            &NewAccount {
+                contact: &[],
+                terms_of_service_agreed: true,
+                only_return_existing: false,
+            },
+            server_url.clone(),
+            None,
+        )
+        .await?;
+
+    #[derive(Deserialize)]
+    struct JsonKey<'a> {
+        key_pkcs8: &'a str,
+    }
+
+    let json1 = serde_json::to_string(&credentials)?;
+    let json_key = serde_json::from_str::<JsonKey>(&json1)?;
+    let key_der = BASE64_URL_SAFE_NO_PAD.decode(json_key.key_pkcs8)?;
+    let key = Key::from_pkcs8_der(PrivatePkcs8KeyDer::from(key_der.clone()))?;
+
+    let (account2, credentials2) = Account::builder_with_http(Box::new(env.client.clone()))
+        .from_key((key, PrivateKeyDer::try_from(key_der.clone())?), server_url)
+        .await?;
+
+    assert_eq!(account1.id(), account2.id());
+    assert_eq!(
+        serde_json::to_string(&credentials)?,
+        serde_json::to_string(&credentials2)?,
+    );
+
+    drop(env);
+
+    let env = Environment::new(EnvironmentConfig::default()).await?;
+    let server_url = format!("https://{}/dir", &env.config.pebble.listen_address);
+
+    let key = Key::from_pkcs8_der(PrivatePkcs8KeyDer::from(key_der.clone()))?;
+    let result = Account::builder_with_http(Box::new(env.client.clone()))
+        .from_key((key, PrivateKeyDer::try_from(key_der)?), server_url)
+        .await;
+
+    let Err(err) = result else {
+        panic!("expected OK result");
+    };
+
+    let Error::Api(problem) = err else {
+        panic!("unexpected error result {err:?}");
+    };
+
+    assert_eq!(
+        problem.r#type,
+        Some("urn:ietf:params:acme:error:accountDoesNotExist".to_string())
+    );
 
     Ok(())
 }
