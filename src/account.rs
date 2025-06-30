@@ -6,6 +6,7 @@ use http::header::LOCATION;
 use http::{Method, Request};
 #[cfg(feature = "time")]
 use http_body_util::Full;
+use rustls_pki_types::{PrivateKeyDer, PrivatePkcs8KeyDer};
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 
@@ -214,7 +215,7 @@ impl Account {
 
         Ok(AccountCredentials {
             id: self.inner.id.clone(),
-            key_pkcs8: new_key_pkcs8.as_ref().to_vec(),
+            key_pkcs8: new_key_pkcs8,
             directory,
             urls,
         })
@@ -310,7 +311,7 @@ impl AccountInner {
     ) -> Result<Self, Error> {
         Ok(Self {
             id: credentials.id,
-            key: Key::from_pkcs8_der(credentials.key_pkcs8.as_ref())?,
+            key: Key::from_pkcs8_der(credentials.key_pkcs8.secret_der())?,
             client: Arc::new(match (credentials.directory, credentials.urls) {
                 (Some(server_url), _) => Client::new(server_url, http).await?,
                 (None, Some(directory)) => Client {
@@ -453,7 +454,7 @@ impl AccountBuilder {
         let id = account_url.ok_or("failed to get account URL")?;
         let credentials = AccountCredentials {
             id: id.clone(),
-            key_pkcs8: key_pkcs8.as_ref().to_vec(),
+            key_pkcs8,
             directory: Some(client.server_url.clone().unwrap()), // New clients always have `server_url`
             // We support deserializing URLs for compatibility with versions pre 0.4,
             // but we prefer to get fresh URLs from the `server_url` for newer credentials.
@@ -483,11 +484,15 @@ pub(crate) struct Key {
 }
 
 impl Key {
-    fn generate() -> Result<(Self, crypto::pkcs8::Document), Error> {
+    fn generate() -> Result<(Self, PrivateKeyDer<'static>), Error> {
         let rng = crypto::SystemRandom::new();
         let pkcs8 =
             crypto::EcdsaKeyPair::generate_pkcs8(&crypto::ECDSA_P256_SHA256_FIXED_SIGNING, &rng)?;
-        Self::new(pkcs8.as_ref(), rng).map(|key| (key, pkcs8))
+
+        Ok((
+            Self::new(pkcs8.as_ref(), rng)?,
+            PrivatePkcs8KeyDer::from(pkcs8.as_ref().to_vec()).into(),
+        ))
     }
 
     fn from_pkcs8_der(pkcs8_der: &[u8]) -> Result<Self, Error> {
