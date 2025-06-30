@@ -394,8 +394,10 @@ impl AccountBuilder {
         server_url: String,
         external_account: Option<&ExternalAccountKey>,
     ) -> Result<(Account, AccountCredentials), Error> {
+        let (key, key_pkcs8) = Key::generate()?;
         Self::create_inner(
             account,
+            (key, key_pkcs8),
             external_account,
             Client::new(server_url, self.http).await?,
         )
@@ -424,10 +426,10 @@ impl AccountBuilder {
 
     async fn create_inner(
         account: &NewAccount<'_>,
+        (key, key_pkcs8): (Key, PrivateKeyDer<'static>),
         external_account: Option<&ExternalAccountKey>,
         client: Client,
     ) -> Result<(Account, AccountCredentials), Error> {
-        let (key, key_pkcs8) = Key::generate()?;
         let payload = NewAccountPayload {
             new_account: account,
             external_account_binding: external_account
