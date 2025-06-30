@@ -5,7 +5,7 @@ use std::net::IpAddr;
 
 use base64::prelude::{BASE64_URL_SAFE_NO_PAD, Engine};
 use bytes::Bytes;
-use rustls_pki_types::{CertificateDer, Der};
+use rustls_pki_types::{CertificateDer, Der, PrivateKeyDer};
 use serde::de::{self, DeserializeOwned};
 use serde::ser::SerializeMap;
 use serde::{Deserialize, Serialize};
@@ -94,7 +94,7 @@ pub struct AccountCredentials {
     pub(crate) id: String,
     /// Stored in DER, serialized as base64
     #[serde(with = "pkcs8_serde")]
-    pub(crate) key_pkcs8: Vec<u8>,
+    pub(crate) key_pkcs8: PrivateKeyDer<'static>,
     pub(crate) directory: Option<String>,
     /// We never serialize `urls` by default, but we support deserializing them
     /// in order to support serialized data from older versions of the library.
@@ -106,33 +106,39 @@ mod pkcs8_serde {
     use std::fmt;
 
     use base64::prelude::{BASE64_URL_SAFE_NO_PAD, Engine};
+    use rustls_pki_types::PrivateKeyDer;
     use serde::{Deserializer, Serializer, de};
 
-    pub(crate) fn serialize<S>(key_pkcs8: &[u8], serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: Serializer,
-    {
-        let encoded = BASE64_URL_SAFE_NO_PAD.encode(key_pkcs8.as_ref());
+    pub(crate) fn serialize<S: Serializer>(
+        key_pkcs8: &PrivateKeyDer<'_>,
+        serializer: S,
+    ) -> Result<S::Ok, S::Error> {
+        let encoded = BASE64_URL_SAFE_NO_PAD.encode(key_pkcs8.secret_der());
         serializer.serialize_str(&encoded)
     }
 
     pub(crate) fn deserialize<'de, D: Deserializer<'de>>(
         deserializer: D,
-    ) -> Result<Vec<u8>, D::Error> {
+    ) -> Result<PrivateKeyDer<'static>, D::Error> {
         struct Visitor;
 
         impl de::Visitor<'_> for Visitor {
-            type Value = Vec<u8>;
+            type Value = PrivateKeyDer<'static>;
 
             fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
                 formatter.write_str("a base64-encoded PKCS#8 private key")
             }
 
-            fn visit_str<E>(self, v: &str) -> Result<Vec<u8>, E>
-            where
-                E: de::Error,
-            {
-                BASE64_URL_SAFE_NO_PAD.decode(v).map_err(de::Error::custom)
+            fn visit_str<E: de::Error>(self, v: &str) -> Result<Self::Value, E> {
+                let bytes = match BASE64_URL_SAFE_NO_PAD.decode(v) {
+                    Ok(bytes) => bytes,
+                    Err(err) => return Err(de::Error::custom(err)),
+                };
+
+                match PrivateKeyDer::try_from(bytes) {
+                    Ok(key) => Ok(key),
+                    Err(err) => Err(de::Error::custom(err)),
+                }
             }
         }
 

@@ -297,10 +297,10 @@ mod crypto {
 
     pub(crate) use ring_like::digest::{Digest, SHA256, digest};
     pub(crate) use ring_like::error::{KeyRejected, Unspecified};
+    pub(crate) use ring_like::hmac;
     pub(crate) use ring_like::rand::SystemRandom;
     pub(crate) use ring_like::signature::{ECDSA_P256_SHA256_FIXED_SIGNING, EcdsaKeyPair};
     pub(crate) use ring_like::signature::{KeyPair, Signature};
-    pub(crate) use ring_like::{hmac, pkcs8};
 
     #[cfg(feature = "aws-lc-rs")]
     pub(crate) fn p256_key_pair_from_pkcs8(
