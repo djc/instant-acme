@@ -403,6 +403,30 @@ impl AccountBuilder {
         .await
     }
 
+    /// Load an existing account for the given private key
+    ///
+    /// The returned [`AccountCredentials`] can be serialized and stored for later use.
+    /// Use [`AccountBuilder::from_credentials()`] to restore the account from the credentials.
+    ///
+    /// Yields an error if no account matching the given key exists on the server.
+    pub async fn from_key(
+        self,
+        key: (Key, PrivateKeyDer<'static>),
+        server_url: String,
+    ) -> Result<(Account, AccountCredentials), Error> {
+        Self::create_inner(
+            &NewAccount {
+                contact: &[],
+                terms_of_service_agreed: true,
+                only_return_existing: true,
+            },
+            key,
+            None,
+            Client::new(server_url, self.http).await?,
+        )
+        .await
+    }
+
     /// Restore an existing account from the given ID, private key, server URL and HTTP client
     ///
     /// The key must be provided in DER-encoded PKCS#8. This is usually how ECDSA keys are
