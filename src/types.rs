@@ -2,6 +2,7 @@ use std::borrow::Cow;
 use std::collections::HashMap;
 use std::fmt::{self, Write};
 use std::net::IpAddr;
+use std::time::Instant;
 
 use base64::prelude::{BASE64_URL_SAFE_NO_PAD, Engine};
 use bytes::Bytes;
@@ -51,6 +52,11 @@ pub enum Error {
     /// Failed to (de)serialize a JSON object
     #[error("failed to (de)serialize JSON: {0}")]
     Json(#[from] serde_json::Error),
+    /// Timed out while waiting for the server to update [`OrderStatus`]
+    ///
+    /// If `Some`, the nested `Instant` indicates when the server suggests to poll next.
+    #[error("timed out waiting for an order update")]
+    Timeout(Option<Instant>),
     /// ACME server does not support a requested feature
     #[error("ACME server does not support: {0}")]
     Unsupported(&'static str),

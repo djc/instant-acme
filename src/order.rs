@@ -164,13 +164,14 @@ impl Order {
 
     /// Poll the order with the given [`RetryPolicy`]
     ///
-    /// Yields the [`OrderStatus`] immediately if `Ready` or `Invalid`, or after `tries` attempts.
+    /// Yields the [`OrderStatus`] immediately if `Ready` or `Invalid`, or yields an
+    /// [`Error::Timeout`] if the [`RetryPolicy::timeout`] has been reached.
     pub async fn poll(&mut self, retries: &RetryPolicy) -> Result<OrderStatus, Error> {
         let mut retrying = retries.state();
         self.retry_after = None;
         loop {
-            if let ControlFlow::Break(()) = retrying.wait(self.retry_after.take()).await {
-                return Ok(self.state.status);
+            if let ControlFlow::Break(err) = retrying.wait(self.retry_after.take()).await {
+                return Err(err);
             }
 
             let state = self.refresh().await?;
@@ -564,13 +565,13 @@ struct RetryState {
 }
 
 impl RetryState {
-    async fn wait(&mut self, after: Option<SystemTime>) -> ControlFlow<(), ()> {
+    async fn wait(&mut self, after: Option<SystemTime>) -> ControlFlow<Error, ()> {
         if let Some(after) = after {
             let now = SystemTime::now();
             if let Ok(delay) = after.duration_since(now) {
                 let next = Instant::now() + delay;
                 if next > self.deadline {
-                    return ControlFlow::Break(());
+                    return ControlFlow::Break(Error::Timeout(Some(next)));
                 } else {
                     sleep(delay).await;
                     return ControlFlow::Continue(());
@@ -581,7 +582,7 @@ impl RetryState {
         sleep(self.delay).await;
         self.delay = self.delay.mul_f32(self.backoff);
         match Instant::now() + self.delay > self.deadline {
-            true => ControlFlow::Break(()),
+            true => ControlFlow::Break(Error::Timeout(None)),
             false => ControlFlow::Continue(()),
         }
     }
