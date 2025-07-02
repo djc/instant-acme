@@ -941,7 +941,7 @@ pub(crate) struct Empty {}
 mod tests {
     #[cfg(feature = "x509-parser")]
     use rcgen::{
-        BasicConstraints, CertificateParams, DistinguishedName, IsCa, KeyIdMethod, KeyPair,
+        BasicConstraints, CertificateParams, DistinguishedName, IsCa, Issuer, KeyIdMethod, KeyPair,
         SerialNumber,
     };
 
@@ -1166,7 +1166,7 @@ mod tests {
         let mut ca_params = CertificateParams::default();
         ca_params.is_ca = IsCa::Ca(BasicConstraints::Unconstrained);
         ca_params.key_identifier_method = KeyIdMethod::PreSpecified(ca_key_id);
-        let ca_cert = ca_params.self_signed(&ca_key).unwrap();
+        let ca = Issuer::new(ca_params, ca_key);
 
         // Generate an end entity certificate issued by the CA, with a specific serial number
         // and an AKI extension.
@@ -1176,7 +1176,7 @@ mod tests {
         ee_params.distinguished_name = DistinguishedName::new();
         ee_params.serial_number = Some(SerialNumber::from_slice(ee_serial.as_slice()));
         ee_params.use_authority_key_identifier_extension = true;
-        let ee_cert = ee_params.signed_by(&ee_key, &ca_cert, &ca_key).unwrap();
+        let ee_cert = ee_params.signed_by(&ee_key, &ca).unwrap();
 
         // Extract the AKI and serial number from the EE certificate and create an encoded
         // certificate identifier.
