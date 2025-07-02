@@ -208,8 +208,8 @@ impl Account {
             id: self.inner.id.clone(),
         });
 
-        let (directory, urls) = match &self.inner.client.server_url {
-            Some(server_url) => (Some(server_url.clone()), None),
+        let (directory, urls) = match &self.inner.client.directory_url {
+            Some(directory_url) => (Some(directory_url.clone()), None),
             None => (None, Some(self.inner.client.directory.clone())),
         };
 
@@ -316,11 +316,11 @@ impl AccountInner {
                 _ => return Err("unsupported key format, expected PKCS#8".into()),
             },
             client: Arc::new(match (credentials.directory, credentials.urls) {
-                (Some(server_url), _) => Client::new(server_url, http).await?,
+                (Some(directory_url), _) => Client::new(directory_url, http).await?,
                 (None, Some(directory)) => Client {
                     http,
                     directory,
-                    server_url: None,
+                    directory_url: None,
                 },
                 (None, None) => return Err("no server URLs found".into()),
             }),
@@ -383,14 +383,14 @@ impl AccountBuilder {
         })
     }
 
-    /// Create a new account on the `server_url` with the information in [`NewAccount`]
+    /// Create a new account on the `directory_url` with the information in [`NewAccount`]
     ///
     /// The returned [`AccountCredentials`] can be serialized and stored for later use.
     /// Use [`AccountBuilder::from_credentials()`] to restore the account from the credentials.
     pub async fn create(
         self,
         account: &NewAccount<'_>,
-        server_url: String,
+        directory_url: String,
         external_account: Option<&ExternalAccountKey>,
     ) -> Result<(Account, AccountCredentials), Error> {
         let (key, key_pkcs8) = Key::generate()?;
@@ -398,7 +398,7 @@ impl AccountBuilder {
             account,
             (key, key_pkcs8),
             external_account,
-            Client::new(server_url, self.http).await?,
+            Client::new(directory_url, self.http).await?,
         )
         .await
     }
@@ -412,7 +412,7 @@ impl AccountBuilder {
     pub async fn from_key(
         self,
         key: (Key, PrivateKeyDer<'static>),
-        server_url: String,
+        directory_url: String,
     ) -> Result<(Account, AccountCredentials), Error> {
         Self::create_inner(
             &NewAccount {
@@ -422,7 +422,7 @@ impl AccountBuilder {
             },
             key,
             None,
-            Client::new(server_url, self.http).await?,
+            Client::new(directory_url, self.http).await?,
         )
         .await
     }
@@ -436,13 +436,13 @@ impl AccountBuilder {
         self,
         id: String,
         key_pkcs8_der: PrivatePkcs8KeyDer<'_>,
-        server_url: String,
+        directory_url: String,
     ) -> Result<Account, Error> {
         Ok(Account {
             inner: Arc::new(AccountInner {
                 id,
                 key: Key::from_pkcs8_der(key_pkcs8_der)?,
-                client: Arc::new(Client::new(server_url, self.http).await?),
+                client: Arc::new(Client::new(directory_url, self.http).await?),
             }),
         })
     }
@@ -483,9 +483,9 @@ impl AccountBuilder {
         let credentials = AccountCredentials {
             id: id.clone(),
             key_pkcs8,
-            directory: Some(client.server_url.clone().unwrap()), // New clients always have `server_url`
+            directory: Some(client.directory_url.clone().unwrap()), // New clients always have `directory_url`
             // We support deserializing URLs for compatibility with versions pre 0.4,
-            // but we prefer to get fresh URLs from the `server_url` for newer credentials.
+            // but we prefer to get fresh URLs from the `directory_url` for newer credentials.
             urls: None,
         };
 

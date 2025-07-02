@@ -44,13 +44,13 @@ use types::{Directory, JoseJson, Signer};
 struct Client {
     http: Box<dyn HttpClient>,
     directory: Directory,
-    server_url: Option<String>,
+    directory_url: Option<String>,
 }
 
 impl Client {
-    async fn new(server_url: String, http: Box<dyn HttpClient>) -> Result<Self, Error> {
+    async fn new(directory_url: String, http: Box<dyn HttpClient>) -> Result<Self, Error> {
         let req = Request::builder()
-            .uri(&server_url)
+            .uri(&directory_url)
             .body(Full::default())
             .expect("infallible error should not occur");
         let rsp = http.request(req).await?;
@@ -58,7 +58,7 @@ impl Client {
         Ok(Client {
             http,
             directory: serde_json::from_slice(&body)?,
-            server_url: Some(server_url),
+            directory_url: Some(directory_url),
         })
     }
 
