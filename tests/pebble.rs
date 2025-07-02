@@ -379,7 +379,7 @@ async fn account_from_key() -> Result<(), Box<dyn StdError>> {
     // Creat an env/initial account
 
     let env = Environment::new(EnvironmentConfig::default()).await?;
-    let server_url = format!("https://{}/dir", &env.config.pebble.listen_address);
+    let directory_url = format!("https://{}/dir", &env.config.pebble.listen_address);
 
     let (account1, credentials) = Account::builder_with_http(Box::new(env.client.clone()))
         .create(
@@ -388,7 +388,7 @@ async fn account_from_key() -> Result<(), Box<dyn StdError>> {
                 terms_of_service_agreed: true,
                 only_return_existing: false,
             },
-            server_url.clone(),
+            directory_url.clone(),
             None,
         )
         .await?;
@@ -404,7 +404,10 @@ async fn account_from_key() -> Result<(), Box<dyn StdError>> {
     let key = Key::from_pkcs8_der(PrivatePkcs8KeyDer::from(key_der.clone()))?;
 
     let (account2, credentials2) = Account::builder_with_http(Box::new(env.client.clone()))
-        .from_key((key, PrivateKeyDer::try_from(key_der.clone())?), server_url)
+        .from_key(
+            (key, PrivateKeyDer::try_from(key_der.clone())?),
+            directory_url,
+        )
         .await?;
 
     assert_eq!(account1.id(), account2.id());
@@ -416,11 +419,11 @@ async fn account_from_key() -> Result<(), Box<dyn StdError>> {
     drop(env);
 
     let env = Environment::new(EnvironmentConfig::default()).await?;
-    let server_url = format!("https://{}/dir", &env.config.pebble.listen_address);
+    let directory_url = format!("https://{}/dir", &env.config.pebble.listen_address);
 
     let key = Key::from_pkcs8_der(PrivatePkcs8KeyDer::from(key_der.clone()))?;
     let result = Account::builder_with_http(Box::new(env.client.clone()))
-        .from_key((key, PrivateKeyDer::try_from(key_der)?), server_url)
+        .from_key((key, PrivateKeyDer::try_from(key_der)?), directory_url)
         .await;
 
     let Err(err) = result else {
