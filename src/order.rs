@@ -568,8 +568,13 @@ impl RetryState {
         if let Some(after) = after {
             let now = SystemTime::now();
             if let Ok(delay) = after.duration_since(now) {
-                sleep(delay).await;
-                return ControlFlow::Continue(());
+                let next = Instant::now() + delay;
+                if next > self.deadline {
+                    return ControlFlow::Break(());
+                } else {
+                    sleep(delay).await;
+                    return ControlFlow::Continue(());
+                }
             }
         }
 
