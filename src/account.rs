@@ -297,8 +297,8 @@ impl Account {
         &self.inner.id
     }
 
-    /// Get the account thumb
-    pub fn thumb(&self) -> &str {
+    /// Get the account key_thumbprint
+    pub fn key_thumbprint(&self) -> &str {
         &self.inner.key.thumb
     }
 }
