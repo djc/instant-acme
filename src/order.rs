@@ -456,6 +456,28 @@ impl ChallengeHandle<'_> {
         }
     }
 
+    /// Notify the server that the challenge is ready and provide a payload
+    ///
+    /// This function is for the ACME challenge device-attest-01.
+    /// See <https://datatracker.ietf.org/doc/draft-acme-device-attest/> for details.
+    ///
+    /// Note: Do not use this function for http-01, tls-alpn-01 or dns-01 challenges.
+    ///
+    /// `payload` should serialize to "attObj" as defined in link.
+    pub async fn set_ready_with_payload(&mut self, payload: &impl Serialize) -> Result<(), Error> {
+        let rsp = self
+            .account
+            .post(Some(payload), self.nonce.take(), &self.challenge.url)
+            .await?;
+
+        *self.nonce = nonce_from_response(&rsp);
+        let response = Problem::check::<Challenge>(rsp).await?;
+        match response.error {
+            Some(details) => Err(Error::Api(details)),
+            None => Ok(()),
+        }
+    }
+
     /// Create a [`KeyAuthorization`] for this challenge
     ///
     /// Combines a challenge's token with the thumbprint of the account's public key to compute
