@@ -297,7 +297,7 @@ impl Account {
         &self.inner.id
     }
 
-    /// Get the account key_thumbprint
+    /// Get the [RFC 7638](https://www.rfc-editor.org/rfc/rfc7638) account key thumbprint
     pub fn key_thumbprint(&self) -> &str {
         &self.inner.key.thumb
     }
