@@ -296,6 +296,11 @@ impl Account {
     pub fn id(&self) -> &str {
         &self.inner.id
     }
+
+    /// Get the [RFC 7638](https://www.rfc-editor.org/rfc/rfc7638) account key thumbprint
+    pub fn key_thumbprint(&self) -> &str {
+        &self.inner.key.thumb
+    }
 }
 
 pub(crate) struct AccountInner {
