@@ -183,6 +183,32 @@ impl Order {
         }
     }
 
+    /// Poll the certificate with the given [`RetryPolicy`]
+    ///
+    /// Yields the PEM encoded certificate chain for this order if the order state becomes
+    /// `Valid`. The function keeps polling as long as the order state is `Processing`.
+    /// An error is returned immediately: if the order state is `Invalid`, if polling runs
+    /// into a timeout, or if the ACME CA suggest to retry at a later time.
+    pub async fn poll_certificate(&mut self, retries: &RetryPolicy) -> Result<String, Error> {
+        let mut retrying = retries.state();
+        self.retry_after = None;
+        loop {
+            if let ControlFlow::Break(err) = retrying.wait(self.retry_after.take()).await {
+                return Err(err);
+            }
+
+            let state = self.refresh().await?;
+            if let Some(error) = &state.error {
+                return Err(Error::Api(error.clone()));
+            } else if let OrderStatus::Valid | OrderStatus::Invalid = state.status {
+                return self
+                    .certificate()
+                    .await?
+                    .ok_or(Error::Str("no certificates received from ACME CA"));
+            }
+        }
+    }
+
     /// Refresh the current state of the order
     pub async fn refresh(&mut self) -> Result<&OrderState, Error> {
         let rsp = self

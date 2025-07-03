@@ -656,12 +656,7 @@ impl Environment {
         debug!(order_url = order.url(), "finalizing order");
         order.finalize().await?;
         debug!(order_url = order.url(), "fetching order certificate chain");
-        let cert_chain_pem = loop {
-            match order.certificate().await.unwrap() {
-                Some(cert_chain_pem) => break cert_chain_pem,
-                None => sleep(Duration::from_secs(1)).await,
-            }
-        };
+        let cert_chain_pem = order.poll_certificate(&RETRY_POLICY).await.unwrap();
 
         // Parse the PEM chain into a vec of DER certificates ordered ee -> intermediates.
         info!("successfully issued certificate");
