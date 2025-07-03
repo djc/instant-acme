@@ -296,6 +296,11 @@ impl Account {
     pub fn id(&self) -> &str {
         &self.inner.id
     }
+
+    /// Get the account thumb
+    pub fn thumb(&self) -> &str {
+        &self.inner.key.thumb
+    }
 }
 
 pub(crate) struct AccountInner {
