@@ -166,7 +166,7 @@ impl Order {
     ///
     /// Yields the [`OrderStatus`] immediately if `Ready` or `Invalid`, or yields an
     /// [`Error::Timeout`] if the [`RetryPolicy::timeout`] has been reached.
-    pub async fn poll(&mut self, retries: &RetryPolicy) -> Result<OrderStatus, Error> {
+    pub async fn poll_ready(&mut self, retries: &RetryPolicy) -> Result<OrderStatus, Error> {
         let mut retrying = retries.state();
         self.retry_after = None;
         loop {
@@ -428,8 +428,8 @@ impl Deref for AuthorizationHandle<'_> {
 /// * Set up the challenge response in your infrastructure (details vary by challenge type)
 /// * Call [`ChallengeHandle::set_ready()`] for that challenge after setup is complete
 ///
-/// After the challenges have been set to ready, call [`Order::poll()`] to wait until the order is
-/// ready to be finalized (or to learn if it becomes invalid). Once it is ready, call
+/// After the challenges have been set to ready, call [`Order::poll_ready()`] to wait until the
+/// order is ready to be finalized (or to learn if it becomes invalid). Once it is ready, call
 /// [`Order::finalize()`] to get the certificate.
 ///
 /// Dereferences to the underlying [`Challenge`] for easy access to the challenge's state.

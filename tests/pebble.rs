@@ -600,7 +600,7 @@ impl Environment {
         }
 
         // Poll until the order is ready.
-        let status = order.poll(&RETRY_POLICY).await?;
+        let status = order.poll_ready(&RETRY_POLICY).await?;
         if status != OrderStatus::Ready {
             return Err(format!("unexpected order status: {status:?}").into());
         }
