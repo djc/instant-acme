@@ -82,7 +82,7 @@ async fn main() -> anyhow::Result<()> {
 
     // Exponentially back off until the order becomes ready or invalid.
 
-    let status = order.poll(&RetryPolicy::default()).await?;
+    let status = order.poll_ready(&RetryPolicy::default()).await?;
     if status != OrderStatus::Ready {
         return Err(anyhow::anyhow!("unexpected order status: {status:?}"));
     }
