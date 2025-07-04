@@ -8,12 +8,15 @@ use std::error::Error as StdError;
 use std::fmt;
 use std::future::Future;
 use std::pin::Pin;
+use std::str::FromStr;
+use std::time::{Duration, SystemTime};
 
 use async_trait::async_trait;
 use bytes::Bytes;
-use http::header::CONTENT_TYPE;
+use http::header::{CONTENT_TYPE, RETRY_AFTER};
 use http::{Method, Request, Response, StatusCode};
 use http_body_util::{BodyExt, Full};
+use httpdate::HttpDate;
 #[cfg(feature = "hyper-rustls")]
 use hyper_util::client::legacy::Client as HyperClient;
 #[cfg(feature = "hyper-rustls")]
@@ -157,6 +160,28 @@ fn nonce_from_response(rsp: &BytesResponse) -> Option<String> {
         .headers
         .get(REPLAY_NONCE)
         .and_then(|hv| String::from_utf8(hv.as_ref().to_vec()).ok())
+}
+
+/// Parse the `Retry-After` header from the response
+///
+/// <https://httpwg.org/specs/rfc9110.html#field.retry-after>
+///
+/// # Syntax
+///
+/// Retry-After = HTTP-date / delay-seconds
+/// delay-seconds  = 1*DIGIT
+fn retry_after(rsp: &BytesResponse) -> Option<SystemTime> {
+    let value = rsp.parts.headers.get(RETRY_AFTER)?.to_str().ok()?.trim();
+    if value.is_empty() {
+        return None;
+    }
+
+    Some(match u64::from_str(value) {
+        // `delay-seconds` is a number of seconds to wait
+        Ok(secs) => SystemTime::now() + Duration::from_secs(secs),
+        // `HTTP-date` looks like `Fri, 31 Dec 1999 23:59:59 GMT`
+        Err(_) => SystemTime::from(HttpDate::from_str(value).ok()?),
+    })
 }
 
 #[cfg(feature = "hyper-rustls")]
