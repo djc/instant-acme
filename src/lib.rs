@@ -18,6 +18,10 @@ use http::{Method, Request, Response, StatusCode};
 use http_body_util::{BodyExt, Full};
 use httpdate::HttpDate;
 #[cfg(feature = "hyper-rustls")]
+use hyper_rustls::HttpsConnectorBuilder;
+#[cfg(feature = "hyper-rustls")]
+use hyper_rustls::builderstates::WantsSchemes;
+#[cfg(feature = "hyper-rustls")]
 use hyper_util::client::legacy::Client as HyperClient;
 #[cfg(feature = "hyper-rustls")]
 use hyper_util::client::legacy::connect::{Connect, HttpConnector};
@@ -184,23 +188,31 @@ fn retry_after(rsp: &BytesResponse) -> Option<SystemTime> {
     })
 }
 
+/// A default HTTP client implementation using hyper-rustls
 #[cfg(feature = "hyper-rustls")]
-struct DefaultClient(HyperClient<hyper_rustls::HttpsConnector<HttpConnector>, Full<Bytes>>);
+pub struct DefaultClient(HyperClient<hyper_rustls::HttpsConnector<HttpConnector>, Full<Bytes>>);
 
 #[cfg(feature = "hyper-rustls")]
 impl DefaultClient {
-    fn try_new() -> Result<Self, Error> {
-        Ok(Self(
-            HyperClient::builder(TokioExecutor::new()).build(
-                hyper_rustls::HttpsConnectorBuilder::new()
-                    .try_with_platform_verifier()
-                    .map_err(|e| Error::Other(Box::new(e)))?
-                    .https_only()
-                    .enable_http1()
-                    .enable_http2()
-                    .build(),
-            ),
+    /// Create a new default HTTP client with the given TLS configuration
+    pub fn with_config(config: rustls::ClientConfig) -> Self {
+        Self::new(hyper_rustls::HttpsConnectorBuilder::new().with_tls_config(config))
+    }
+
+    /// Create a new default client using rustls-platform-verifier
+    pub fn try_new() -> Result<Self, Error> {
+        Ok(Self::new(
+            hyper_rustls::HttpsConnectorBuilder::new()
+                .try_with_platform_verifier()
+                .map_err(|e| Error::Other(Box::new(e)))?,
         ))
+    }
+
+    fn new(builder: HttpsConnectorBuilder<WantsSchemes>) -> Self {
+        Self(
+            HyperClient::builder(TokioExecutor::new())
+                .build(builder.https_only().enable_http1().enable_http2().build()),
+        )
     }
 }
 
