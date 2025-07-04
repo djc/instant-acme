@@ -347,7 +347,7 @@ mod crypto {
 const JOSE_JSON: &str = "application/jose+json";
 const REPLAY_NONCE: &str = "Replay-Nonce";
 
-#[cfg(test)]
+#[cfg(all(test, feature = "hyper-rustls"))]
 mod tests {
     use super::*;
 
