@@ -72,7 +72,6 @@ rustdoc-args = ["--cfg", "docsrs"]
 [package.metadata.cargo_check_external_types]
 allowed_external_types = [
     "aws_lc_rs::*",
-    "base64::*",
     "bytes::*",
     "http::*",
     "http_body::*",
