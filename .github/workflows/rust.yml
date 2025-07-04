@@ -77,7 +77,18 @@ jobs:
       - run: cargo doc --locked --all-features --no-deps --document-private-items
         env:
           RUSTDOCFLAGS: -Dwarnings
-          
+
+  semver:
+    name: Check semver compatibility
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Check semver
+        uses: obi1kenobi/cargo-semver-checks-action@v2
+
   check-external-types:
     name: Validate external types appearing in public API
     runs-on: ubuntu-latest
