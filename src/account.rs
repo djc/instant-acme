@@ -1,3 +1,5 @@
+#[cfg(feature = "hyper-rustls")]
+use std::path::Path;
 use std::sync::Arc;
 #[cfg(feature = "time")]
 use std::time::{Duration, SystemTime};
@@ -6,6 +8,12 @@ use base64::prelude::{BASE64_URL_SAFE_NO_PAD, Engine};
 use http::header::LOCATION;
 #[cfg(feature = "time")]
 use http::{Method, Request};
+#[cfg(feature = "hyper-rustls")]
+use rustls::RootCertStore;
+#[cfg(feature = "hyper-rustls")]
+use rustls_pki_types::CertificateDer;
+#[cfg(feature = "hyper-rustls")]
+use rustls_pki_types::pem::PemObject;
 use rustls_pki_types::{PrivateKeyDer, PrivatePkcs8KeyDer};
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
@@ -46,6 +54,26 @@ impl Account {
         Ok(AccountBuilder {
             http: Box::new(DefaultClient::try_new()?),
         })
+    }
+
+    /// Create an account builder with an HTTP client configured using a custom root CA
+    ///
+    /// This is useful if your ACME server uses a testing PKI and not a certificate
+    /// chain issued by a publicly trusted CA.
+    #[cfg(feature = "hyper-rustls")]
+    pub fn builder_with_root(pem_path: impl AsRef<Path>) -> Result<AccountBuilder, Error> {
+        let root_der = match CertificateDer::from_pem_file(pem_path) {
+            Ok(root_der) => root_der,
+            Err(err) => return Err(Error::Other(err.into())),
+        };
+
+        let mut roots = RootCertStore::empty();
+        match roots.add(root_der) {
+            Ok(()) => Ok(AccountBuilder {
+                http: Box::new(DefaultClient::with_roots(roots)?),
+            }),
+            Err(err) => Err(Error::Other(err.into())),
+        }
     }
 
     /// Create an account builder with the given HTTP client
