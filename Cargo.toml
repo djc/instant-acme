@@ -18,6 +18,8 @@ fips = ["aws-lc-rs", "aws-lc-rs?/fips"]
 hyper-rustls = ["dep:hyper", "dep:hyper-rustls", "dep:hyper-util"]
 rcgen = ["dep:rcgen"]
 ring = ["dep:ring", "hyper-rustls?/ring", "rcgen/ring"]
+time = ["dep:time"]
+x509-parser = ["dep:x509-parser"]
 
 [dependencies]
 async-trait = "0.1"
