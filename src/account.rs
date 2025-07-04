@@ -6,8 +6,6 @@ use base64::prelude::{BASE64_URL_SAFE_NO_PAD, Engine};
 use http::header::LOCATION;
 #[cfg(feature = "time")]
 use http::{Method, Request};
-#[cfg(feature = "time")]
-use http_body_util::Full;
 use rustls_pki_types::{PrivateKeyDer, PrivatePkcs8KeyDer};
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
@@ -15,8 +13,6 @@ use serde::{Deserialize, Serialize};
 #[cfg(feature = "hyper-rustls")]
 use crate::DefaultClient;
 use crate::order::Order;
-#[cfg(feature = "time")]
-use crate::retry_after;
 use crate::types::{
     AccountCredentials, AuthorizationStatus, Empty, Header, JoseJson, Jwk, KeyOrKeyId, NewAccount,
     NewAccountPayload, NewOrder, OrderState, Problem, ProfileMeta, RevocationRequest, Signer,
@@ -24,6 +20,8 @@ use crate::types::{
 };
 #[cfg(feature = "time")]
 use crate::types::{CertificateIdentifier, RenewalInfo};
+#[cfg(feature = "time")]
+use crate::{BodyWrapper, retry_after};
 use crate::{BytesResponse, Client, Error, HttpClient, crypto, nonce_from_response};
 
 /// An ACME account as described in RFC 8555 (section 7.1.2)
@@ -169,10 +167,9 @@ impl Account {
         let request = Request::builder()
             .method(Method::GET)
             .uri(format!("{renewal_info_url}/{certificate_id}"))
-            .body(Full::default())?;
+            .body(BodyWrapper::default())?;
 
         let rsp = self.inner.client.http.request(request).await?;
-
         let Some(retry_after) = retry_after(&rsp) else {
             return Err(Error::Str("missing Retry-After header"));
         };

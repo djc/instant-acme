@@ -4,18 +4,21 @@
 #![warn(missing_docs)]
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
 
+use std::convert::Infallible;
 use std::error::Error as StdError;
 use std::fmt;
 use std::future::Future;
 use std::pin::Pin;
 use std::str::FromStr;
+use std::task::{Context, Poll};
 use std::time::{Duration, SystemTime};
 
 use async_trait::async_trait;
-use bytes::Bytes;
+use bytes::{Buf, Bytes};
 use http::header::{CONTENT_TYPE, RETRY_AFTER};
 use http::{Method, Request, Response, StatusCode};
-use http_body_util::{BodyExt, Full};
+use http_body::{Frame, SizeHint};
+use http_body_util::BodyExt;
 use httpdate::HttpDate;
 #[cfg(feature = "hyper-rustls")]
 use hyper::body::Incoming;
@@ -56,7 +59,7 @@ impl Client {
     async fn new(directory_url: String, http: Box<dyn HttpClient>) -> Result<Self, Error> {
         let req = Request::builder()
             .uri(&directory_url)
-            .body(Full::default())
+            .body(BodyWrapper::default())
             .expect("infallible error should not occur");
         let rsp = http.request(req).await?;
         let body = rsp.body().await.map_err(Error::Other)?;
@@ -117,7 +120,7 @@ impl Client {
             .method(Method::POST)
             .uri(url)
             .header(CONTENT_TYPE, JOSE_JSON)
-            .body(Full::from(serde_json::to_vec(&body)?))?;
+            .body(BodyWrapper::from(serde_json::to_vec(&body)?))?;
 
         self.http.request(request).await
     }
@@ -130,7 +133,7 @@ impl Client {
         let request = Request::builder()
             .method(Method::HEAD)
             .uri(&self.directory.new_nonce)
-            .body(Full::default())
+            .body(BodyWrapper::default())
             .expect("infallible error should not occur");
 
         let rsp = self.http.request(request).await?;
@@ -187,7 +190,7 @@ fn retry_after(rsp: &BytesResponse) -> Option<SystemTime> {
 }
 
 #[cfg(feature = "hyper-rustls")]
-struct DefaultClient(HyperClient<hyper_rustls::HttpsConnector<HttpConnector>, Full<Bytes>>);
+struct DefaultClient(HyperClient<hyper_rustls::HttpsConnector<HttpConnector>, BodyWrapper<Bytes>>);
 
 #[cfg(feature = "hyper-rustls")]
 impl DefaultClient {
@@ -210,7 +213,7 @@ impl DefaultClient {
 impl HttpClient for DefaultClient {
     fn request(
         &self,
-        req: Request<Full<Bytes>>,
+        req: Request<BodyWrapper<Bytes>>,
     ) -> Pin<Box<dyn Future<Output = Result<BytesResponse, Error>> + Send>> {
         let fut = self.0.request(req);
         Box::pin(async move { BytesResponse::try_from(fut.await) })
@@ -222,15 +225,15 @@ pub trait HttpClient: Send + Sync + 'static {
     /// Send the given request and return the response
     fn request(
         &self,
-        req: Request<Full<Bytes>>,
+        req: Request<BodyWrapper<Bytes>>,
     ) -> Pin<Box<dyn Future<Output = Result<BytesResponse, Error>> + Send>>;
 }
 
 #[cfg(feature = "hyper-rustls")]
-impl<C: Connect + Clone + Send + Sync + 'static> HttpClient for HyperClient<C, Full<Bytes>> {
+impl<C: Connect + Clone + Send + Sync + 'static> HttpClient for HyperClient<C, BodyWrapper<Bytes>> {
     fn request(
         &self,
-        req: Request<Full<Bytes>>,
+        req: Request<BodyWrapper<Bytes>>,
     ) -> Pin<Box<dyn Future<Output = Result<BytesResponse, Error>> + Send>> {
         let fut = self.request(req);
         Box::pin(async move { BytesResponse::try_from(fut.await) })
@@ -276,7 +279,9 @@ where
     }
 }
 
-struct BodyWrapper<B> {
+/// A simple HTTP body wrapper type
+#[derive(Default)]
+pub struct BodyWrapper<B> {
     inner: Option<B>,
 }
 
@@ -295,6 +300,37 @@ where
         match body.collect().await {
             Ok(body) => Ok(body.to_bytes()),
             Err(e) => Err(e.into()),
+        }
+    }
+}
+
+impl http_body::Body for BodyWrapper<Bytes> {
+    type Data = Bytes;
+    type Error = Infallible;
+
+    fn poll_frame(
+        mut self: Pin<&mut Self>,
+        _cx: &mut Context<'_>,
+    ) -> Poll<Option<Result<Frame<Self::Data>, Self::Error>>> {
+        Poll::Ready(self.inner.take().map(|d| Ok(Frame::data(d))))
+    }
+
+    fn is_end_stream(&self) -> bool {
+        self.inner.is_none()
+    }
+
+    fn size_hint(&self) -> SizeHint {
+        match self.inner.as_ref() {
+            Some(data) => SizeHint::with_exact(u64::try_from(data.remaining()).unwrap()),
+            None => SizeHint::with_exact(0),
+        }
+    }
+}
+
+impl From<Vec<u8>> for BodyWrapper<Bytes> {
+    fn from(data: Vec<u8>) -> Self {
+        BodyWrapper {
+            inner: Some(Bytes::from(data)),
         }
     }
 }
