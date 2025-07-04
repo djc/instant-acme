@@ -622,7 +622,7 @@ impl RetryState {
 ///
 /// Retry-After = HTTP-date / delay-seconds
 /// delay-seconds  = 1*DIGIT
-fn retry_after(rsp: &BytesResponse) -> Option<SystemTime> {
+pub(crate) fn retry_after(rsp: &BytesResponse) -> Option<SystemTime> {
     let value = rsp.parts.headers.get(RETRY_AFTER)?.to_str().ok()?.trim();
     if value.is_empty() {
         return None;
