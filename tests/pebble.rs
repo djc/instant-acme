@@ -19,13 +19,14 @@ use base64::prelude::BASE64_URL_SAFE_NO_PAD;
 use bytes::{Buf, Bytes};
 use http::header::CONTENT_TYPE;
 use http::{Method, Request};
-use http_body_util::{BodyExt, Full};
+use http_body_util::BodyExt;
 use hyper_util::client::legacy::Client as HyperClient;
 use hyper_util::client::legacy::connect::HttpConnector;
 use hyper_util::rt::TokioExecutor;
 use instant_acme::{
-    Account, AuthorizationStatus, ChallengeHandle, ChallengeType, Error, ExternalAccountKey,
-    Identifier, Key, KeyAuthorization, NewAccount, NewOrder, Order, OrderStatus, RetryPolicy,
+    Account, AuthorizationStatus, BodyWrapper, ChallengeHandle, ChallengeType, Error,
+    ExternalAccountKey, Identifier, Key, KeyAuthorization, NewAccount, NewOrder, Order,
+    OrderStatus, RetryPolicy,
 };
 #[cfg(all(feature = "time", feature = "x509-parser"))]
 use instant_acme::{CertificateIdentifier, RevocationRequest};
@@ -469,7 +470,7 @@ struct Environment {
     pebble: Subprocess,
     #[allow(dead_code)] // Held for the lifetime of the environment.
     challtestsrv: Subprocess,
-    client: HyperClient<hyper_rustls::HttpsConnector<HttpConnector>, Full<Bytes>>,
+    client: HyperClient<hyper_rustls::HttpsConnector<HttpConnector>, BodyWrapper<Bytes>>,
 }
 
 impl Environment {
@@ -681,7 +682,7 @@ impl Environment {
                 &self.config.pebble.management_listen_address
             ))
             .header(CONTENT_TYPE, "application/json")
-            .body(Full::default())?;
+            .body(BodyWrapper::default())?;
 
         let resp = self.client.request(req).await?;
         if resp.status() != 200 {
@@ -712,7 +713,7 @@ impl Environment {
                     .method(Method::POST)
                     .uri(url)
                     .header(CONTENT_TYPE, "application/json")
-                    .body(Full::from(body))?,
+                    .body(BodyWrapper::from(body))?,
             )
             .await?;
         Ok(())

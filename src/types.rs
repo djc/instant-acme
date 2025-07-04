@@ -30,15 +30,12 @@ pub enum Error {
     /// RFC 8555 uses problem documents as described in RFC 7807.
     #[error(transparent)]
     Api(#[from] Problem),
-    /// Failed to base64-decode data
-    #[error("base64 decoding failed: {0}")]
-    Base64(#[from] base64::DecodeError),
     /// Failed from cryptographic operations
-    #[error("cryptographic operation failed: {0}")]
-    Crypto(#[from] crypto::Unspecified),
+    #[error("cryptographic operation failed")]
+    Crypto,
     /// Failed to instantiate a private key
-    #[error("invalid key bytes: {0}")]
-    CryptoKey(#[from] crypto::KeyRejected),
+    #[error("invalid key bytes")]
+    KeyRejected,
     /// HTTP failure
     #[error("HTTP request failure: {0}")]
     Http(#[from] http::Error),
@@ -78,13 +75,6 @@ impl Error {
 impl From<&'static str> for Error {
     fn from(s: &'static str) -> Self {
         Error::Str(s)
-    }
-}
-
-#[cfg(feature = "hyper-rustls")]
-impl From<hyper_util::client::legacy::Error> for Error {
-    fn from(value: hyper_util::client::legacy::Error) -> Self {
-        Self::Other(Box::new(value))
     }
 }
 

@@ -18,6 +18,8 @@ fips = ["aws-lc-rs", "aws-lc-rs?/fips"]
 hyper-rustls = ["dep:hyper", "dep:hyper-rustls", "dep:hyper-util"]
 rcgen = ["dep:rcgen"]
 ring = ["dep:ring", "hyper-rustls?/ring", "rcgen/ring"]
+time = ["dep:time"]
+x509-parser = ["dep:x509-parser"]
 
 [dependencies]
 async-trait = "0.1"
@@ -69,14 +71,10 @@ rustdoc-args = ["--cfg", "docsrs"]
 
 [package.metadata.cargo_check_external_types]
 allowed_external_types = [
-    "aws_lc_rs::*",
-    "base64::*",
     "bytes::*",
     "http::*",
     "http_body::*",
-    "http_body_util::*",
     "hyper::*",
-    "hyper_util::*",
     "rustls_pki_types::*",
     "serde::*",
     "serde_json::*",
