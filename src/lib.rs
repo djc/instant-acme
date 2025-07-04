@@ -321,26 +321,29 @@ mod crypto {
     pub(crate) use ring as ring_like;
 
     pub(crate) use ring_like::digest::{Digest, SHA256, digest};
-    pub(crate) use ring_like::error::{KeyRejected, Unspecified};
     pub(crate) use ring_like::hmac;
     pub(crate) use ring_like::rand::SystemRandom;
     pub(crate) use ring_like::signature::{ECDSA_P256_SHA256_FIXED_SIGNING, EcdsaKeyPair};
     pub(crate) use ring_like::signature::{KeyPair, Signature};
 
+    use super::Error;
+
     #[cfg(feature = "aws-lc-rs")]
     pub(crate) fn p256_key_pair_from_pkcs8(
         pkcs8: &[u8],
         _: &SystemRandom,
-    ) -> Result<EcdsaKeyPair, KeyRejected> {
+    ) -> Result<EcdsaKeyPair, Error> {
         EcdsaKeyPair::from_pkcs8(&ECDSA_P256_SHA256_FIXED_SIGNING, pkcs8)
+            .map_err(|_| Error::KeyRejected)
     }
 
     #[cfg(all(feature = "ring", not(feature = "aws-lc-rs")))]
     pub(crate) fn p256_key_pair_from_pkcs8(
         pkcs8: &[u8],
         rng: &SystemRandom,
-    ) -> Result<EcdsaKeyPair, KeyRejected> {
+    ) -> Result<EcdsaKeyPair, Error> {
         EcdsaKeyPair::from_pkcs8(&ECDSA_P256_SHA256_FIXED_SIGNING, pkcs8, rng)
+            .map_err(|_| Error::KeyRejected)
     }
 }
 

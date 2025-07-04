@@ -537,7 +537,8 @@ impl Key {
     pub fn generate() -> Result<(Self, PrivateKeyDer<'static>), Error> {
         let rng = crypto::SystemRandom::new();
         let pkcs8 =
-            crypto::EcdsaKeyPair::generate_pkcs8(&crypto::ECDSA_P256_SHA256_FIXED_SIGNING, &rng)?;
+            crypto::EcdsaKeyPair::generate_pkcs8(&crypto::ECDSA_P256_SHA256_FIXED_SIGNING, &rng)
+                .map_err(|_| Error::Crypto)?;
         Ok((
             Self::new(pkcs8.as_ref(), rng)?,
             PrivatePkcs8KeyDer::from(pkcs8.as_ref().to_vec()).into(),
@@ -577,7 +578,10 @@ impl Signer for Key {
     }
 
     fn sign(&self, payload: &[u8]) -> Result<Self::Signature, Error> {
-        Ok(self.inner.sign(&self.rng, payload)?)
+        self
+            .inner
+            .sign(&self.rng, payload)
+            .map_err(|_| Error::Crypto)
     }
 }
 
