@@ -76,7 +76,6 @@ allowed_external_types = [
     "http_body::*",
     "http_body_util::*",
     "hyper::*",
-    "hyper_util::*",
     "rustls_pki_types::*",
     "serde::*",
     "serde_json::*",

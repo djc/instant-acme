@@ -578,8 +578,7 @@ impl Signer for Key {
     }
 
     fn sign(&self, payload: &[u8]) -> Result<Self::Signature, Error> {
-        self
-            .inner
+        self.inner
             .sign(&self.rng, payload)
             .map_err(|_| Error::Crypto)
     }
