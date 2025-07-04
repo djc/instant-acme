@@ -18,6 +18,10 @@ use http::{Method, Request, Response, StatusCode};
 use http_body_util::{BodyExt, Full};
 use httpdate::HttpDate;
 #[cfg(feature = "hyper-rustls")]
+use hyper_rustls::HttpsConnectorBuilder;
+#[cfg(feature = "hyper-rustls")]
+use hyper_rustls::builderstates::WantsSchemes;
+#[cfg(feature = "hyper-rustls")]
 use hyper_util::client::legacy::Client as HyperClient;
 #[cfg(feature = "hyper-rustls")]
 use hyper_util::client::legacy::connect::{Connect, HttpConnector};
@@ -190,17 +194,28 @@ struct DefaultClient(HyperClient<hyper_rustls::HttpsConnector<HttpConnector>, Fu
 #[cfg(feature = "hyper-rustls")]
 impl DefaultClient {
     fn try_new() -> Result<Self, Error> {
-        Ok(Self(
-            HyperClient::builder(TokioExecutor::new()).build(
-                hyper_rustls::HttpsConnectorBuilder::new()
-                    .try_with_platform_verifier()
-                    .map_err(|e| Error::Other(Box::new(e)))?
-                    .https_only()
-                    .enable_http1()
-                    .enable_http2()
-                    .build(),
+        Ok(Self::new(
+            hyper_rustls::HttpsConnectorBuilder::new()
+                .try_with_platform_verifier()
+                .map_err(|e| Error::Other(Box::new(e)))?,
+        ))
+    }
+
+    fn with_roots(roots: rustls::RootCertStore) -> Result<Self, Error> {
+        Ok(Self::new(
+            hyper_rustls::HttpsConnectorBuilder::new().with_tls_config(
+                rustls::ClientConfig::builder()
+                    .with_root_certificates(roots)
+                    .with_no_client_auth(),
             ),
         ))
+    }
+
+    fn new(builder: HttpsConnectorBuilder<WantsSchemes>) -> Self {
+        Self(
+            HyperClient::builder(TokioExecutor::new())
+                .build(builder.https_only().enable_http1().enable_http2().build()),
+        )
     }
 }
 
