@@ -1,12 +1,9 @@
 use std::ops::{ControlFlow, Deref};
-use std::str::FromStr;
 use std::sync::Arc;
 use std::time::{Duration, Instant, SystemTime};
 use std::{fmt, slice};
 
 use base64::prelude::{BASE64_URL_SAFE_NO_PAD, Engine};
-use http::header::RETRY_AFTER;
-use httpdate::HttpDate;
 #[cfg(feature = "rcgen")]
 use rcgen::{CertificateParams, DistinguishedName, KeyPair};
 use serde::Serialize;
@@ -17,7 +14,7 @@ use crate::types::{
     Authorization, AuthorizationState, AuthorizationStatus, AuthorizedIdentifier, Challenge,
     ChallengeType, Empty, FinalizeRequest, OrderState, OrderStatus, Problem,
 };
-use crate::{BytesResponse, Error, Key, crypto, nonce_from_response};
+use crate::{Error, Key, crypto, nonce_from_response, retry_after};
 
 /// An ACME order as described in RFC 8555 (section 7.1.3)
 ///
@@ -612,26 +609,4 @@ impl RetryState {
             false => ControlFlow::Continue(()),
         }
     }
-}
-
-/// Parse the `Retry-After` header from the response
-///
-/// <https://httpwg.org/specs/rfc9110.html#field.retry-after>
-///
-/// # Syntax
-///
-/// Retry-After = HTTP-date / delay-seconds
-/// delay-seconds  = 1*DIGIT
-pub(crate) fn retry_after(rsp: &BytesResponse) -> Option<SystemTime> {
-    let value = rsp.parts.headers.get(RETRY_AFTER)?.to_str().ok()?.trim();
-    if value.is_empty() {
-        return None;
-    }
-
-    Some(match u64::from_str(value) {
-        // `delay-seconds` is a number of seconds to wait
-        Ok(secs) => SystemTime::now() + Duration::from_secs(secs),
-        // `HTTP-date` looks like `Fri, 31 Dec 1999 23:59:59 GMT`
-        Err(_) => SystemTime::from(HttpDate::from_str(value).ok()?),
-    })
 }
