@@ -64,6 +64,8 @@ jobs:
         with:
           components: rustfmt, clippy
       - run: cargo fmt --all -- --check
+      - run: cargo clippy --all-targets --no-default-features --features ring -- -D warnings
+      - run: cargo clippy --all-targets -- -D warnings
       - run: cargo clippy --all-targets --all-features -- -D warnings
 
   docs:

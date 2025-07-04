@@ -15,6 +15,8 @@ use serde::{Deserialize, Serialize};
 #[cfg(feature = "hyper-rustls")]
 use crate::DefaultClient;
 use crate::order::Order;
+#[cfg(feature = "time")]
+use crate::retry_after;
 use crate::types::{
     AccountCredentials, AuthorizationStatus, Empty, Header, JoseJson, Jwk, KeyOrKeyId, NewAccount,
     NewAccountPayload, NewOrder, OrderState, Problem, ProfileMeta, RevocationRequest, Signer,
@@ -22,7 +24,7 @@ use crate::types::{
 };
 #[cfg(feature = "time")]
 use crate::types::{CertificateIdentifier, RenewalInfo};
-use crate::{BytesResponse, Client, Error, HttpClient, crypto, nonce_from_response, retry_after};
+use crate::{BytesResponse, Client, Error, HttpClient, crypto, nonce_from_response};
 
 /// An ACME account as described in RFC 8555 (section 7.1.2)
 ///
