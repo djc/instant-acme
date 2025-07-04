@@ -66,3 +66,18 @@ required-features = ["hyper-rustls"]
 # all non-default features except fips (cannot build on docs.rs environment)
 features = ["aws-lc-rs", "x509-parser", "time"]
 rustdoc-args = ["--cfg", "docsrs"]
+
+[package.metadata.cargo_check_external_types]
+allowed_external_types = [
+    "aws_lc_rs::*",
+    "base64::*",
+    "bytes::*",
+    "http::*",
+    "http_body::*",
+    "http_body_util::*",
+    "hyper::*",
+    "hyper_util::*",
+    "rustls_pki_types::*",
+    "serde::*",
+    "serde_json::*",
+]
