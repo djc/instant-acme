@@ -184,12 +184,14 @@ fn retry_after(rsp: &BytesResponse) -> Option<SystemTime> {
     })
 }
 
+/// A default HTTP client implementation using hyper-rustls
 #[cfg(feature = "hyper-rustls")]
-struct DefaultClient(HyperClient<hyper_rustls::HttpsConnector<HttpConnector>, Full<Bytes>>);
+pub struct DefaultClient(HyperClient<hyper_rustls::HttpsConnector<HttpConnector>, Full<Bytes>>);
 
 #[cfg(feature = "hyper-rustls")]
 impl DefaultClient {
-    fn try_new() -> Result<Self, Error> {
+    /// Create a new default client using rustls-platform-verifier
+    pub fn try_new() -> Result<Self, Error> {
         Ok(Self(
             HyperClient::builder(TokioExecutor::new()).build(
                 hyper_rustls::HttpsConnectorBuilder::new()
