@@ -31,11 +31,11 @@ pub enum Error {
     #[error(transparent)]
     Api(#[from] Problem),
     /// Failed from cryptographic operations
-    #[error("cryptographic operation failed: {0}")]
-    Crypto(#[from] crypto::Unspecified),
+    #[error("cryptographic operation failed")]
+    Crypto,
     /// Failed to instantiate a private key
-    #[error("invalid key bytes: {0}")]
-    CryptoKey(#[from] crypto::KeyRejected),
+    #[error("invalid key bytes")]
+    KeyRejected,
     /// HTTP failure
     #[error("HTTP request failure: {0}")]
     Http(#[from] http::Error),
