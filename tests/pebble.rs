@@ -229,7 +229,10 @@ async fn replacement_order() -> Result<(), Box<dyn StdError>> {
         .expect("failed to fetch renewal window");
 
     // Since we revoked the initial certificate, the window start should be in the past.
-    assert!(renewal_info.suggested_window.start < OffsetDateTime::now_utc());
+    assert!(renewal_info.0.suggested_window.start < OffsetDateTime::now_utc());
+
+    // The next iteration to update the window should be in the future.
+    assert!(renewal_info.1 > Duration::ZERO);
 
     // So, let's go ahead and issue a replacement certificate.
     env.test::<Http01>(&NewOrder::new(&dns_identifiers(names)).replaces(initial_cert_id))

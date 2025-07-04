@@ -1,4 +1,6 @@
 use std::sync::Arc;
+#[cfg(feature = "time")]
+use std::time::{Duration, SystemTime};
 
 use base64::prelude::{BASE64_URL_SAFE_NO_PAD, Engine};
 use http::header::LOCATION;
@@ -12,7 +14,7 @@ use serde::{Deserialize, Serialize};
 
 #[cfg(feature = "hyper-rustls")]
 use crate::DefaultClient;
-use crate::order::Order;
+use crate::order::{Order, retry_after};
 use crate::types::{
     AccountCredentials, AuthorizationStatus, Empty, Header, JoseJson, Jwk, KeyOrKeyId, NewAccount,
     NewAccountPayload, NewOrder, OrderState, Problem, ProfileMeta, RevocationRequest, Signer,
@@ -143,16 +145,18 @@ impl Account {
     /// uniformly random point between the window start/end should be selected and used to
     /// schedule a renewal in the future.
     ///
+    /// The `Duration` is a hint from the ACME server when to again fetch the renewal window.
+    /// See <https://www.rfc-editor.org/rfc/rfc9773.html#section-4.3.2> for details.
+    ///
     /// This is only supported by some ACME servers. If the server does not support this feature,
     /// this method will return `Error::Unsupported`.
     ///
-    /// See <https://www.rfc-editor.org/rfc/rfc9773.html#section-4.2-4> for more
-    /// information.
+    /// See <https://www.rfc-editor.org/rfc/rfc9773.html#section-4.2-4> for more information.
     #[cfg(feature = "time")]
     pub async fn renewal_info(
         &self,
         certificate_id: &CertificateIdentifier<'_>,
-    ) -> Result<RenewalInfo, Error> {
+    ) -> Result<(RenewalInfo, Duration), Error> {
         let renewal_info_url = match self.inner.client.directory.renewal_info.as_deref() {
             Some(url) => url,
             None => return Err(Error::Unsupported("ACME renewal information (ARI)")),
@@ -166,7 +170,16 @@ impl Account {
             .body(Full::default())?;
 
         let rsp = self.inner.client.http.request(request).await?;
-        Problem::check::<RenewalInfo>(rsp).await
+
+        let Some(retry_after) = retry_after(&rsp) else {
+            return Err(Error::Str("missing Retry-After header"));
+        };
+
+        let delay = retry_after
+            .duration_since(SystemTime::now())
+            .unwrap_or(Duration::ZERO);
+
+        Ok((Problem::check::<RenewalInfo>(rsp).await?, delay))
     }
 
     /// Update the account's authentication key
