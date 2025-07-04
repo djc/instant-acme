@@ -30,9 +30,6 @@ pub enum Error {
     /// RFC 8555 uses problem documents as described in RFC 7807.
     #[error(transparent)]
     Api(#[from] Problem),
-    /// Failed to base64-decode data
-    #[error("base64 decoding failed: {0}")]
-    Base64(#[from] base64::DecodeError),
     /// Failed from cryptographic operations
     #[error("cryptographic operation failed: {0}")]
     Crypto(#[from] crypto::Unspecified),
