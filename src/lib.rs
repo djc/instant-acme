@@ -18,6 +18,8 @@ use http::{Method, Request, Response, StatusCode};
 use http_body_util::{BodyExt, Full};
 use httpdate::HttpDate;
 #[cfg(feature = "hyper-rustls")]
+use hyper::body::Incoming;
+#[cfg(feature = "hyper-rustls")]
 use hyper_util::client::legacy::Client as HyperClient;
 #[cfg(feature = "hyper-rustls")]
 use hyper_util::client::legacy::connect::{Connect, HttpConnector};
@@ -211,12 +213,7 @@ impl HttpClient for DefaultClient {
         req: Request<Full<Bytes>>,
     ) -> Pin<Box<dyn Future<Output = Result<BytesResponse, Error>> + Send>> {
         let fut = self.0.request(req);
-        Box::pin(async move {
-            match fut.await {
-                Ok(rsp) => Ok(BytesResponse::from(rsp)),
-                Err(e) => Err(e.into()),
-            }
-        })
+        Box::pin(async move { BytesResponse::try_from(fut.await) })
     }
 }
 
@@ -236,12 +233,7 @@ impl<C: Connect + Clone + Send + Sync + 'static> HttpClient for HyperClient<C, F
         req: Request<Full<Bytes>>,
     ) -> Pin<Box<dyn Future<Output = Result<BytesResponse, Error>> + Send>> {
         let fut = self.request(req);
-        Box::pin(async move {
-            match fut.await {
-                Ok(rsp) => Ok(BytesResponse::from(rsp)),
-                Err(e) => Err(e.into()),
-            }
-        })
+        Box::pin(async move { BytesResponse::try_from(fut.await) })
     }
 }
 
@@ -254,6 +246,16 @@ pub struct BytesResponse {
 }
 
 impl BytesResponse {
+    #[cfg(feature = "hyper-rustls")]
+    fn try_from(
+        result: Result<Response<Incoming>, hyper_util::client::legacy::Error>,
+    ) -> Result<Self, Error> {
+        match result {
+            Ok(rsp) => Ok(BytesResponse::from(rsp)),
+            Err(e) => Err(Error::Other(Box::new(e))),
+        }
+    }
+
     pub(crate) async fn body(mut self) -> Result<Bytes, Box<dyn StdError + Send + Sync + 'static>> {
         self.body.into_bytes().await
     }
