@@ -648,7 +648,7 @@ pub enum AuthorizationStatus {
 #[allow(missing_docs)]
 #[derive(Clone, Debug, Serialize, Deserialize, Eq, PartialEq)]
 #[non_exhaustive]
-#[serde(tag = "type", content = "value", rename_all = "camelCase")]
+#[serde(tag = "type", content = "value", rename_all = "kebab-case")]
 pub enum Identifier {
     Dns(String),
 
@@ -656,6 +656,16 @@ pub enum Identifier {
     ///
     /// Note that not all ACME servers will accept an order with an IP address identifier.
     Ip(IpAddr),
+
+    /// Permanent Identifier
+    ///
+    /// Note that this identifier is only used for attestation.
+    PermanentIdentifier(String),
+
+    /// Hardware Module identifier
+    ///
+    /// Note that this identifier is only used for attestation.
+    HardwareModule(String),
 }
 
 impl Identifier {
@@ -690,6 +700,10 @@ impl fmt::Display for AuthorizedIdentifier<'_> {
             (true, Identifier::Dns(dns)) => f.write_fmt(format_args!("*.{dns}")),
             (false, Identifier::Dns(dns)) => f.write_str(dns),
             (_, Identifier::Ip(addr)) => write!(f, "{addr}"),
+            (_, Identifier::PermanentIdentifier(permanent_identifier)) => {
+                f.write_str(permanent_identifier)
+            }
+            (_, Identifier::HardwareModule(hardware_module)) => f.write_str(hardware_module),
         }
     }
 }
@@ -704,6 +718,8 @@ pub enum ChallengeType {
     Dns01,
     #[serde(rename = "tls-alpn-01")]
     TlsAlpn01,
+    #[serde(rename = "device-attest-01")]
+    DeviceAttest01,
     #[serde(untagged)]
     Unknown(String),
 }
@@ -928,6 +944,16 @@ pub(crate) enum SigningAlgorithm {
     Es256,
     /// HMAC with SHA-256,
     Hs256,
+}
+
+/// Attestation payload used for device-attest-01
+///
+/// See <https://datatracker.ietf.org/doc/draft-acme-device-attest/> for details.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DeviceAttestation<'a> {
+    /// attestation payload
+    pub att_obj: Cow<'a, [u8]>,
 }
 
 #[derive(Debug, Serialize)]

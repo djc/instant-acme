@@ -1,3 +1,4 @@
+use std::borrow::Cow;
 use std::ops::{ControlFlow, Deref};
 use std::sync::Arc;
 use std::time::{Duration, Instant, SystemTime};
@@ -12,7 +13,7 @@ use tokio::time::sleep;
 use crate::account::AccountInner;
 use crate::types::{
     Authorization, AuthorizationState, AuthorizationStatus, AuthorizedIdentifier, Challenge,
-    ChallengeType, Empty, FinalizeRequest, OrderState, OrderStatus, Problem,
+    ChallengeType, DeviceAttestation, Empty, FinalizeRequest, OrderState, OrderStatus, Problem,
 };
 use crate::{Error, Key, crypto, nonce_from_response, retry_after};
 
@@ -443,6 +444,40 @@ impl ChallengeHandle<'_> {
         let rsp = self
             .account
             .post(Some(&Empty {}), self.nonce.take(), &self.challenge.url)
+            .await?;
+
+        *self.nonce = nonce_from_response(&rsp);
+        let response = Problem::check::<Challenge>(rsp).await?;
+        match response.error {
+            Some(details) => Err(Error::Api(details)),
+            None => Ok(()),
+        }
+    }
+
+    /// Notify the server that the challenge is ready by sending a device attestation
+    ///
+    /// This function is for the ACME challenge device-attest-01. It should not be used
+    /// with other challenge types.
+    /// See <https://datatracker.ietf.org/doc/draft-acme-device-attest/> for details.
+    ///
+    /// `payload` is the device attestation object as defined in link. Provide the attestation
+    /// object as a raw blob. Base64 encoding of the attestation object `payload.att_obj`
+    /// is done by this function.
+    pub async fn send_device_attestation(
+        &mut self,
+        payload: &DeviceAttestation<'_>,
+    ) -> Result<(), Error> {
+        if self.challenge.r#type != ChallengeType::DeviceAttest01 {
+            return Err(Error::Str("challenge type should be device-attest-01"));
+        }
+
+        let payload = DeviceAttestation {
+            att_obj: Cow::Owned(BASE64_URL_SAFE_NO_PAD.encode(&payload.att_obj).into()),
+        };
+
+        let rsp = self
+            .account
+            .post(Some(&payload), self.nonce.take(), &self.challenge.url)
             .await?;
 
         *self.nonce = nonce_from_response(&rsp);
