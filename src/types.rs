@@ -710,6 +710,7 @@ impl fmt::Display for AuthorizedIdentifier<'_> {
 
 /// The challenge type
 #[allow(missing_docs)]
+#[non_exhaustive]
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq)]
 pub enum ChallengeType {
     #[serde(rename = "http-01")]
