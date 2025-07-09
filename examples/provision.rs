@@ -1,8 +1,6 @@
 use std::io;
-use std::time::Duration;
 
 use clap::Parser;
-use tokio::time::sleep;
 use tracing::info;
 
 use instant_acme::{
@@ -90,12 +88,7 @@ async fn main() -> anyhow::Result<()> {
     // Finalize the order and print certificate chain, private key and account credentials.
 
     let private_key_pem = order.finalize().await?;
-    let cert_chain_pem = loop {
-        match order.certificate().await? {
-            Some(cert_chain_pem) => break cert_chain_pem,
-            None => sleep(Duration::from_secs(1)).await,
-        }
-    };
+    let cert_chain_pem = order.poll_certificate(&RetryPolicy::default()).await?;
 
     info!("certificate chain:\n\n{cert_chain_pem}");
     info!("private key:\n\n{private_key_pem}");
