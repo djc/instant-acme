@@ -15,7 +15,7 @@ use std::time::{Duration, SystemTime};
 
 use async_trait::async_trait;
 use bytes::{Buf, Bytes};
-use http::header::{CONTENT_TYPE, RETRY_AFTER};
+use http::header::{CONTENT_TYPE, RETRY_AFTER, USER_AGENT};
 use http::{Method, Request, Response, StatusCode};
 use http_body::{Frame, SizeHint};
 use http_body_util::BodyExt;
@@ -61,11 +61,12 @@ struct Client {
 
 impl Client {
     async fn new(directory_url: String, http: Box<dyn HttpClient>) -> Result<Self, Error> {
-        let req = Request::builder()
+        let request = Request::builder()
             .uri(&directory_url)
+            .header(USER_AGENT, CRATE_USER_AGENT)
             .body(BodyWrapper::default())
             .expect("infallible error should not occur");
-        let rsp = http.request(req).await?;
+        let rsp = http.request(request).await?;
         let body = rsp.body().await.map_err(Error::Other)?;
         Ok(Client {
             http,
@@ -123,6 +124,7 @@ impl Client {
         let request = Request::builder()
             .method(Method::POST)
             .uri(url)
+            .header(USER_AGENT, CRATE_USER_AGENT)
             .header(CONTENT_TYPE, JOSE_JSON)
             .body(BodyWrapper::from(serde_json::to_vec(&body)?))?;
 
@@ -137,6 +139,7 @@ impl Client {
         let request = Request::builder()
             .method(Method::HEAD)
             .uri(&self.directory.new_nonce)
+            .header(USER_AGENT, CRATE_USER_AGENT)
             .body(BodyWrapper::default())
             .expect("infallible error should not occur");
 
@@ -400,6 +403,7 @@ mod crypto {
     }
 }
 
+const CRATE_USER_AGENT: &str = concat!("instant-acme/", env!("CARGO_PKG_VERSION"));
 const JOSE_JSON: &str = "application/jose+json";
 const REPLAY_NONCE: &str = "Replay-Nonce";
 

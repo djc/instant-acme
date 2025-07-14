@@ -7,6 +7,8 @@ use std::time::{Duration, SystemTime};
 use base64::prelude::{BASE64_URL_SAFE_NO_PAD, Engine};
 use http::header::LOCATION;
 #[cfg(feature = "time")]
+use http::header::USER_AGENT;
+#[cfg(feature = "time")]
 use http::{Method, Request};
 #[cfg(feature = "hyper-rustls")]
 use rustls::RootCertStore;
@@ -29,7 +31,7 @@ use crate::types::{
 #[cfg(feature = "time")]
 use crate::types::{CertificateIdentifier, RenewalInfo};
 #[cfg(feature = "time")]
-use crate::{BodyWrapper, retry_after};
+use crate::{BodyWrapper, CRATE_USER_AGENT, retry_after};
 use crate::{BytesResponse, Client, Error, HttpClient, crypto, nonce_from_response};
 
 /// An ACME account as described in RFC 8555 (section 7.1.2)
@@ -195,6 +197,7 @@ impl Account {
         let request = Request::builder()
             .method(Method::GET)
             .uri(format!("{renewal_info_url}/{certificate_id}"))
+            .header(USER_AGENT, CRATE_USER_AGENT)
             .body(BodyWrapper::default())?;
 
         let rsp = self.inner.client.http.request(request).await?;
