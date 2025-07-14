@@ -4,7 +4,7 @@
 
 use std::fs;
 
-use rcgen::{BasicConstraints, DistinguishedName, DnType, IsCa, Issuer, KeyPair};
+use rcgen::{BasicConstraints, CertifiedIssuer, DistinguishedName, DnType, IsCa, KeyPair};
 
 fn main() -> anyhow::Result<()> {
     let ca_key = KeyPair::generate()?;
@@ -14,9 +14,8 @@ fn main() -> anyhow::Result<()> {
     ca_params.distinguished_name = distinguished_name;
     ca_params.is_ca = IsCa::Ca(BasicConstraints::Unconstrained);
 
-    let ca_cert = ca_params.self_signed(&ca_key)?;
-    fs::write("tests/testdata/ca.pem", ca_cert.pem())?;
-    let issuer = Issuer::new(ca_params, ca_key);
+    let issuer = CertifiedIssuer::self_signed(ca_params, ca_key)?;
+    fs::write("tests/testdata/ca.pem", issuer.as_ref().pem())?;
 
     let ee_key = KeyPair::generate()?;
     fs::write("tests/testdata/server.key", ee_key.serialize_pem())?;
