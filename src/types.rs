@@ -415,6 +415,7 @@ pub struct NewOrder<'a> {
     pub(crate) replaces: Option<CertificateIdentifier<'a>>,
     /// Identifiers to be included in the order
     identifiers: &'a [Identifier],
+    #[serde(skip_serializing_if = "Option::is_none")]
     profile: Option<&'a str>,
 }
 
