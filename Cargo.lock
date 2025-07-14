@@ -681,7 +681,7 @@ dependencies = [
 
 [[package]]
 name = "instant-acme"
-version = "0.8.1"
+version = "0.8.2"
 dependencies = [
  "anyhow",
  "async-trait",
