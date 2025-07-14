@@ -411,6 +411,7 @@ impl<'de> Deserialize<'de> for Authorization {
 #[serde(rename_all = "camelCase")]
 pub struct NewOrder<'a> {
     /// The [`CertificateIdentifier`] of a previously issued certificate being replaced by the order
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) replaces: Option<CertificateIdentifier<'a>>,
     /// Identifiers to be included in the order
     identifiers: &'a [Identifier],
