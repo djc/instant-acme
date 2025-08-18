@@ -46,7 +46,7 @@ x509-parser = { version = "0.17", default-features = false, optional = true }
 
 [dev-dependencies]
 anyhow = "1.0.66"
-clap = { version = "4.0.29", features = ["derive"] }
+clap = { version = "4.5.45", features = ["derive"] }
 rustls = { version = "0.23", default-features = false }
 tempfile = "3"
 tokio = { version = "1.22.0", features = ["macros", "rt", "rt-multi-thread", "time"] }
