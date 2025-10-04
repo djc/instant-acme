@@ -233,7 +233,7 @@ impl Account {
             old_key: Jwk,
         }
 
-        let (new_key, new_key_pkcs8) = Key::generate()?;
+        let (new_key, new_key_pkcs8) = Key::generate_pkcs8()?;
         let mut header = new_key.header(Some("nonce"), new_key_url);
         header.nonce = None;
         let payload = NewKey {
@@ -359,10 +359,7 @@ impl AccountInner {
     ) -> Result<Self, Error> {
         Ok(Self {
             id: credentials.id,
-            key: match credentials.key_pkcs8 {
-                PrivateKeyDer::Pkcs8(inner) => Key::from_pkcs8_der(inner)?,
-                _ => return Err("unsupported key format, expected PKCS#8".into()),
-            },
+            key: Key::from_pkcs8_der(credentials.key_pkcs8)?,
             client: Arc::new(match (credentials.directory, credentials.urls) {
                 (Some(directory_url), _) => Client::new(directory_url, http).await?,
                 (None, Some(directory)) => Client {
@@ -441,7 +438,7 @@ impl AccountBuilder {
         directory_url: String,
         external_account: Option<&ExternalAccountKey>,
     ) -> Result<(Account, AccountCredentials), Error> {
-        let (key, key_pkcs8) = Key::generate()?;
+        let (key, key_pkcs8) = Key::generate_pkcs8()?;
         Self::create_inner(
             account,
             (key, key_pkcs8),
@@ -468,7 +465,10 @@ impl AccountBuilder {
                 terms_of_service_agreed: true,
                 only_return_existing: true,
             },
-            key,
+            match key {
+                (key, PrivateKeyDer::Pkcs8(pkcs8)) => (key, pkcs8),
+                _ => return Err("unsupported key format, expected PKCS#8".into()),
+            },
             None,
             Client::new(directory_url, self.http).await?,
         )
@@ -497,7 +497,7 @@ impl AccountBuilder {
 
     async fn create_inner(
         account: &NewAccount<'_>,
-        (key, key_pkcs8): (Key, PrivateKeyDer<'static>),
+        (key, key_pkcs8): (Key, PrivatePkcs8KeyDer<'static>),
         external_account: Option<&ExternalAccountKey>,
         client: Client,
     ) -> Result<(Account, AccountCredentials), Error> {
@@ -562,14 +562,21 @@ pub struct Key {
 
 impl Key {
     /// Generate a new ECDSA P-256 key pair
+    #[deprecated(since = "0.8.3", note = "use `generate_pkcs8()` instead")]
     pub fn generate() -> Result<(Self, PrivateKeyDer<'static>), Error> {
+        let (key, pkcs8) = Self::generate_pkcs8()?;
+        Ok((key, PrivateKeyDer::Pkcs8(pkcs8)))
+    }
+
+    /// Generate a new ECDSA P-256 key pair
+    pub fn generate_pkcs8() -> Result<(Self, PrivatePkcs8KeyDer<'static>), Error> {
         let rng = crypto::SystemRandom::new();
         let pkcs8 =
             crypto::EcdsaKeyPair::generate_pkcs8(&crypto::ECDSA_P256_SHA256_FIXED_SIGNING, &rng)
                 .map_err(|_| Error::Crypto)?;
         Ok((
             Self::new(pkcs8.as_ref(), rng)?,
-            PrivatePkcs8KeyDer::from(pkcs8.as_ref().to_vec()).into(),
+            PrivatePkcs8KeyDer::from(pkcs8.as_ref().to_vec()),
         ))
     }
 
