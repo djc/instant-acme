@@ -98,6 +98,13 @@ pub struct AccountCredentials {
     pub(crate) urls: Option<Directory>,
 }
 
+impl AccountCredentials {
+    /// The account's private key
+    pub fn private_key(&self) -> &PrivatePkcs8KeyDer<'_> {
+        &self.key_pkcs8
+    }
+}
+
 mod pkcs8_serde {
     use std::fmt;
 
