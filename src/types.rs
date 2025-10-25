@@ -534,6 +534,7 @@ pub struct NewAccount<'a> {
     /// Set to `true` in order to retrieve an existing account
     ///
     /// Setting this to `false` has not been tested.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
     pub only_return_existing: bool,
 }
 
