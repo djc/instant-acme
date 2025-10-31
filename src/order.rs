@@ -237,7 +237,7 @@ impl Order {
     }
 }
 
-/// An stream-like interface that yields an [`Order`]'s authoritations
+/// An stream-like interface that yields an [`Order`]'s authorizations
 ///
 /// Call [`next()`] to get the next authorization in the order. If the order state
 /// does not yet contain the state of the authorization, it will be fetched from the server.
