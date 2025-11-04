@@ -446,6 +446,58 @@ async fn account_from_key() -> Result<(), Box<dyn StdError>> {
     Ok(())
 }
 
+/// Test account creation with a provided private key
+#[tokio::test]
+#[ignore]
+async fn account_create_from_key() -> Result<(), Box<dyn StdError>> {
+    try_tracing_init();
+
+    let env = Environment::new(EnvironmentConfig::default()).await?;
+    let directory_url = format!("https://{}/dir", &env.config.pebble.listen_address);
+
+    // Generate a new key
+    let (key, key_pkcs8) = Key::generate_pkcs8()?;
+
+    // Create a new account with the generated key
+    let (account1, credentials1) = Account::builder_with_http(Box::new(env.client.clone()))
+        .create_from_key(
+            (
+                key,
+                PrivateKeyDer::try_from(key_pkcs8.secret_pkcs8_der().to_vec())?,
+            ),
+            directory_url.clone(),
+        )
+        .await?;
+
+    // Extract the key to verify it matches what we provided
+    #[derive(Deserialize)]
+    struct JsonKey<'a> {
+        key_pkcs8: &'a str,
+    }
+
+    let json1 = serde_json::to_string(&credentials1)?;
+    let json_key = serde_json::from_str::<JsonKey>(&json1)?;
+    let key_der = BASE64_URL_SAFE_NO_PAD.decode(json_key.key_pkcs8)?;
+
+    // Verify the key matches
+    assert_eq!(key_der, key_pkcs8.secret_pkcs8_der());
+
+    // Now try to load the account using from_key to verify it was created
+    let key2 = Key::from_pkcs8_der(PrivatePkcs8KeyDer::from(key_der.clone()))?;
+    let (account2, credentials2) = Account::builder_with_http(Box::new(env.client.clone()))
+        .from_key((key2, PrivateKeyDer::try_from(key_der)?), directory_url)
+        .await?;
+
+    // Both should be the same account
+    assert_eq!(account1.id(), account2.id());
+    assert_eq!(
+        serde_json::to_string(&credentials1)?,
+        serde_json::to_string(&credentials2)?,
+    );
+
+    Ok(())
+}
+
 fn try_tracing_init() {
     let _ = tracing_subscriber::registry()
         .with(fmt::layer())
