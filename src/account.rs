@@ -459,11 +459,37 @@ impl AccountBuilder {
         key: (Key, PrivateKeyDer<'static>),
         directory_url: String,
     ) -> Result<(Account, AccountCredentials), Error> {
+        self.from_key_inner(key, directory_url, true).await
+    }
+
+    /// Create a new account with the given private key
+    ///
+    /// The returned [`AccountCredentials`] can be serialized and stored for later use.
+    /// Use [`AccountBuilder::from_credentials()`] to restore the account from the credentials.
+    ///
+    /// Unlike [`AccountBuilder::from_key()`] which only loads existing accounts, this method
+    /// will create a new account if one doesn't already exist for the given key.
+    pub async fn create_from_key(
+        self,
+        key: (Key, PrivateKeyDer<'static>),
+        directory_url: String,
+    ) -> Result<(Account, AccountCredentials), Error> {
+        self.from_key_inner(key, directory_url, false).await
+    }
+
+    /// Shared implementation for `from_key` and `create_from_key`
+    #[allow(clippy::wrong_self_convention)]
+    async fn from_key_inner(
+        self,
+        key: (Key, PrivateKeyDer<'static>),
+        directory_url: String,
+        only_return_existing: bool,
+    ) -> Result<(Account, AccountCredentials), Error> {
         Self::create_inner(
             &NewAccount {
                 contact: &[],
                 terms_of_service_agreed: true,
-                only_return_existing: true,
+                only_return_existing,
             },
             match key {
                 (key, PrivateKeyDer::Pkcs8(pkcs8)) => (key, pkcs8),
