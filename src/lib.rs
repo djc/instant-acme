@@ -2,7 +2,7 @@
 
 #![warn(unreachable_pub)]
 #![warn(missing_docs)]
-#![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
+#![cfg_attr(instant_acme_docsrs, feature(doc_cfg))]
 
 use std::convert::Infallible;
 use std::error::Error as StdError;
