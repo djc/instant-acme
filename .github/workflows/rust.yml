@@ -73,10 +73,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@nightly
       - run: cargo doc --locked --all-features --no-deps --document-private-items
         env:
-          RUSTDOCFLAGS: -Dwarnings
+          RUSTDOCFLAGS: -Dwarnings --cfg=instant_acme_docsrs
 
   semver:
     name: Check semver compatibility
