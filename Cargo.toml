@@ -51,7 +51,7 @@ rustls = { version = "0.23", default-features = false }
 tempfile = "3"
 tokio = { version = "1.22.0", features = ["macros", "rt", "rt-multi-thread", "time"] }
 tracing = "0.1.37"
-tracing-subscriber =  { version = "0.3.16", features = ["env-filter"] }
+tracing-subscriber =  { version = "0.3.22", features = ["env-filter"] }
 
 [[example]]
 name = "provision"
