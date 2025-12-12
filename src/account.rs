@@ -153,13 +153,12 @@ impl Account {
 
     /// Revokes a previously issued certificate
     pub async fn revoke<'a>(&'a self, payload: &RevocationRequest<'a>) -> Result<(), Error> {
-        let revoke_url = match self.inner.client.directory.revoke_cert.as_deref() {
-            Some(url) => url,
+        let Some(revoke_url) = self.inner.client.directory.revoke_cert.as_deref() else {
             // This happens because the current account credentials were deserialized from an
             // older version which only serialized a subset of the directory URLs. You should
             // make sure the account credentials include a `directory` field containing a
             // string with the server's directory URL.
-            None => return Err("no revokeCert URL found".into()),
+            return Err("no revokeCert URL found".into());
         };
 
         let rsp = self.inner.post(Some(payload), None, revoke_url).await?;
@@ -187,9 +186,8 @@ impl Account {
         &self,
         certificate_id: &CertificateIdentifier<'_>,
     ) -> Result<(RenewalInfo, Duration), Error> {
-        let renewal_info_url = match self.inner.client.directory.renewal_info.as_deref() {
-            Some(url) => url,
-            None => return Err(Error::Unsupported("ACME renewal information (ARI)")),
+        let Some(renewal_info_url) = self.inner.client.directory.renewal_info.as_deref() else {
+            return Err(Error::Unsupported("ACME renewal information (ARI)"));
         };
 
         // Note: unlike other ACME endpoints, the renewal info endpoint does not require a nonce
@@ -221,9 +219,8 @@ impl Account {
     ///
     /// See <https://datatracker.ietf.org/doc/html/rfc8555#section-7.3.5> for more information.
     pub async fn update_key(&mut self) -> Result<AccountCredentials, Error> {
-        let new_key_url = match self.inner.client.directory.key_change.as_deref() {
-            Some(url) => url,
-            None => return Err("Account key rollover not supported by ACME CA".into()),
+        let Some(new_key_url) = self.inner.client.directory.key_change.as_deref() else {
+            return Err("Account key rollover not supported by ACME CA".into());
         };
 
         #[derive(Debug, Serialize)]

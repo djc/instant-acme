@@ -127,9 +127,8 @@ impl Order {
             return Err(Error::Str("invalid order state"));
         }
 
-        let cert_url = match &self.state.certificate {
-            Some(cert_url) => cert_url,
-            None => return Err(Error::Str("no certificate URL found")),
+        let Some(cert_url) = &self.state.certificate else {
+            return Err(Error::Str("no certificate URL found"));
         };
 
         let rsp = self
