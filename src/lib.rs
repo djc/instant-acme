@@ -1,6 +1,5 @@
 //! Async pure-Rust ACME (RFC 8555) client.
 
-#![warn(unreachable_pub)]
 #![warn(missing_docs)]
 #![cfg_attr(instant_acme_docsrs, feature(doc_cfg))]
 
@@ -43,15 +42,15 @@ pub use order::{
     RetryPolicy,
 };
 mod types;
-#[cfg(feature = "time")]
-pub use types::RenewalInfo;
 pub use types::{
     AccountCredentials, Authorization, AuthorizationState, AuthorizationStatus,
-    AuthorizedIdentifier, CertificateIdentifier, Challenge, ChallengeType, Error, Identifier,
-    LetsEncrypt, NewAccount, NewOrder, OrderState, OrderStatus, Problem, ProfileMeta,
-    RevocationReason, RevocationRequest, ZeroSsl,
+    AuthorizedIdentifier, CertificateIdentifier, Challenge, ChallengeStatus, ChallengeType,
+    DeviceAttestation, Error, Identifier, LetsEncrypt, NewAccount, NewOrder, OrderState,
+    OrderStatus, Problem, ProfileMeta, RevocationReason, RevocationRequest, Subproblem, ZeroSsl,
 };
 use types::{Directory, JoseJson, Signer};
+#[cfg(feature = "time")]
+pub use types::{RenewalInfo, SuggestedWindow};
 
 struct Client {
     http: Box<dyn HttpClient>,
@@ -68,7 +67,7 @@ impl Client {
             .expect("infallible error should not occur");
         let rsp = http.request(request).await?;
         let body = rsp.body().await.map_err(Error::Other)?;
-        Ok(Client {
+        Ok(Self {
             http,
             directory: serde_json::from_slice(&body)?,
             directory_url: Some(directory_url),
@@ -203,7 +202,7 @@ struct DefaultClient(HyperClient<hyper_rustls::HttpsConnector<HttpConnector>, Bo
 impl DefaultClient {
     fn try_new() -> Result<Self, Error> {
         Ok(Self::new(
-            hyper_rustls::HttpsConnectorBuilder::new()
+            HttpsConnectorBuilder::new()
                 .try_with_platform_verifier()
                 .map_err(|e| Error::Other(Box::new(e)))?,
         ))
@@ -211,7 +210,7 @@ impl DefaultClient {
 
     fn with_roots(roots: rustls::RootCertStore) -> Result<Self, Error> {
         Ok(Self::new(
-            hyper_rustls::HttpsConnectorBuilder::new().with_tls_config(
+            HttpsConnectorBuilder::new().with_tls_config(
                 rustls::ClientConfig::builder()
                     .with_root_certificates(roots)
                     .with_no_client_auth(),
@@ -272,7 +271,7 @@ impl BytesResponse {
         result: Result<Response<Incoming>, hyper_util::client::legacy::Error>,
     ) -> Result<Self, Error> {
         match result {
-            Ok(rsp) => Ok(BytesResponse::from(rsp)),
+            Ok(rsp) => Ok(Self::from(rsp)),
             Err(e) => Err(Error::Other(Box::new(e))),
         }
     }
@@ -347,7 +346,7 @@ impl http_body::Body for BodyWrapper<Bytes> {
 
 impl From<Vec<u8>> for BodyWrapper<Bytes> {
     fn from(data: Vec<u8>) -> Self {
-        BodyWrapper {
+        Self {
             inner: Some(Bytes::from(data)),
         }
     }
@@ -355,7 +354,7 @@ impl From<Vec<u8>> for BodyWrapper<Bytes> {
 
 #[async_trait]
 impl BytesBody for Bytes {
-    async fn into_bytes(&mut self) -> Result<Bytes, Box<dyn StdError + Send + Sync + 'static>> {
+    async fn into_bytes(&mut self) -> Result<Self, Box<dyn StdError + Send + Sync + 'static>> {
         Ok(self.to_owned())
     }
 }

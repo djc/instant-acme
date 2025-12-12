@@ -74,7 +74,7 @@ impl Error {
 
 impl From<&'static str> for Error {
     fn from(s: &'static str) -> Self {
-        Error::Str(s)
+        Self::Str(s)
     }
 }
 
@@ -173,7 +173,7 @@ impl Problem {
         let body = rsp.body().await.map_err(Error::Other)?;
         match status.is_informational() || status.is_success() || status.is_redirection() {
             true => Ok(body),
-            false => Err(serde_json::from_slice::<Problem>(&body)?.into()),
+            false => Err(serde_json::from_slice::<Self>(&body)?.into()),
         }
     }
 }
@@ -730,6 +730,7 @@ pub enum ChallengeType {
     Unknown(String),
 }
 
+#[allow(missing_docs)]
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub enum ChallengeStatus {
@@ -869,7 +870,7 @@ impl Serialize for CertificateIdentifier<'_> {
 impl<'a> TryFrom<&'a CertificateDer<'_>> for CertificateIdentifier<'_> {
     type Error = String;
 
-    fn try_from(cert: &'a CertificateDer) -> Result<Self, Self::Error> {
+    fn try_from(cert: &'a CertificateDer<'_>) -> Result<Self, Self::Error> {
         let (_, parsed_cert) = parse_x509_certificate(cert.as_ref())
             .map_err(|e| format!("failed to parse certificate: {e}"))?;
 

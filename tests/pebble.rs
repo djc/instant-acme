@@ -362,7 +362,7 @@ async fn update_key() -> Result<(), Box<dyn StdError>> {
     );
 
     // Change the Pebble environment to use the new ACME account key.
-    env.account = instant_acme::Account::builder_with_http(Box::new(env.client.clone()))
+    env.account = Account::builder_with_http(Box::new(env.client.clone()))
         .from_credentials(new_credentials)
         .await?;
 
@@ -403,7 +403,7 @@ async fn account_from_key() -> Result<(), Box<dyn StdError>> {
     }
 
     let json1 = serde_json::to_string(&credentials)?;
-    let json_key = serde_json::from_str::<JsonKey>(&json1)?;
+    let json_key = serde_json::from_str::<JsonKey<'_>>(&json1)?;
     let key_der = BASE64_URL_SAFE_NO_PAD.decode(json_key.key_pkcs8)?;
     let key = Key::from_pkcs8_der(PrivatePkcs8KeyDer::from(key_der.clone()))?;
 
@@ -476,7 +476,7 @@ async fn account_create_from_key() -> Result<(), Box<dyn StdError>> {
     }
 
     let json1 = serde_json::to_string(&credentials1)?;
-    let json_key = serde_json::from_str::<JsonKey>(&json1)?;
+    let json_key = serde_json::from_str::<JsonKey<'_>>(&json1)?;
     let key_der = BASE64_URL_SAFE_NO_PAD.decode(json_key.key_pkcs8)?;
 
     // Verify the key matches
@@ -530,7 +530,7 @@ impl Environment {
     ///
     /// Spawned test server subprocesses are torn down cleanly on drop to avoid leaving
     /// stray child processes.
-    async fn new(config: EnvironmentConfig) -> Result<Environment, Box<dyn StdError>> {
+    async fn new(config: EnvironmentConfig) -> Result<Self, Box<dyn StdError>> {
         #[derive(Clone, Serialize)]
         struct ConfigWrapper<'a> {
             pebble: &'a PebbleConfig,
@@ -646,7 +646,7 @@ impl Environment {
 
             let mut challenge = authz
                 .challenge(A::TYPE)
-                .ok_or(format!("no {:?} challenge found", A::TYPE))?;
+                .ok_or_else(|| format!("no {:?} challenge found", A::TYPE))?;
 
             let key_authz = challenge.key_authorization();
             self.request_challenge::<A>(&challenge, &key_authz).await?;
@@ -816,9 +816,8 @@ impl AuthorizationMethod for Dns01 {
         key_auth: &'a KeyAuthorization,
     ) -> impl Serialize + 'a {
         let identifier = challenge.identifier();
-        let domain = match identifier.identifier {
-            Identifier::Dns(domain) => domain,
-            _ => unreachable!("unsupported identifier {identifier:?}"),
+        let Identifier::Dns(domain) = identifier.identifier else {
+            unreachable!("unsupported identifier {identifier:?}");
         };
 
         let host = format!("_acme-challenge.{domain}.");
