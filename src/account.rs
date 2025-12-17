@@ -32,7 +32,7 @@ use crate::types::{
 use crate::types::{CertificateIdentifier, RenewalInfo};
 #[cfg(feature = "time")]
 use crate::{BodyWrapper, CRATE_USER_AGENT, retry_after};
-use crate::{BytesResponse, Client, Error, HttpClient, crypto, nonce_from_response};
+use crate::{BytesResponse, Client, Error, HttpClient, Identifier, crypto, nonce_from_response};
 
 /// An ACME account as described in RFC 8555 (section 7.1.2)
 ///
@@ -123,11 +123,19 @@ impl Account {
             ));
         }
 
+        let identifiers = order.identifiers.iter()
+            .filter_map(|id| match id {
+                Identifier::Dns(name) => Some(name.clone()),
+                _ => None,
+            })
+            .collect();
+
         Ok(Order {
             account: self.inner.clone(),
             nonce,
             retry_after: None,
             state,
+            identifiers: Some(identifiers),
             url: order_url.ok_or("no order URL found")?,
         })
     }
@@ -148,6 +156,7 @@ impl Account {
             // simple no url error hides the causing error in `Problem::check`.
             state: Problem::check::<OrderState>(rsp).await?,
             url,
+            identifiers: None,
         })
     }
 

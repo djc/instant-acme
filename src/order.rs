@@ -31,6 +31,7 @@ pub struct Order {
     pub(crate) retry_after: Option<SystemTime>,
     pub(crate) url: String,
     pub(crate) state: OrderState,
+    pub(crate) identifiers: Option<Vec<String>>,
 }
 
 impl Order {
@@ -63,11 +64,21 @@ impl Order {
     /// the order is in the appropriate state.
     #[cfg(feature = "rcgen")]
     pub async fn finalize(&mut self) -> Result<String, Error> {
-        let mut names = Vec::with_capacity(self.state.authorizations.len());
-        let mut identifiers = self.identifiers();
-        while let Some(result) = identifiers.next().await {
-            names.push(result?.to_string());
-        }
+        let names = if let Some(identifiers) = &self.identifiers {
+            // If we have a provided list of identifiers use that for
+            // the SANs as the CA will use the first one for the
+            // Subject CN. This is in line with how certbot and other
+            // ACME tools behaves.
+            identifiers.clone()
+
+        } else {
+            let mut names = Vec::with_capacity(self.state.authorizations.len());
+            let mut identifiers = self.identifiers();
+            while let Some(result) = identifiers.next().await {
+                names.push(result?.to_string());
+            }
+            names
+        };
 
         let mut params = CertificateParams::new(names).map_err(Error::from_rcgen)?;
         params.distinguished_name = DistinguishedName::new();
