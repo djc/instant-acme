@@ -129,8 +129,8 @@ impl Account {
             .map(|id| match id {
                 Identifier::Dns(name) => name.clone(),
                 Identifier::Ip(ip) => ip.to_string(),
-                Identifier::PermanentIdentifier(name) => name.to_string(),
-                Identifier::HardwareModule(name) => name.to_string(),
+                Identifier::PermanentIdentifier(name) => name.clone(),
+                Identifier::HardwareModule(name) => name.clone(),
             })
             .collect();
 
