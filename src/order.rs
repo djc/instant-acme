@@ -70,7 +70,6 @@ impl Order {
             // Subject CN. This is in line with how certbot and other
             // ACME tools behaves.
             identifiers.clone()
-
         } else {
             let mut names = Vec::with_capacity(self.state.authorizations.len());
             let mut identifiers = self.identifiers();

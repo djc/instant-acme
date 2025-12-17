@@ -123,7 +123,9 @@ impl Account {
             ));
         }
 
-        let identifiers = order.identifiers.iter()
+        let identifiers = order
+            .identifiers
+            .iter()
             .filter_map(|id| match id {
                 Identifier::Dns(name) => Some(name.clone()),
                 _ => None,
