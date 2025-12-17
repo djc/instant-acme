@@ -126,9 +126,11 @@ impl Account {
         let identifiers = order
             .identifiers
             .iter()
-            .filter_map(|id| match id {
-                Identifier::Dns(name) => Some(name.clone()),
-                _ => None,
+            .map(|id| match id {
+                Identifier::Dns(name) => name.clone(),
+                Identifier::Ip(ip) => ip.to_string(),
+                Identifier::PermanentIdentifier(name) => name.to_string(),
+                Identifier::HardwareModule(name) => name.to_string(),
             })
             .collect();
 
