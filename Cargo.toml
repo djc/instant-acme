@@ -36,7 +36,7 @@ hyper-util = { version = "0.1.5", features = ["client", "client-legacy", "http1"
 rcgen = { version = "0.14.2", default-features = false, features = ["pem"], optional = true }
 ring = { version = "0.17", features = ["std"], optional = true }
 rustls = { version = "0.23", default-features = false, optional = true }
-rustls-pki-types = "1.1.0"
+rustls-pki-types = "1.13.2"
 serde = { version = "1.0.104", features = ["derive"] }
 serde_json = "1.0.78"
 time = { version = "0.3", default-features = false, features = ["serde", "parsing"], optional = true }
