@@ -1,5 +1,11 @@
 [advisories]
 yanked = "deny"
+ignore = [
+  # RUSTSEC-2026-0009: Vulnerability in time
+  #   Not applicable - `instant-acme` only parses RFC-3339 dates from a trusted
+  #   source (the ACME server). Updating `time` requires an MSRV bump.
+  "RUSTSEC-2026-0009"
+]
 
 [licenses]
 version = 2
