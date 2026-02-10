@@ -956,10 +956,8 @@ pub(crate) enum SigningAlgorithm {
 /// Attestation payload used for device-attest-01
 ///
 /// See <https://datatracker.ietf.org/doc/draft-acme-device-attest/> for details.
-#[derive(Serialize)]
-#[serde(rename_all = "camelCase")]
 pub struct DeviceAttestation<'a> {
-    /// attestation payload
+    /// CBOR encoded attestation payload
     pub att_obj: Cow<'a, [u8]>,
 }
 
