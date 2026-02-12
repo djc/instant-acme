@@ -470,8 +470,14 @@ impl ChallengeHandle<'_> {
             return Err(Error::Str("challenge type should be device-attest-01"));
         }
 
-        let payload = DeviceAttestation {
-            att_obj: Cow::Owned(BASE64_URL_SAFE_NO_PAD.encode(&payload.att_obj).into()),
+        #[derive(Serialize)]
+        #[serde(rename_all = "camelCase")]
+        struct DeviceAttestationBase64<'a> {
+            att_obj: Cow<'a, str>,
+        }
+
+        let payload = DeviceAttestationBase64 {
+            att_obj: Cow::Owned(BASE64_URL_SAFE_NO_PAD.encode(&payload.att_obj)),
         };
 
         let rsp = self
