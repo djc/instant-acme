@@ -724,6 +724,7 @@ pub enum ChallengeType {
     Dns01,
     #[serde(rename = "tls-alpn-01")]
     TlsAlpn01,
+    /// Note: Device attestation support is experimental
     #[serde(rename = "device-attest-01")]
     DeviceAttest01,
     #[serde(untagged)]
