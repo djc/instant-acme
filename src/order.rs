@@ -465,6 +465,8 @@ impl ChallengeHandle<'_> {
     ///
     /// The function yields the challenge status from the ACME server that validated the
     /// attestation challenge.
+    ///
+    /// Note: Device attestation support is experimental.
     pub async fn send_device_attestation(
         &mut self,
         payload: &DeviceAttestation<'_>,

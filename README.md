@@ -44,6 +44,7 @@ If both `ring` and `aws-lc-rs` are enabled, `aws-lc-rs` will be used.
 ## Limitations
 
 * Only supports P-256 ECDSA account keys for now
+* Device attestation support is experimental
 
 ## Getting started
 
