@@ -724,12 +724,14 @@ pub enum ChallengeType {
     Dns01,
     #[serde(rename = "tls-alpn-01")]
     TlsAlpn01,
+    /// Note: Device attestation support is experimental
     #[serde(rename = "device-attest-01")]
     DeviceAttest01,
     #[serde(untagged)]
     Unknown(String),
 }
 
+/// Status of an ACME [Challenge]
 #[allow(missing_docs)]
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq)]
 #[serde(rename_all = "camelCase")]
