@@ -565,7 +565,7 @@ impl Environment {
             Command::new(&challtestsrv_path)
                 .arg("-management")
                 .arg(format!(":{}", config.challtestsrv_port))
-                .arg("-dns01")
+                .arg("-dnsserver")
                 .arg(format!(":{}", config.dns_port))
                 .arg("-http01")
                 .arg(format!(":{}", config.pebble.http_port))
