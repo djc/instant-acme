@@ -44,9 +44,10 @@ pub use order::{
 mod types;
 pub use types::{
     AccountCredentials, Authorization, AuthorizationState, AuthorizationStatus,
-    AuthorizedIdentifier, CertificateIdentifier, Challenge, ChallengeStatus, ChallengeType,
-    DeviceAttestation, Error, Identifier, LetsEncrypt, NewAccount, NewOrder, OrderState,
-    OrderStatus, Problem, ProfileMeta, RevocationReason, RevocationRequest, Subproblem, ZeroSsl,
+    AuthorizedIdentifier, CertificateIdentifier, Challenge, ChallengeState, ChallengeStatus,
+    ChallengeType, DeviceAttestation, Error, Identifier, LetsEncrypt, NewAccount, NewOrder,
+    OrderState, OrderStatus, Problem, ProfileMeta, RevocationReason, RevocationRequest, Subproblem,
+    ZeroSsl,
 };
 use types::{Directory, JoseJson, Signer};
 #[cfg(feature = "time")]
