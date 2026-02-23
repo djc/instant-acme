@@ -504,7 +504,7 @@ impl ChallengeHandle<'_> {
     /// the challenge's `KeyAuthorization`. The `KeyAuthorization` must be used to provision the
     /// expected challenge response based on the challenge type in use.
     pub fn key_authorization(&self) -> Result<KeyAuthorization, Error> {
-        KeyAuthorization::new(self.challenge, &self.account.key)
+        KeyAuthorization::new(&self.challenge.token, &self.account.key)
     }
 
     /// The identifier for this challenge's authorization
@@ -532,10 +532,10 @@ pub struct KeyAuthorization {
 }
 
 impl KeyAuthorization {
-    fn new(challenge: &Challenge, key: &Key) -> Result<Self, Error> {
+    fn new(token: &str, key: &Key) -> Result<Self, Error> {
         let inner = format!(
             "{}.{}",
-            challenge.token,
+            token,
             BASE64_URL_SAFE_NO_PAD.encode(key.thumb_sha256()?)
         );
 
