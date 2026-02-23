@@ -333,6 +333,9 @@ pub struct Challenge {
     /// Challenge identifier
     pub url: String,
     /// Token for this challenge
+    ///
+    /// Unknown `ChallengeType` instances may omit this field, leaving it empty.
+    #[serde(default)]
     pub token: String,
     /// Current status
     pub status: ChallengeStatus,
