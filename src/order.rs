@@ -504,7 +504,7 @@ impl ChallengeHandle<'_> {
     /// the challenge's `KeyAuthorization`. The `KeyAuthorization` must be used to provision the
     /// expected challenge response based on the challenge type in use.
     pub fn key_authorization(&self) -> KeyAuthorization {
-        KeyAuthorization::new(self.challenge, &self.account.key)
+        KeyAuthorization::new(&self.challenge.token, &self.account.key)
     }
 
     /// The identifier for this challenge's authorization
@@ -529,8 +529,8 @@ impl Deref for ChallengeHandle<'_> {
 pub struct KeyAuthorization(String);
 
 impl KeyAuthorization {
-    fn new(challenge: &Challenge, key: &Key) -> Self {
-        Self(format!("{}.{}", challenge.token, &key.thumb))
+    fn new(token: &str, key: &Key) -> Self {
+        Self(format!("{token}.{}", &key.thumb))
     }
 
     /// Get the key authorization value
