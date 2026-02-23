@@ -71,7 +71,7 @@ async fn main() -> anyhow::Result<()> {
         println!(
             "_acme-challenge.{} IN TXT {}",
             challenge.identifier(),
-            challenge.key_authorization().dns_value()
+            challenge.key_authorization().unwrap().dns_value()
         );
         io::stdin().read_line(&mut String::new())?;
 

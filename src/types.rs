@@ -145,7 +145,7 @@ mod pkcs8_serde {
 }
 
 /// An RFC 7807 problem document as returned by the ACME server
-#[derive(Clone, Debug, Deserialize)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Problem {
     /// One of an enumerated list of problem types
@@ -165,7 +165,9 @@ pub struct Problem {
 
 impl Problem {
     pub(crate) async fn check<T: DeserializeOwned>(rsp: BytesResponse) -> Result<T, Error> {
-        Ok(serde_json::from_slice(&Self::from_response(rsp).await?)?)
+        let body = Self::from_response(rsp).await?;
+        println!("{}", str::from_utf8(&body).unwrap());
+        Ok(serde_json::from_slice(&body)?)
     }
 
     pub(crate) async fn from_response(rsp: BytesResponse) -> Result<Bytes, Error> {
@@ -209,7 +211,7 @@ impl std::error::Error for Problem {}
 /// An RFC 8555 subproblem document contained within a problem returned by the ACME server
 ///
 /// See <https://www.rfc-editor.org/rfc/rfc8555#section-6.7.1>
-#[derive(Clone, Debug, Deserialize)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct Subproblem {
     /// The identifier associated with this problem
     pub identifier: Option<Identifier>,
@@ -686,18 +688,67 @@ impl fmt::Display for AuthorizedIdentifier<'_> {
 /// An ACME challenge as described in RFC 8555 (section 7.1.5)
 ///
 /// <https://datatracker.ietf.org/doc/html/rfc8555#section-7.1.5>
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Serialize)]
 pub struct Challenge {
     /// Type of challenge
-    pub r#type: ChallengeType,
+    #[serde(flatten)]
+    pub state: ChallengeState,
     /// Challenge identifier
     pub url: String,
-    /// Token for this challenge
-    pub token: String,
     /// Current status
     pub status: ChallengeStatus,
     /// Potential error state
     pub error: Option<Problem>,
+}
+
+impl Challenge {
+    /// Get the token for this challenge, if it has one
+    pub fn token(&self) -> Option<&str> {
+        match &self.state {
+            ChallengeState::Http01 { token }
+            | ChallengeState::Dns01 { token }
+            | ChallengeState::TlsAlpn01 { token } => Some(token),
+            ChallengeState::DeviceAttest01
+            | ChallengeState::DnsPersist01 { .. }
+            | ChallengeState::Unknown(_) => None,
+        }
+    }
+}
+
+#[allow(missing_docs)]
+#[derive(Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(tag = "type")]
+pub enum ChallengeState {
+    #[serde(rename = "http-01")]
+    Http01 { token: String },
+    #[serde(rename = "dns-01")]
+    Dns01 { token: String },
+    #[serde(rename = "dns-persist-01")]
+    DnsPersist01 {
+        #[serde(rename = "issuer-domain-names")]
+        issuer_domain_names: Vec<String>,
+    },
+    #[serde(rename = "tls-alpn-01")]
+    TlsAlpn01 { token: String },
+    /// Note: Device attestation support is experimental
+    #[serde(rename = "device-attest-01")]
+    DeviceAttest01,
+    #[serde(untagged)]
+    Unknown(String),
+}
+
+impl ChallengeState {
+    /// Get the type of this challenge
+    pub fn r#type(&self) -> ChallengeType {
+        match self {
+            Self::Http01 { .. } => ChallengeType::Http01,
+            Self::Dns01 { .. } => ChallengeType::Dns01,
+            Self::DnsPersist01 { .. } => ChallengeType::DnsPersist01,
+            Self::TlsAlpn01 { .. } => ChallengeType::TlsAlpn01,
+            Self::DeviceAttest01 => ChallengeType::DeviceAttest01,
+            Self::Unknown(s) => ChallengeType::Unknown(s.clone()),
+        }
+    }
 }
 
 /// The challenge type
@@ -709,6 +760,8 @@ pub enum ChallengeType {
     Http01,
     #[serde(rename = "dns-01")]
     Dns01,
+    #[serde(rename = "dns-persist-01")]
+    DnsPersist01,
     #[serde(rename = "tls-alpn-01")]
     TlsAlpn01,
     /// Note: Device attestation support is experimental
@@ -720,7 +773,7 @@ pub enum ChallengeType {
 
 /// Status of an ACME [Challenge]
 #[allow(missing_docs)]
-#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub enum ChallengeStatus {
     Pending,
@@ -1040,6 +1093,18 @@ mod tests {
     // https://datatracker.ietf.org/doc/html/rfc8555#section-8.4
     #[test]
     fn challenge() {
+        dbg!(
+            serde_json::to_string(&Challenge {
+                state: ChallengeState::Dns01 {
+                    token: "foo".to_owned()
+                },
+                url: "bar".to_owned(),
+                status: ChallengeStatus::Pending,
+                error: None,
+            })
+            .unwrap()
+        );
+
         const CHALLENGE: &str = r#"{
           "type": "dns-01",
           "url": "https://example.com/acme/chall/Rg5dV14Gh1Q",
@@ -1048,10 +1113,14 @@ mod tests {
         }"#;
 
         let obj = serde_json::from_str::<Challenge>(CHALLENGE).unwrap();
-        assert_eq!(obj.r#type, ChallengeType::Dns01);
+        assert_eq!(
+            obj.state,
+            ChallengeState::Dns01 {
+                token: "evaGxfADs6pSRb2LAv9IZf17Dt3juxGJ-PCt92wr-oA".to_owned()
+            }
+        );
         assert_eq!(obj.url, "https://example.com/acme/chall/Rg5dV14Gh1Q");
         assert_eq!(obj.status, ChallengeStatus::Pending);
-        assert_eq!(obj.token, "evaGxfADs6pSRb2LAv9IZf17Dt3juxGJ-PCt92wr-oA");
     }
 
     // https://datatracker.ietf.org/doc/html/rfc8555#section-7.6

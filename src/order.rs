@@ -394,7 +394,11 @@ impl<'a> AuthorizationHandle<'a> {
     ///
     /// Yields an object to interact with the challenge for the given type, if available.
     pub fn challenge(&'a mut self, r#type: ChallengeType) -> Option<ChallengeHandle<'a>> {
-        let challenge = self.state.challenges.iter().find(|c| c.r#type == r#type)?;
+        let challenge = self
+            .state
+            .challenges
+            .iter()
+            .find(|c| c.state.r#type() == r#type)?;
         Some(ChallengeHandle {
             identifier: self.state.identifier(),
             challenge,
@@ -471,7 +475,7 @@ impl ChallengeHandle<'_> {
         &mut self,
         payload: &DeviceAttestation<'_>,
     ) -> Result<ChallengeStatus, Error> {
-        if self.challenge.r#type != ChallengeType::DeviceAttest01 {
+        if self.challenge.state.r#type() != ChallengeType::DeviceAttest01 {
             return Err(Error::Str("challenge type should be device-attest-01"));
         }
 
@@ -503,8 +507,10 @@ impl ChallengeHandle<'_> {
     /// Combines a challenge's token with the thumbprint of the account's public key to compute
     /// the challenge's `KeyAuthorization`. The `KeyAuthorization` must be used to provision the
     /// expected challenge response based on the challenge type in use.
-    pub fn key_authorization(&self) -> KeyAuthorization {
-        KeyAuthorization::new(&self.challenge.token, &self.account.key)
+    pub fn key_authorization(&self) -> Option<KeyAuthorization> {
+        self.challenge
+            .token()
+            .map(|token| KeyAuthorization::new(token, &self.account.key))
     }
 
     /// The identifier for this challenge's authorization

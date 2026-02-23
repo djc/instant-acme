@@ -637,25 +637,33 @@ impl Environment {
         // Collect up the relevant challenges, provisioning the expected responses as we go.
         let mut authorizations = order.authorizations();
         while let Some(result) = authorizations.next().await {
+            dbg!("got authorization");
             let mut authz = result?;
+            dbg!(&authz.challenges);
             match authz.status {
                 AuthorizationStatus::Pending => {}
                 AuthorizationStatus::Valid => continue,
                 _ => unreachable!("unexpected authz state: {:?}", authz.status),
             }
 
+            dbg!("selecting challenge");
             let mut challenge = authz
                 .challenge(A::TYPE)
                 .ok_or_else(|| format!("no {:?} challenge found", A::TYPE))?;
 
-            let key_authz = challenge.key_authorization();
+            dbg!("get key authorization");
+            let key_authz = challenge.key_authorization().unwrap();
+            dbg!("request challenge");
             self.request_challenge::<A>(&challenge, &key_authz).await?;
 
             debug!(challenge_url = challenge.url, "marking challenge ready");
+            dbg!("set challenge ready");
             challenge.set_ready().await?;
+            dbg!("challenge ready");
         }
 
         // Poll until the order is ready.
+        dbg!("poll_ready()");
         let status = order.poll_ready(&RETRY_POLICY).await?;
         if status != OrderStatus::Ready {
             return Err(format!("unexpected order status: {status:?}").into());
@@ -787,7 +795,7 @@ impl AuthorizationMethod for Http01 {
         key_auth: &'a KeyAuthorization,
     ) -> impl Serialize + 'a {
         debug!(
-            token = challenge.token,
+            token = ?challenge.token(),
             key_auth = key_auth.as_str(),
             "provisioning HTTP-01 response",
         );
@@ -799,7 +807,7 @@ impl AuthorizationMethod for Http01 {
         }
 
         AddHttp01Request {
-            token: &challenge.token,
+            token: challenge.token().unwrap(),
             content: key_auth.as_str(),
         }
     }
