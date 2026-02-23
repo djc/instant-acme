@@ -323,23 +323,6 @@ struct JwkThumb<'a> {
     y: &'a str,
 }
 
-/// An ACME challenge as described in RFC 8555 (section 7.1.5)
-///
-/// <https://datatracker.ietf.org/doc/html/rfc8555#section-7.1.5>
-#[derive(Debug, Deserialize)]
-pub struct Challenge {
-    /// Type of challenge
-    pub r#type: ChallengeType,
-    /// Challenge identifier
-    pub url: String,
-    /// Token for this challenge
-    pub token: String,
-    /// Current status
-    pub status: ChallengeStatus,
-    /// Potential error state
-    pub error: Option<Problem>,
-}
-
 /// Contents of an ACME order as described in RFC 8555 (section 7.1.3)
 ///
 /// The order identity will usually be represented by an [Order](crate::Order).
@@ -636,19 +619,6 @@ impl AuthorizationState {
     }
 }
 
-/// Status for an [`AuthorizationState`]
-#[allow(missing_docs)]
-#[derive(Clone, Copy, Debug, Serialize, Deserialize, Eq, PartialEq)]
-#[serde(rename_all = "camelCase")]
-pub enum AuthorizationStatus {
-    Pending,
-    Valid,
-    Invalid,
-    Revoked,
-    Expired,
-    Deactivated,
-}
-
 /// Represent an identifier in an ACME [Order](crate::Order)
 #[allow(missing_docs)]
 #[derive(Clone, Debug, Serialize, Deserialize, Eq, PartialEq)]
@@ -713,6 +683,23 @@ impl fmt::Display for AuthorizedIdentifier<'_> {
     }
 }
 
+/// An ACME challenge as described in RFC 8555 (section 7.1.5)
+///
+/// <https://datatracker.ietf.org/doc/html/rfc8555#section-7.1.5>
+#[derive(Debug, Deserialize)]
+pub struct Challenge {
+    /// Type of challenge
+    pub r#type: ChallengeType,
+    /// Challenge identifier
+    pub url: String,
+    /// Token for this challenge
+    pub token: String,
+    /// Current status
+    pub status: ChallengeStatus,
+    /// Potential error state
+    pub error: Option<Problem>,
+}
+
 /// The challenge type
 #[allow(missing_docs)]
 #[non_exhaustive]
@@ -740,6 +727,19 @@ pub enum ChallengeStatus {
     Processing,
     Valid,
     Invalid,
+}
+
+/// Status for an [`AuthorizationState`]
+#[allow(missing_docs)]
+#[derive(Clone, Copy, Debug, Serialize, Deserialize, Eq, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub enum AuthorizationStatus {
+    Pending,
+    Valid,
+    Invalid,
+    Revoked,
+    Expired,
+    Deactivated,
 }
 
 /// Status of an [Order](crate::Order)
