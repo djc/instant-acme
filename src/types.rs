@@ -314,6 +314,27 @@ pub enum JwkThumbFields<'a> {
         #[serde(serialize_with = "base64url::serialize")]
         y: &'a [u8],
     },
+    /// Octet Key Pair (Ed25519, Ed448, X25519, etc.)
+    Okp {
+        /// The curve name (e.g., `"Ed25519"`)
+        crv: &'static str,
+        /// Key type, must be `"OKP"`
+        kty: &'static str,
+        /// The public key (serialized as base64url)
+        #[serde(serialize_with = "base64url::serialize")]
+        x: &'a [u8],
+    },
+    /// RSA key
+    Rsa {
+        /// The public exponent (serialized as base64url)
+        #[serde(serialize_with = "base64url::serialize")]
+        e: &'a [u8],
+        /// Key type, must be `"RSA"`
+        kty: &'static str,
+        /// The modulus (serialized as base64url)
+        #[serde(serialize_with = "base64url::serialize")]
+        n: &'a [u8],
+    },
 }
 
 mod base64url {
@@ -959,14 +980,27 @@ fn deserialize_static_certificate_identifier<'de, D: serde::Deserializer<'de>>(
 #[serde(rename_all = "UPPERCASE")]
 #[non_exhaustive]
 pub enum SigningAlgorithm {
+    /// EdDSA using the Ed25519 parameter set in Section 5.1 of [RFC 8032](https://www.rfc-editor.org/rfc/rfc8032)
+    ///
+    /// [RFC 9864, Section 2.2](https://www.rfc-editor.org/rfc/rfc9864#section-2.2)
+    #[serde(rename = "Ed25519")]
+    Ed25519,
     /// ECDSA using P-256 and SHA-256
     ///
     /// [RFC 7518, Section 3.4](https://www.rfc-editor.org/rfc/rfc7518#section-3.4)
     Es256,
+    /// ECDSA using P-384 and SHA-384
+    ///
+    /// [RFC 7518, Section 3.4](https://www.rfc-editor.org/rfc/rfc7518#section-3.4)
+    Es384,
     /// HMAC using SHA-256
     ///
     /// [RFC 7518, Section 3.2](https://www.rfc-editor.org/rfc/rfc7518#section-3.2)
     Hs256,
+    /// RSASSA-PKCS1-v1_5 using SHA-256
+    ///
+    /// [RFC 7518, Section 3.3](https://www.rfc-editor.org/rfc/rfc7518#section-3.3)
+    Rs256,
     /// Other algorithm not represented in the enum
     #[serde(untagged)]
     Other(&'static str),
