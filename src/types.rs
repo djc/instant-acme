@@ -18,8 +18,7 @@ use x509_parser::extensions::ParsedExtension;
 #[cfg(feature = "x509-parser")]
 use x509_parser::parse_x509_certificate;
 
-use crate::BytesResponse;
-use crate::crypto::{self, KeyPair};
+use crate::{BytesResponse, Sha256};
 
 /// Error type for instant-acme
 #[derive(Debug, Error)]
@@ -66,7 +65,7 @@ pub enum Error {
 }
 
 impl Error {
-    #[cfg(feature = "rcgen")]
+    #[cfg(all(feature = "rcgen", any(feature = "aws-lc-rs", feature = "ring")))]
     pub(crate) fn from_rcgen(err: rcgen::Error) -> Self {
         Self::Other(Box::new(err))
     }
@@ -270,50 +269,27 @@ pub(crate) enum KeyOrKeyId<'a> {
     KeyId(&'a str),
 }
 
-impl KeyOrKeyId<'_> {
-    pub(crate) fn from_key(key: &crypto::EcdsaKeyPair) -> KeyOrKeyId<'_> {
-        KeyOrKeyId::Key(Jwk::new(key))
-    }
-}
-
 /// A JSON Web Key (JWK) as used in JWS headers
 ///
 /// See [RFC 7517](https://www.rfc-editor.org/rfc/rfc7517) for more information.
 #[derive(Debug, Serialize)]
-pub(crate) struct Jwk<'a> {
+pub struct Jwk<'a> {
     /// The algorithm intended for use with this key
-    alg: SigningAlgorithm,
+    pub alg: SigningAlgorithm,
     /// Key-type-specific parameters
     #[serde(flatten)]
-    key: JwkThumbFields<'a>,
+    pub key: JwkThumbFields<'a>,
     /// The intended use (`"sig"` for signing)
-    r#use: &'static str,
+    pub r#use: &'static str,
 }
 
 impl Jwk<'_> {
-    pub(crate) fn new(key: &crypto::EcdsaKeyPair) -> Jwk<'_> {
-        let (x, y) = key.public_key().as_ref()[1..].split_at(32);
-        Jwk {
-            alg: SigningAlgorithm::Es256,
-            key: JwkThumbFields::Ec {
-                crv: "P-256",
-                kty: "EC",
-                x,
-                y,
-            },
-            r#use: "sig",
-        }
-    }
-
     /// Compute the [RFC 7638](https://www.rfc-editor.org/rfc/rfc7638) JWK thumbprint.
     ///
     /// Serializes only the required key-type-specific members in lexicographic order,
     /// then hashes with SHA-256.
-    pub(crate) fn thumb_sha256(&self) -> Result<crypto::Digest, serde_json::Error> {
-        Ok(crypto::digest(
-            &crypto::SHA256,
-            &serde_json::to_vec(&self.key)?,
-        ))
+    pub(crate) fn thumb_sha256(&self, sha256: &dyn Sha256) -> Result<[u8; 32], serde_json::Error> {
+        Ok(sha256.hash(&serde_json::to_vec(&self.key)?))
     }
 }
 
@@ -324,7 +300,7 @@ impl Jwk<'_> {
 #[derive(Debug, Serialize)]
 #[serde(untagged)]
 #[non_exhaustive]
-pub(crate) enum JwkThumbFields<'a> {
+pub enum JwkThumbFields<'a> {
     /// Elliptic Curve key (P-256, P-384, etc.)
     Ec {
         /// The curve name (e.g., `"P-256"`)
@@ -625,7 +601,7 @@ impl JoseJson {
         Ok(Self {
             protected,
             payload,
-            signature: BASE64_URL_SAFE_NO_PAD.encode(signature.as_ref()),
+            signature: BASE64_URL_SAFE_NO_PAD.encode(signature),
         })
     }
 }
@@ -982,7 +958,7 @@ fn deserialize_static_certificate_identifier<'de, D: serde::Deserializer<'de>>(
 #[derive(Clone, Copy, Debug, Serialize)]
 #[serde(rename_all = "UPPERCASE")]
 #[non_exhaustive]
-pub(crate) enum SigningAlgorithm {
+pub enum SigningAlgorithm {
     /// ECDSA using P-256 and SHA-256
     ///
     /// [RFC 7518, Section 3.4](https://www.rfc-editor.org/rfc/rfc7518#section-3.4)
@@ -1009,7 +985,7 @@ pub(crate) struct Empty {}
 
 #[cfg(test)]
 mod tests {
-    #[cfg(feature = "x509-parser")]
+    #[cfg(all(feature = "x509-parser", any(feature = "aws-lc-rs", feature = "ring")))]
     use rcgen::{
         BasicConstraints, CertificateParams, DistinguishedName, IsCa, Issuer, KeyIdMethod, KeyPair,
         SerialNumber,
@@ -1227,7 +1203,7 @@ mod tests {
         assert_eq!(serialized, r#""aYhba4dGQEHhs3uEe6CuLN4ByNQ.AIdlQyE""#);
     }
 
-    #[cfg(feature = "x509-parser")]
+    #[cfg(all(feature = "x509-parser", any(feature = "aws-lc-rs", feature = "ring")))]
     #[test]
     fn encoded_certificate_identifier_from_cert() {
         // Generate a CA key_pair and self-signed cert with a specific subject key identifier.

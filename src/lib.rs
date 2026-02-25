@@ -24,22 +24,24 @@ use httpdate::HttpDate;
 #[cfg(feature = "hyper-rustls")]
 use hyper::body::Incoming;
 #[cfg(feature = "hyper-rustls")]
-use hyper_rustls::HttpsConnectorBuilder;
+use hyper_rustls::{HttpsConnectorBuilder, builderstates::WantsSchemes};
 #[cfg(feature = "hyper-rustls")]
-use hyper_rustls::builderstates::WantsSchemes;
-#[cfg(feature = "hyper-rustls")]
-use hyper_util::client::legacy::Client as HyperClient;
-#[cfg(feature = "hyper-rustls")]
-use hyper_util::client::legacy::connect::{Connect, HttpConnector};
+use hyper_util::client::legacy::{
+    Client as HyperClient,
+    connect::{Connect, HttpConnector},
+};
 #[cfg(feature = "hyper-rustls")]
 use hyper_util::rt::TokioExecutor;
 #[cfg(feature = "hyper-rustls")]
-use rustls::crypto::CryptoProvider;
+use rustls::crypto::CryptoProvider as RustlsCryptoProvider;
 use serde::Serialize;
 
 mod account;
 pub use account::Key;
 pub use account::{Account, AccountBuilder, ExternalAccountKey};
+mod crypto;
+pub use crypto::{CryptoProvider, HmacSha256, Sha256, SigningKey, SigningKeyProvider};
+pub use types::{Jwk, JwkThumbFields, SigningAlgorithm};
 mod order;
 pub use order::{
     AuthorizationHandle, Authorizations, ChallengeHandle, Identifiers, KeyAuthorization, Order,
@@ -204,7 +206,7 @@ struct DefaultClient(HyperClient<hyper_rustls::HttpsConnector<HttpConnector>, Bo
 
 #[cfg(feature = "hyper-rustls")]
 impl DefaultClient {
-    fn try_new(rustls_crypto_provider: CryptoProvider) -> Result<Self, Error> {
+    fn try_new(rustls_crypto_provider: RustlsCryptoProvider) -> Result<Self, Error> {
         Ok(Self::new(
             HttpsConnectorBuilder::new()
                 .with_provider_and_platform_verifier(rustls_crypto_provider)
@@ -214,7 +216,7 @@ impl DefaultClient {
 
     fn with_roots(
         roots: rustls::RootCertStore,
-        rustls_crypto_provider: CryptoProvider,
+        rustls_crypto_provider: RustlsCryptoProvider,
     ) -> Result<Self, Error> {
         Ok(Self::new(
             HttpsConnectorBuilder::new().with_tls_config(
@@ -378,39 +380,6 @@ pub trait BytesBody: Send {
     async fn into_bytes(&mut self) -> Result<Bytes, Box<dyn StdError + Send + Sync + 'static>>;
 }
 
-mod crypto {
-    #[cfg(feature = "aws-lc-rs")]
-    pub(crate) use aws_lc_rs as ring_like;
-    #[cfg(all(feature = "ring", not(feature = "aws-lc-rs")))]
-    pub(crate) use ring as ring_like;
-
-    pub(crate) use ring_like::digest::{Digest, SHA256, digest};
-    pub(crate) use ring_like::hmac;
-    pub(crate) use ring_like::rand::SystemRandom;
-    pub(crate) use ring_like::signature::{ECDSA_P256_SHA256_FIXED_SIGNING, EcdsaKeyPair};
-    pub(crate) use ring_like::signature::{KeyPair, Signature};
-
-    use super::Error;
-
-    #[cfg(feature = "aws-lc-rs")]
-    pub(crate) fn p256_key_pair_from_pkcs8(
-        pkcs8: &[u8],
-        _: &SystemRandom,
-    ) -> Result<EcdsaKeyPair, Error> {
-        EcdsaKeyPair::from_pkcs8(&ECDSA_P256_SHA256_FIXED_SIGNING, pkcs8)
-            .map_err(|_| Error::KeyRejected)
-    }
-
-    #[cfg(all(feature = "ring", not(feature = "aws-lc-rs")))]
-    pub(crate) fn p256_key_pair_from_pkcs8(
-        pkcs8: &[u8],
-        rng: &SystemRandom,
-    ) -> Result<EcdsaKeyPair, Error> {
-        EcdsaKeyPair::from_pkcs8(&ECDSA_P256_SHA256_FIXED_SIGNING, pkcs8, rng)
-            .map_err(|_| Error::KeyRejected)
-    }
-}
-
 const CRATE_USER_AGENT: &str = concat!("instant-acme/", env!("CARGO_PKG_VERSION"));
 const JOSE_JSON: &str = "application/jose+json";
 const REPLAY_NONCE: &str = "Replay-Nonce";
@@ -421,14 +390,14 @@ const REPLAY_NONCE: &str = "Replay-Nonce";
     any(feature = "aws-lc-rs", feature = "ring")
 ))]
 mod tests {
-    use rustls::crypto::CryptoProvider;
+    use rustls::crypto::CryptoProvider as RustlsCryptoProvider;
 
     use super::*;
 
     #[tokio::test]
     async fn deserialize_old_credentials() -> Result<(), Error> {
         const CREDENTIALS: &str = r#"{"id":"id","key_pkcs8":"MIGHAgEAMBMGByqGSM49AgEGCCqGSM49AwEHBG0wawIBAQQgJVWC_QzOTCS5vtsJp2IG-UDc8cdDfeoKtxSZxaznM-mhRANCAAQenCPoGgPFTdPJ7VLLKt56RxPlYT1wNXnHc54PEyBg3LxKaH0-sJkX0mL8LyPEdsfL_Oz4TxHkWLJGrXVtNhfH","urls":{"newNonce":"new-nonce","newAccount":"new-acct","newOrder":"new-order", "revokeCert": "revoke-cert"}}"#;
-        Account::builder(rustls_crypto_provider())?
+        Account::builder(crypto_provider(), rustls_crypto_provider())?
             .from_credentials(serde_json::from_str::<AccountCredentials>(CREDENTIALS)?)
             .await?;
         Ok(())
@@ -437,19 +406,29 @@ mod tests {
     #[tokio::test]
     async fn deserialize_new_credentials() -> Result<(), Error> {
         const CREDENTIALS: &str = r#"{"id":"id","key_pkcs8":"MIGHAgEAMBMGByqGSM49AgEGCCqGSM49AwEHBG0wawIBAQQgJVWC_QzOTCS5vtsJp2IG-UDc8cdDfeoKtxSZxaznM-mhRANCAAQenCPoGgPFTdPJ7VLLKt56RxPlYT1wNXnHc54PEyBg3LxKaH0-sJkX0mL8LyPEdsfL_Oz4TxHkWLJGrXVtNhfH","directory":"https://acme-staging-v02.api.letsencrypt.org/directory"}"#;
-        Account::builder(rustls_crypto_provider())?
+        Account::builder(crypto_provider(), rustls_crypto_provider())?
             .from_credentials(serde_json::from_str::<AccountCredentials>(CREDENTIALS)?)
             .await?;
         Ok(())
     }
 
     #[cfg(feature = "aws-lc-rs")]
-    fn rustls_crypto_provider() -> CryptoProvider {
+    fn rustls_crypto_provider() -> RustlsCryptoProvider {
         rustls::crypto::aws_lc_rs::default_provider()
     }
 
     #[cfg(all(feature = "ring", not(feature = "aws-lc-rs")))]
-    fn rustls_crypto_provider() -> CryptoProvider {
+    fn rustls_crypto_provider() -> RustlsCryptoProvider {
         rustls::crypto::ring::default_provider()
+    }
+
+    #[cfg(feature = "aws-lc-rs")]
+    fn crypto_provider() -> &'static CryptoProvider {
+        CryptoProvider::aws_lc_rs()
+    }
+
+    #[cfg(all(feature = "ring", not(feature = "aws-lc-rs")))]
+    fn crypto_provider() -> &'static CryptoProvider {
+        CryptoProvider::ring()
     }
 }
