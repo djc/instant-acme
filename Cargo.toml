@@ -57,6 +57,10 @@ tracing-subscriber =  { version = "0.3.16", features = ["env-filter"] }
 name = "provision"
 required-features = ["hyper-rustls", "rcgen", "aws-lc-rs"]
 
+[[example]]
+name = "certgen"
+required-features = ["rcgen", "aws-lc-rs"]
+
 # Pebble integration test.
 # Ignored by default because it requires pebble & pebble-challtestsrv.
 # Run with:
