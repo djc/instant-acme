@@ -235,7 +235,7 @@ impl Account {
             old_key: Jwk<'a>,
         }
 
-        let (new_key, new_key_pkcs8) = Key::generate_pkcs8()?;
+        let (new_key, new_key_pkcs8) = Key::generate()?;
         let mut header = new_key.header(Some("nonce"), new_key_url);
         header.nonce = None;
         let payload = NewKey {
@@ -440,7 +440,7 @@ impl AccountBuilder {
         directory_url: String,
         external_account: Option<&ExternalAccountKey>,
     ) -> Result<(Account, AccountCredentials), Error> {
-        let (key, key_pkcs8) = Key::generate_pkcs8()?;
+        let (key, key_pkcs8) = Key::generate()?;
         Self::create_inner(
             account,
             (key, key_pkcs8),
@@ -590,14 +590,7 @@ pub struct Key {
 
 impl Key {
     /// Generate a new ECDSA P-256 key pair
-    #[deprecated(since = "0.8.3", note = "use `generate_pkcs8()` instead")]
-    pub fn generate() -> Result<(Self, PrivateKeyDer<'static>), Error> {
-        let (key, pkcs8) = Self::generate_pkcs8()?;
-        Ok((key, PrivateKeyDer::Pkcs8(pkcs8)))
-    }
-
-    /// Generate a new ECDSA P-256 key pair
-    pub fn generate_pkcs8() -> Result<(Self, PrivatePkcs8KeyDer<'static>), Error> {
+    pub fn generate() -> Result<(Self, PrivatePkcs8KeyDer<'static>), Error> {
         let rng = crypto::SystemRandom::new();
         let pkcs8 =
             crypto::EcdsaKeyPair::generate_pkcs8(&crypto::ECDSA_P256_SHA256_FIXED_SIGNING, &rng)
