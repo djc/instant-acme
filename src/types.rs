@@ -975,13 +975,25 @@ fn deserialize_static_certificate_identifier<'de, D: serde::Deserializer<'de>>(
     Ok(Some(cert_id.into_owned()))
 }
 
+/// Algorithm identifier for JWS headers
+///
+/// See the [IANA JOSE registry](https://www.iana.org/assignments/jose/jose.xhtml#web-signature-encryption-algorithms)
+/// for the full list of registered algorithms.
 #[derive(Clone, Copy, Debug, Serialize)]
 #[serde(rename_all = "UPPERCASE")]
+#[non_exhaustive]
 pub(crate) enum SigningAlgorithm {
     /// ECDSA using P-256 and SHA-256
+    ///
+    /// [RFC 7518, Section 3.4](https://www.rfc-editor.org/rfc/rfc7518#section-3.4)
     Es256,
-    /// HMAC with SHA-256,
+    /// HMAC using SHA-256
+    ///
+    /// [RFC 7518, Section 3.2](https://www.rfc-editor.org/rfc/rfc7518#section-3.2)
     Hs256,
+    /// Other algorithm not represented in the enum
+    #[serde(untagged)]
+    Other(&'static str),
 }
 
 /// Attestation payload used for device-attest-01
