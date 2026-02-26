@@ -265,62 +265,88 @@ pub(crate) struct Header<'a> {
 #[derive(Debug, Serialize)]
 pub(crate) enum KeyOrKeyId<'a> {
     #[serde(rename = "jwk")]
-    Key(Jwk),
+    Key(Jwk<'a>),
     #[serde(rename = "kid")]
     KeyId(&'a str),
 }
 
 impl KeyOrKeyId<'_> {
-    pub(crate) fn from_key(key: &crypto::EcdsaKeyPair) -> KeyOrKeyId<'static> {
+    pub(crate) fn from_key(key: &crypto::EcdsaKeyPair) -> KeyOrKeyId<'_> {
         KeyOrKeyId::Key(Jwk::new(key))
     }
 }
 
+/// A JSON Web Key (JWK) as used in JWS headers
+///
+/// See [RFC 7517](https://www.rfc-editor.org/rfc/rfc7517) for more information.
 #[derive(Debug, Serialize)]
-pub(crate) struct Jwk {
+pub(crate) struct Jwk<'a> {
+    /// The algorithm intended for use with this key
     alg: SigningAlgorithm,
-    crv: &'static str,
-    kty: &'static str,
+    /// Key-type-specific parameters
+    #[serde(flatten)]
+    key: JwkThumbFields<'a>,
+    /// The intended use (`"sig"` for signing)
     r#use: &'static str,
-    x: String,
-    y: String,
 }
 
-impl Jwk {
-    pub(crate) fn new(key: &crypto::EcdsaKeyPair) -> Self {
+impl Jwk<'_> {
+    pub(crate) fn new(key: &crypto::EcdsaKeyPair) -> Jwk<'_> {
         let (x, y) = key.public_key().as_ref()[1..].split_at(32);
-        Self {
+        Jwk {
             alg: SigningAlgorithm::Es256,
-            crv: "P-256",
-            kty: "EC",
+            key: JwkThumbFields::Ec {
+                crv: "P-256",
+                kty: "EC",
+                x,
+                y,
+            },
             r#use: "sig",
-            x: BASE64_URL_SAFE_NO_PAD.encode(x),
-            y: BASE64_URL_SAFE_NO_PAD.encode(y),
         }
     }
 
-    pub(crate) fn thumb_sha256(
-        key: &crypto::EcdsaKeyPair,
-    ) -> Result<crypto::Digest, serde_json::Error> {
-        let jwk = Self::new(key);
+    /// Compute the [RFC 7638](https://www.rfc-editor.org/rfc/rfc7638) JWK thumbprint.
+    ///
+    /// Serializes only the required key-type-specific members in lexicographic order,
+    /// then hashes with SHA-256.
+    pub(crate) fn thumb_sha256(&self) -> Result<crypto::Digest, serde_json::Error> {
         Ok(crypto::digest(
             &crypto::SHA256,
-            &serde_json::to_vec(&JwkThumb {
-                crv: jwk.crv,
-                kty: jwk.kty,
-                x: &jwk.x,
-                y: &jwk.y,
-            })?,
+            &serde_json::to_vec(&self.key)?,
         ))
     }
 }
 
+/// Key-type-specific JWK parameters
+///
+/// Each variant's fields are declared in lexicographic order for correct
+/// [RFC 7638](https://www.rfc-editor.org/rfc/rfc7638) thumbprint computation.
 #[derive(Debug, Serialize)]
-struct JwkThumb<'a> {
-    crv: &'a str,
-    kty: &'a str,
-    x: &'a str,
-    y: &'a str,
+#[serde(untagged)]
+#[non_exhaustive]
+pub(crate) enum JwkThumbFields<'a> {
+    /// Elliptic Curve key (P-256, P-384, etc.)
+    Ec {
+        /// The curve name (e.g., `"P-256"`)
+        crv: &'static str,
+        /// Key type, must be `"EC"`
+        kty: &'static str,
+        /// The x coordinate (serialized as base64url)
+        #[serde(serialize_with = "base64url::serialize")]
+        x: &'a [u8],
+        /// The y coordinate (serialized as base64url)
+        #[serde(serialize_with = "base64url::serialize")]
+        y: &'a [u8],
+    },
+}
+
+mod base64url {
+    use base64::prelude::{BASE64_URL_SAFE_NO_PAD, Engine};
+    use serde::Serializer;
+
+    pub(crate) fn serialize<S: Serializer>(data: &&[u8], serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.serialize_str(&BASE64_URL_SAFE_NO_PAD.encode(*data))
+    }
 }
 
 /// An ACME challenge as described in RFC 8555 (section 7.1.5)
