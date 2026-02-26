@@ -232,7 +232,7 @@ impl Account {
         struct NewKey<'a> {
             account: &'a str,
             #[serde(rename = "oldKey")]
-            old_key: Jwk,
+            old_key: Jwk<'a>,
         }
 
         let (new_key, new_key_pkcs8) = Key::generate_pkcs8()?;
@@ -617,7 +617,7 @@ impl Key {
 
     fn new(pkcs8_der: &[u8], rng: crypto::SystemRandom) -> Result<Self, Error> {
         let inner = crypto::p256_key_pair_from_pkcs8(pkcs8_der, &rng)?;
-        let thumb = BASE64_URL_SAFE_NO_PAD.encode(Jwk::thumb_sha256(&inner)?);
+        let thumb = BASE64_URL_SAFE_NO_PAD.encode(Jwk::new(&inner).thumb_sha256()?);
         Ok(Self {
             rng,
             signing_algorithm: SigningAlgorithm::Es256,
