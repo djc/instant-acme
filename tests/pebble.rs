@@ -456,7 +456,7 @@ async fn account_create_from_key() -> Result<(), Box<dyn StdError>> {
     let directory_url = format!("https://{}/dir", &env.config.pebble.listen_address);
 
     // Generate a new key
-    let (key, key_pkcs8) = Key::generate_pkcs8()?;
+    let (key, key_pkcs8) = Key::generate()?;
 
     // Create a new account with the generated key
     let (account1, credentials1) = Account::builder_with_http(Box::new(env.client.clone()))
