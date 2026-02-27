@@ -222,15 +222,31 @@ impl Account {
         Ok((Problem::check::<RenewalInfo>(rsp).await?, delay))
     }
 
-    /// Update the account's authentication key
+    /// Update the account's authentication key, reusing the existing [`CryptoProvider`]
     ///
     /// This is useful if you want to change the ACME account key of an existing account, e.g.
     /// to mitigate the risk of a key compromise. This method creates a new client key and changes
     /// the key associated with the existing account. `self` will be updated with the new key,
     /// and a fresh set of [`AccountCredentials`] will be returned to update stored credentials.
     ///
+    /// To change the key type (e.g. from P-256 to Ed25519), use
+    /// [`update_key_with_provider()`][Self::update_key_with_provider] instead.
+    ///
     /// See <https://datatracker.ietf.org/doc/html/rfc8555#section-7.3.5> for more information.
     pub async fn update_key(&mut self) -> Result<AccountCredentials, Error> {
+        self.update_key_with_provider(self.inner.key.provider).await
+    }
+
+    /// Update the account's authentication key using the given [`CryptoProvider`]
+    ///
+    /// Like [`update_key()`][Self::update_key], but allows switching to a different key type
+    /// by supplying a different [`CryptoProvider`] (e.g. migrating from P-256 to Ed25519).
+    ///
+    /// See <https://datatracker.ietf.org/doc/html/rfc8555#section-7.3.5> for more information.
+    pub async fn update_key_with_provider(
+        &mut self,
+        provider: &'static CryptoProvider,
+    ) -> Result<AccountCredentials, Error> {
         let Some(new_key_url) = self.inner.client.directory.key_change.as_deref() else {
             return Err("Account key rollover not supported by ACME CA".into());
         };
@@ -242,7 +258,7 @@ impl Account {
             old_key: Jwk<'a>,
         }
 
-        let (new_key, new_key_pkcs8) = Key::generate(self.inner.key.provider)?;
+        let (new_key, new_key_pkcs8) = Key::generate(provider)?;
         let mut header = new_key.header(Some("nonce"), new_key_url);
         header.nonce = None;
         let payload = NewKey {
