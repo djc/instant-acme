@@ -13,6 +13,8 @@ use http::{Method, Request};
 #[cfg(feature = "hyper-rustls")]
 use rustls::RootCertStore;
 #[cfg(feature = "hyper-rustls")]
+use rustls::crypto::CryptoProvider;
+#[cfg(feature = "hyper-rustls")]
 use rustls_pki_types::CertificateDer;
 #[cfg(feature = "hyper-rustls")]
 use rustls_pki_types::pem::PemObject;
@@ -52,9 +54,9 @@ pub struct Account {
 impl Account {
     /// Create an account builder with the default HTTP client
     #[cfg(feature = "hyper-rustls")]
-    pub fn builder() -> Result<AccountBuilder, Error> {
+    pub fn builder(rustls_crypto_provider: CryptoProvider) -> Result<AccountBuilder, Error> {
         Ok(AccountBuilder {
-            http: Box::new(DefaultClient::try_new()?),
+            http: Box::new(DefaultClient::try_new(rustls_crypto_provider)?),
         })
     }
 
@@ -63,7 +65,10 @@ impl Account {
     /// This is useful if your ACME server uses a testing PKI and not a certificate
     /// chain issued by a publicly trusted CA.
     #[cfg(feature = "hyper-rustls")]
-    pub fn builder_with_root(pem_path: impl AsRef<Path>) -> Result<AccountBuilder, Error> {
+    pub fn builder_with_root(
+        pem_path: impl AsRef<Path>,
+        rustls_crypto_provider: CryptoProvider,
+    ) -> Result<AccountBuilder, Error> {
         let root_der = match CertificateDer::from_pem_file(pem_path) {
             Ok(root_der) => root_der,
             Err(err) => return Err(Error::Other(err.into())),
@@ -72,7 +77,7 @@ impl Account {
         let mut roots = RootCertStore::empty();
         match roots.add(root_der) {
             Ok(()) => Ok(AccountBuilder {
-                http: Box::new(DefaultClient::with_roots(roots)?),
+                http: Box::new(DefaultClient::with_roots(roots, rustls_crypto_provider)?),
             }),
             Err(err) => Err(Error::Other(err.into())),
         }
