@@ -76,6 +76,7 @@ allowed_external_types = [
     "http::*",
     "http_body::*",
     "hyper::*",
+    "rustls::crypto::CryptoProvider",
     "rustls_pki_types::*",
     "serde_core::*",
     "serde_json::*",

@@ -9,6 +9,8 @@ use std::fmt;
 use std::future::Future;
 use std::pin::Pin;
 use std::str::FromStr;
+#[cfg(feature = "hyper-rustls")]
+use std::sync::Arc;
 use std::task::{Context, Poll};
 use std::time::{Duration, SystemTime};
 
@@ -31,6 +33,8 @@ use hyper_util::client::legacy::Client as HyperClient;
 use hyper_util::client::legacy::connect::{Connect, HttpConnector};
 #[cfg(feature = "hyper-rustls")]
 use hyper_util::rt::TokioExecutor;
+#[cfg(feature = "hyper-rustls")]
+use rustls::crypto::CryptoProvider;
 use serde::Serialize;
 
 mod account;
@@ -200,18 +204,23 @@ struct DefaultClient(HyperClient<hyper_rustls::HttpsConnector<HttpConnector>, Bo
 
 #[cfg(feature = "hyper-rustls")]
 impl DefaultClient {
-    fn try_new() -> Result<Self, Error> {
+    fn try_new(rustls_crypto_provider: CryptoProvider) -> Result<Self, Error> {
         Ok(Self::new(
             HttpsConnectorBuilder::new()
-                .try_with_platform_verifier()
+                .with_provider_and_platform_verifier(rustls_crypto_provider)
                 .map_err(|e| Error::Other(Box::new(e)))?,
         ))
     }
 
-    fn with_roots(roots: rustls::RootCertStore) -> Result<Self, Error> {
+    fn with_roots(
+        roots: rustls::RootCertStore,
+        rustls_crypto_provider: CryptoProvider,
+    ) -> Result<Self, Error> {
         Ok(Self::new(
             HttpsConnectorBuilder::new().with_tls_config(
-                rustls::ClientConfig::builder()
+                rustls::ClientConfig::builder_with_provider(Arc::new(rustls_crypto_provider))
+                    .with_safe_default_protocol_versions()
+                    .map_err(|e| Error::Other(Box::new(e)))?
                     .with_root_certificates(roots)
                     .with_no_client_auth(),
             ),
@@ -406,14 +415,20 @@ const CRATE_USER_AGENT: &str = concat!("instant-acme/", env!("CARGO_PKG_VERSION"
 const JOSE_JSON: &str = "application/jose+json";
 const REPLAY_NONCE: &str = "Replay-Nonce";
 
-#[cfg(all(test, feature = "hyper-rustls"))]
+#[cfg(all(
+    test,
+    feature = "hyper-rustls",
+    any(feature = "aws-lc-rs", feature = "ring")
+))]
 mod tests {
+    use rustls::crypto::CryptoProvider;
+
     use super::*;
 
     #[tokio::test]
     async fn deserialize_old_credentials() -> Result<(), Error> {
         const CREDENTIALS: &str = r#"{"id":"id","key_pkcs8":"MIGHAgEAMBMGByqGSM49AgEGCCqGSM49AwEHBG0wawIBAQQgJVWC_QzOTCS5vtsJp2IG-UDc8cdDfeoKtxSZxaznM-mhRANCAAQenCPoGgPFTdPJ7VLLKt56RxPlYT1wNXnHc54PEyBg3LxKaH0-sJkX0mL8LyPEdsfL_Oz4TxHkWLJGrXVtNhfH","urls":{"newNonce":"new-nonce","newAccount":"new-acct","newOrder":"new-order", "revokeCert": "revoke-cert"}}"#;
-        Account::builder()?
+        Account::builder(rustls_crypto_provider())?
             .from_credentials(serde_json::from_str::<AccountCredentials>(CREDENTIALS)?)
             .await?;
         Ok(())
@@ -422,9 +437,19 @@ mod tests {
     #[tokio::test]
     async fn deserialize_new_credentials() -> Result<(), Error> {
         const CREDENTIALS: &str = r#"{"id":"id","key_pkcs8":"MIGHAgEAMBMGByqGSM49AgEGCCqGSM49AwEHBG0wawIBAQQgJVWC_QzOTCS5vtsJp2IG-UDc8cdDfeoKtxSZxaznM-mhRANCAAQenCPoGgPFTdPJ7VLLKt56RxPlYT1wNXnHc54PEyBg3LxKaH0-sJkX0mL8LyPEdsfL_Oz4TxHkWLJGrXVtNhfH","directory":"https://acme-staging-v02.api.letsencrypt.org/directory"}"#;
-        Account::builder()?
+        Account::builder(rustls_crypto_provider())?
             .from_credentials(serde_json::from_str::<AccountCredentials>(CREDENTIALS)?)
             .await?;
         Ok(())
+    }
+
+    #[cfg(feature = "aws-lc-rs")]
+    fn rustls_crypto_provider() -> CryptoProvider {
+        rustls::crypto::aws_lc_rs::default_provider()
+    }
+
+    #[cfg(all(feature = "ring", not(feature = "aws-lc-rs")))]
+    fn rustls_crypto_provider() -> CryptoProvider {
+        rustls::crypto::ring::default_provider()
     }
 }
