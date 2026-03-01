@@ -1,6 +1,7 @@
 #[cfg(feature = "hyper-rustls")]
 use std::path::Path;
 use std::sync::Arc;
+
 #[cfg(feature = "time")]
 use std::time::{Duration, SystemTime};
 
@@ -11,17 +12,16 @@ use http::header::USER_AGENT;
 #[cfg(feature = "time")]
 use http::{Method, Request};
 #[cfg(feature = "hyper-rustls")]
-use rustls::RootCertStore;
+use rustls::{RootCertStore, crypto::CryptoProvider as RustlsCryptoProvider};
 #[cfg(feature = "hyper-rustls")]
-use rustls_pki_types::CertificateDer;
-#[cfg(feature = "hyper-rustls")]
-use rustls_pki_types::pem::PemObject;
+use rustls_pki_types::{CertificateDer, pem::PemObject};
 use rustls_pki_types::{PrivateKeyDer, PrivatePkcs8KeyDer};
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 
 #[cfg(feature = "hyper-rustls")]
 use crate::DefaultClient;
+use crate::crypto::{CryptoProvider, SigningKey};
 use crate::order::Order;
 use crate::types::{
     AccountCredentials, AuthorizationStatus, Empty, Header, JoseJson, Jwk, KeyOrKeyId, NewAccount,
@@ -32,7 +32,7 @@ use crate::types::{
 use crate::types::{CertificateIdentifier, RenewalInfo};
 #[cfg(feature = "time")]
 use crate::{BodyWrapper, CRATE_USER_AGENT, retry_after};
-use crate::{BytesResponse, Client, Error, HttpClient, crypto, nonce_from_response};
+use crate::{BytesResponse, Client, Error, HmacSha256, HttpClient, nonce_from_response};
 
 /// An ACME account as described in RFC 8555 (section 7.1.2)
 ///
@@ -50,11 +50,15 @@ pub struct Account {
 }
 
 impl Account {
-    /// Create an account builder with the default HTTP client
+    /// Create an account builder with the given [`CryptoProvider`] and default HTTP client
     #[cfg(feature = "hyper-rustls")]
-    pub fn builder() -> Result<AccountBuilder, Error> {
+    pub fn builder(
+        provider: &'static CryptoProvider,
+        rustls_crypto_provider: RustlsCryptoProvider,
+    ) -> Result<AccountBuilder, Error> {
         Ok(AccountBuilder {
-            http: Box::new(DefaultClient::try_new()?),
+            http: Box::new(DefaultClient::try_new(rustls_crypto_provider)?),
+            provider,
         })
     }
 
@@ -63,7 +67,11 @@ impl Account {
     /// This is useful if your ACME server uses a testing PKI and not a certificate
     /// chain issued by a publicly trusted CA.
     #[cfg(feature = "hyper-rustls")]
-    pub fn builder_with_root(pem_path: impl AsRef<Path>) -> Result<AccountBuilder, Error> {
+    pub fn builder_with_root(
+        pem_path: impl AsRef<Path>,
+        provider: &'static CryptoProvider,
+        rustls_crypto_provider: RustlsCryptoProvider,
+    ) -> Result<AccountBuilder, Error> {
         let root_der = match CertificateDer::from_pem_file(pem_path) {
             Ok(root_der) => root_der,
             Err(err) => return Err(Error::Other(err.into())),
@@ -72,15 +80,19 @@ impl Account {
         let mut roots = RootCertStore::empty();
         match roots.add(root_der) {
             Ok(()) => Ok(AccountBuilder {
-                http: Box::new(DefaultClient::with_roots(roots)?),
+                http: Box::new(DefaultClient::with_roots(roots, rustls_crypto_provider)?),
+                provider,
             }),
             Err(err) => Err(Error::Other(err.into())),
         }
     }
 
-    /// Create an account builder with the given HTTP client
-    pub fn builder_with_http(http: Box<dyn HttpClient>) -> AccountBuilder {
-        AccountBuilder { http }
+    /// Create an account builder with the given [`CryptoProvider`] and HTTP client
+    pub fn builder_with_http(
+        http: Box<dyn HttpClient>,
+        provider: &'static CryptoProvider,
+    ) -> AccountBuilder {
+        AccountBuilder { http, provider }
     }
 
     /// Create a new order based on the given [`NewOrder`]
@@ -210,15 +222,31 @@ impl Account {
         Ok((Problem::check::<RenewalInfo>(rsp).await?, delay))
     }
 
-    /// Update the account's authentication key
+    /// Update the account's authentication key, reusing the existing [`CryptoProvider`]
     ///
     /// This is useful if you want to change the ACME account key of an existing account, e.g.
     /// to mitigate the risk of a key compromise. This method creates a new client key and changes
     /// the key associated with the existing account. `self` will be updated with the new key,
     /// and a fresh set of [`AccountCredentials`] will be returned to update stored credentials.
     ///
+    /// To change the key type (e.g. from P-256 to Ed25519), use
+    /// [`update_key_with_provider()`][Self::update_key_with_provider] instead.
+    ///
     /// See <https://datatracker.ietf.org/doc/html/rfc8555#section-7.3.5> for more information.
     pub async fn update_key(&mut self) -> Result<AccountCredentials, Error> {
+        self.update_key_with_provider(self.inner.key.provider).await
+    }
+
+    /// Update the account's authentication key using the given [`CryptoProvider`]
+    ///
+    /// Like [`update_key()`][Self::update_key], but allows switching to a different key type
+    /// by supplying a different [`CryptoProvider`] (e.g. migrating from P-256 to Ed25519).
+    ///
+    /// See <https://datatracker.ietf.org/doc/html/rfc8555#section-7.3.5> for more information.
+    pub async fn update_key_with_provider(
+        &mut self,
+        provider: &'static CryptoProvider,
+    ) -> Result<AccountCredentials, Error> {
         let Some(new_key_url) = self.inner.client.directory.key_change.as_deref() else {
             return Err("Account key rollover not supported by ACME CA".into());
         };
@@ -227,15 +255,15 @@ impl Account {
         struct NewKey<'a> {
             account: &'a str,
             #[serde(rename = "oldKey")]
-            old_key: Jwk,
+            old_key: Jwk<'a>,
         }
 
-        let (new_key, new_key_pkcs8) = Key::generate_pkcs8()?;
+        let (new_key, new_key_pkcs8) = Key::generate(provider)?;
         let mut header = new_key.header(Some("nonce"), new_key_url);
         header.nonce = None;
         let payload = NewKey {
             account: &self.inner.id,
-            old_key: Jwk::new(&self.inner.key.inner),
+            old_key: self.inner.key.inner.as_jwk(),
         };
 
         let body = JoseJson::new(Some(&payload), header, &new_key)?;
@@ -338,8 +366,8 @@ impl Account {
     }
 
     /// Get the [RFC 7638](https://www.rfc-editor.org/rfc/rfc7638) account key thumbprint
-    pub fn key_thumbprint(&self) -> &str {
-        &self.inner.key.thumb
+    pub fn key_thumbprint(&self) -> Result<String, Error> {
+        Ok(BASE64_URL_SAFE_NO_PAD.encode(self.inner.key.thumb_sha256()?))
     }
 }
 
@@ -353,10 +381,11 @@ impl AccountInner {
     async fn from_credentials(
         credentials: AccountCredentials,
         http: Box<dyn HttpClient>,
+        provider: &'static CryptoProvider,
     ) -> Result<Self, Error> {
         Ok(Self {
             id: credentials.id,
-            key: Key::from_pkcs8_der(credentials.key_pkcs8)?,
+            key: Key::from_pkcs8_der(credentials.key_pkcs8, provider)?,
             client: Arc::new(match (credentials.directory, credentials.urls) {
                 (Some(directory_url), _) => Client::new(directory_url, http).await?,
                 (None, Some(directory)) => Client {
@@ -390,12 +419,12 @@ impl AccountInner {
 }
 
 impl Signer for AccountInner {
-    type Signature = <Key as Signer>::Signature;
+    type Signature = Vec<u8>;
 
     fn header<'n, 'u: 'n, 's: 'u>(&'s self, nonce: Option<&'n str>, url: &'u str) -> Header<'n> {
         debug_assert!(nonce.is_some());
         Header {
-            alg: self.key.signing_algorithm,
+            alg: self.key.inner.jws_algorithm(),
             key: KeyOrKeyId::KeyId(&self.id),
             nonce,
             url,
@@ -403,7 +432,7 @@ impl Signer for AccountInner {
     }
 
     fn sign(&self, payload: &[u8]) -> Result<Self::Signature, Error> {
-        self.key.sign(payload)
+        self.key.inner.sign(payload)
     }
 }
 
@@ -412,6 +441,7 @@ impl Signer for AccountInner {
 /// Create one via [`Account::builder()`] or [`Account::builder_with_http()`].
 pub struct AccountBuilder {
     http: Box<dyn HttpClient>,
+    provider: &'static CryptoProvider,
 }
 
 impl AccountBuilder {
@@ -421,7 +451,9 @@ impl AccountBuilder {
     #[allow(clippy::wrong_self_convention)]
     pub async fn from_credentials(self, credentials: AccountCredentials) -> Result<Account, Error> {
         Ok(Account {
-            inner: Arc::new(AccountInner::from_credentials(credentials, self.http).await?),
+            inner: Arc::new(
+                AccountInner::from_credentials(credentials, self.http, self.provider).await?,
+            ),
         })
     }
 
@@ -435,7 +467,7 @@ impl AccountBuilder {
         directory_url: String,
         external_account: Option<&ExternalAccountKey>,
     ) -> Result<(Account, AccountCredentials), Error> {
-        let (key, key_pkcs8) = Key::generate_pkcs8()?;
+        let (key, key_pkcs8) = Key::generate(self.provider)?;
         Self::create_inner(
             account,
             (key, key_pkcs8),
@@ -512,7 +544,7 @@ impl AccountBuilder {
         Ok(Account {
             inner: Arc::new(AccountInner {
                 id,
-                key: Key::from_pkcs8_der(key_pkcs8_der)?,
+                key: Key::from_pkcs8_der(key_pkcs8_der, self.provider)?,
                 client: Arc::new(Client::new(directory_url, self.http).await?),
             }),
         })
@@ -529,7 +561,7 @@ impl AccountBuilder {
             external_account_binding: external_account
                 .map(|eak| {
                     JoseJson::new(
-                        Some(&Jwk::new(&key.inner)),
+                        Some(&key.inner.as_jwk()),
                         eak.header(None, &client.directory.new_account),
                         eak,
                     )
@@ -577,68 +609,64 @@ impl AccountBuilder {
 
 /// Private account key used to sign requests
 pub struct Key {
-    rng: crypto::SystemRandom,
-    signing_algorithm: SigningAlgorithm,
-    inner: crypto::EcdsaKeyPair,
-    pub(crate) thumb: String,
+    pub(crate) inner: Box<dyn SigningKey>,
+    pub(crate) provider: &'static CryptoProvider,
 }
 
 impl Key {
-    /// Generate a new ECDSA P-256 key pair
-    #[deprecated(since = "0.8.3", note = "use `generate_pkcs8()` instead")]
-    pub fn generate() -> Result<(Self, PrivateKeyDer<'static>), Error> {
-        let (key, pkcs8) = Self::generate_pkcs8()?;
-        Ok((key, PrivateKeyDer::Pkcs8(pkcs8)))
-    }
-
-    /// Generate a new ECDSA P-256 key pair
-    pub fn generate_pkcs8() -> Result<(Self, PrivatePkcs8KeyDer<'static>), Error> {
-        let rng = crypto::SystemRandom::new();
-        let pkcs8 =
-            crypto::EcdsaKeyPair::generate_pkcs8(&crypto::ECDSA_P256_SHA256_FIXED_SIGNING, &rng)
-                .map_err(|_| Error::Crypto)?;
+    /// Generate a new key pair using the given [`CryptoProvider`]
+    ///
+    /// The key type depends on the provider.
+    pub fn generate(
+        provider: &'static CryptoProvider,
+    ) -> Result<(Self, PrivatePkcs8KeyDer<'static>), Error> {
+        let (key, pkcs8) = provider.signing_key.generate_key()?;
         Ok((
-            Self::new(pkcs8.as_ref(), rng)?,
-            PrivatePkcs8KeyDer::from(pkcs8.as_ref().to_vec()),
+            Self {
+                inner: key,
+                provider,
+            },
+            pkcs8,
         ))
     }
 
-    /// Create a new key from the given PKCS#8 DER-encoded private key
-    ///
-    /// Currently, only ECDSA P-256 keys are supported.
-    pub fn from_pkcs8_der(pkcs8_der: PrivatePkcs8KeyDer<'_>) -> Result<Self, Error> {
-        Self::new(pkcs8_der.secret_pkcs8_der(), crypto::SystemRandom::new())
+    pub(crate) fn thumb_sha256(&self) -> Result<[u8; 32], Error> {
+        self.inner
+            .as_jwk()
+            .thumb_sha256(self.provider.sha256)
+            .map_err(Error::Json)
     }
 
-    fn new(pkcs8_der: &[u8], rng: crypto::SystemRandom) -> Result<Self, Error> {
-        let inner = crypto::p256_key_pair_from_pkcs8(pkcs8_der, &rng)?;
-        let thumb = BASE64_URL_SAFE_NO_PAD.encode(Jwk::thumb_sha256(&inner)?);
+    /// Create a key from the given PKCS#8 DER-encoded private key using the given
+    /// [`CryptoProvider`]
+    pub fn from_pkcs8_der(
+        pkcs8_der: PrivatePkcs8KeyDer<'_>,
+        provider: &'static CryptoProvider,
+    ) -> Result<Self, Error> {
+        let owned = PrivatePkcs8KeyDer::from(pkcs8_der.secret_pkcs8_der().to_vec());
+        let key = provider.signing_key.load_key(owned)?;
         Ok(Self {
-            rng,
-            signing_algorithm: SigningAlgorithm::Es256,
-            inner,
-            thumb,
+            inner: key,
+            provider,
         })
     }
 }
 
 impl Signer for Key {
-    type Signature = crypto::Signature;
+    type Signature = Vec<u8>;
 
     fn header<'n, 'u: 'n, 's: 'u>(&'s self, nonce: Option<&'n str>, url: &'u str) -> Header<'n> {
         debug_assert!(nonce.is_some());
         Header {
-            alg: self.signing_algorithm,
-            key: KeyOrKeyId::from_key(&self.inner),
+            alg: self.inner.jws_algorithm(),
+            key: KeyOrKeyId::Key(self.inner.as_jwk()),
             nonce,
             url,
         }
     }
 
     fn sign(&self, payload: &[u8]) -> Result<Self::Signature, Error> {
-        self.inner
-            .sign(&self.rng, payload)
-            .map_err(|_| Error::Crypto)
+        self.inner.sign(payload)
     }
 }
 
@@ -647,24 +675,26 @@ impl Signer for Key {
 /// See RFC 8555 section 7.3.4 for more information.
 pub struct ExternalAccountKey {
     id: String,
-    key: crypto::hmac::Key,
+    key_value: Vec<u8>,
+    hmac_sha256: &'static dyn HmacSha256,
 }
 
 impl ExternalAccountKey {
-    /// Create a new external account key
+    /// Create a new external account key using the given [`CryptoProvider`]
     ///
     /// Note that the `key_value` argument represents the raw key value, so if the caller holds
     /// an encoded key value (for example, using base64), decode it before passing it in.
-    pub fn new(id: String, key_value: &[u8]) -> Self {
+    pub fn new(id: String, key_value: &[u8], provider: &'static CryptoProvider) -> Self {
         Self {
             id,
-            key: crypto::hmac::Key::new(crypto::hmac::HMAC_SHA256, key_value),
+            key_value: key_value.to_vec(),
+            hmac_sha256: provider.hmac_sha256,
         }
     }
 }
 
 impl Signer for ExternalAccountKey {
-    type Signature = crypto::hmac::Tag;
+    type Signature = [u8; 32];
 
     fn header<'n, 'u: 'n, 's: 'u>(&'s self, nonce: Option<&'n str>, url: &'u str) -> Header<'n> {
         debug_assert_eq!(nonce, None);
@@ -677,6 +707,6 @@ impl Signer for ExternalAccountKey {
     }
 
     fn sign(&self, payload: &[u8]) -> Result<Self::Signature, Error> {
-        Ok(crypto::hmac::sign(&self.key, payload))
+        Ok(self.hmac_sha256.sign(&self.key_value, payload))
     }
 }
