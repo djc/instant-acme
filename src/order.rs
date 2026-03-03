@@ -5,7 +5,7 @@ use std::time::{Duration, Instant, SystemTime};
 use std::{fmt, slice};
 
 use base64::prelude::{BASE64_URL_SAFE_NO_PAD, Engine};
-#[cfg(feature = "rcgen")]
+#[cfg(all(feature = "rcgen", any(feature = "aws-lc-rs", feature = "ring")))]
 use rcgen::{CertificateParams, DistinguishedName, KeyPair};
 use serde::Serialize;
 use tokio::time::sleep;
@@ -15,7 +15,7 @@ use crate::types::{
     Authorization, AuthorizationState, AuthorizationStatus, AuthorizedIdentifier, Challenge,
     ChallengeType, DeviceAttestation, Empty, FinalizeRequest, OrderState, OrderStatus, Problem,
 };
-use crate::{ChallengeStatus, Error, Key, crypto, nonce_from_response, retry_after};
+use crate::{ChallengeStatus, Error, Key, Sha256, nonce_from_response, retry_after};
 
 /// An ACME order as described in RFC 8555 (section 7.1.3)
 ///
@@ -61,7 +61,7 @@ impl Order {
     ///
     /// After this succeeds, call [`Order::certificate()`] to retrieve the certificate chain once
     /// the order is in the appropriate state.
-    #[cfg(feature = "rcgen")]
+    #[cfg(all(feature = "rcgen", any(feature = "aws-lc-rs", feature = "ring")))]
     pub async fn finalize(&mut self) -> Result<String, Error> {
         let mut names = Vec::with_capacity(self.state.authorizations.len());
         let mut identifiers = self.identifiers();
@@ -503,7 +503,7 @@ impl ChallengeHandle<'_> {
     /// Combines a challenge's token with the thumbprint of the account's public key to compute
     /// the challenge's `KeyAuthorization`. The `KeyAuthorization` must be used to provision the
     /// expected challenge response based on the challenge type in use.
-    pub fn key_authorization(&self) -> KeyAuthorization {
+    pub fn key_authorization(&self) -> Result<KeyAuthorization, Error> {
         KeyAuthorization::new(self.challenge, &self.account.key)
     }
 
@@ -526,18 +526,28 @@ impl Deref for ChallengeHandle<'_> {
 /// Refer to the methods below to see which encoding to use for your challenge type.
 ///
 /// <https://datatracker.ietf.org/doc/html/rfc8555#section-8.1>
-pub struct KeyAuthorization(String);
+pub struct KeyAuthorization {
+    inner: String,
+    sha256: &'static dyn Sha256,
+}
 
 impl KeyAuthorization {
-    fn new(challenge: &Challenge, key: &Key) -> Self {
-        Self(format!("{}.{}", challenge.token, &key.thumb))
+    fn new(challenge: &Challenge, key: &Key) -> Result<Self, Error> {
+        Ok(Self {
+            inner: format!(
+                "{}.{}",
+                challenge.token,
+                BASE64_URL_SAFE_NO_PAD.encode(key.thumb_sha256()?)
+            ),
+            sha256: key.provider.sha256,
+        })
     }
 
     /// Get the key authorization value
     ///
     /// This can be used for HTTP-01 challenge responses.
     pub fn as_str(&self) -> &str {
-        &self.0
+        &self.inner
     }
 
     /// Get the SHA-256 digest of the key authorization
@@ -545,15 +555,16 @@ impl KeyAuthorization {
     /// This can be used for TLS-ALPN-01 challenge responses.
     ///
     /// <https://datatracker.ietf.org/doc/html/rfc8737#section-3>
-    pub fn digest(&self) -> impl AsRef<[u8]> {
-        crypto::digest(&crypto::SHA256, self.0.as_bytes())
+    pub fn digest(&self) -> [u8; 32] {
+        self.sha256.hash(self.inner.as_bytes())
     }
 
     /// Get the base64-encoded SHA256 digest of the key authorization
     ///
     /// This can be used for DNS-01 challenge responses.
     pub fn dns_value(&self) -> String {
-        BASE64_URL_SAFE_NO_PAD.encode(self.digest())
+        let digest = self.digest();
+        BASE64_URL_SAFE_NO_PAD.encode(digest)
     }
 }
 

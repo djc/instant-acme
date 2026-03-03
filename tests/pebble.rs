@@ -1,3 +1,4 @@
+#![cfg(any(feature = "aws-lc-rs", feature = "ring"))]
 //! Note: tests in the file are ignored by default because they requires `pebble` and
 //! `pebble-challtestsrv` binaries.
 //!
@@ -24,15 +25,15 @@ use hyper_util::client::legacy::Client as HyperClient;
 use hyper_util::client::legacy::connect::HttpConnector;
 use hyper_util::rt::TokioExecutor;
 use instant_acme::{
-    Account, AuthorizationStatus, BodyWrapper, ChallengeHandle, ChallengeType, Error,
-    ExternalAccountKey, Identifier, Key, KeyAuthorization, NewAccount, NewOrder, Order,
+    Account, AuthorizationStatus, BodyWrapper, ChallengeHandle, ChallengeType, CryptoProvider,
+    Error, ExternalAccountKey, Identifier, Key, KeyAuthorization, NewAccount, NewOrder, Order,
     OrderStatus, RetryPolicy,
 };
 #[cfg(all(feature = "time", feature = "x509-parser"))]
 use instant_acme::{CertificateIdentifier, RevocationRequest};
 use rustls::RootCertStore;
 use rustls::client::{verify_server_cert_signed_by_trust_anchor, verify_server_name};
-use rustls::crypto::CryptoProvider;
+use rustls::crypto::CryptoProvider as RustlsCryptoProvider;
 use rustls::pki_types::pem::PemObject;
 use rustls::pki_types::{CertificateDer, ServerName};
 use rustls::server::ParsedCertificate;
@@ -162,6 +163,7 @@ async fn eab_required() -> Result<(), Box<dyn StdError>> {
     config.eab_key = Some(ExternalAccountKey::new(
         eab_id.to_string(),
         raw_eab_hmac_key.as_ref(),
+        test_provider(),
     ));
     Environment::new(config).await.map(|_| ())
 }
@@ -362,7 +364,7 @@ async fn update_key() -> Result<(), Box<dyn StdError>> {
     );
 
     // Change the Pebble environment to use the new ACME account key.
-    env.account = Account::builder_with_http(Box::new(env.client.clone()))
+    env.account = Account::builder_with_http(Box::new(env.client.clone()), test_provider())
         .from_credentials(new_credentials)
         .await?;
 
@@ -385,17 +387,19 @@ async fn account_from_key() -> Result<(), Box<dyn StdError>> {
     let env = Environment::new(EnvironmentConfig::default()).await?;
     let directory_url = format!("https://{}/dir", &env.config.pebble.listen_address);
 
-    let (account1, credentials) = Account::builder_with_http(Box::new(env.client.clone()))
-        .create(
-            &NewAccount {
-                contact: &[],
-                terms_of_service_agreed: true,
-                only_return_existing: false,
-            },
-            directory_url.clone(),
-            None,
-        )
-        .await?;
+    let provider = test_provider();
+    let (account1, credentials) =
+        Account::builder_with_http(Box::new(env.client.clone()), provider)
+            .create(
+                &NewAccount {
+                    contact: &[],
+                    terms_of_service_agreed: true,
+                    only_return_existing: false,
+                },
+                directory_url.clone(),
+                None,
+            )
+            .await?;
 
     #[derive(Deserialize)]
     struct JsonKey<'a> {
@@ -405,14 +409,15 @@ async fn account_from_key() -> Result<(), Box<dyn StdError>> {
     let json1 = serde_json::to_string(&credentials)?;
     let json_key = serde_json::from_str::<JsonKey<'_>>(&json1)?;
     let key_der = BASE64_URL_SAFE_NO_PAD.decode(json_key.key_pkcs8)?;
-    let key = Key::from_pkcs8_der(PrivatePkcs8KeyDer::from(key_der.clone()))?;
+    let key = Key::from_pkcs8_der(PrivatePkcs8KeyDer::from(key_der.clone()), provider)?;
 
-    let (account2, credentials2) = Account::builder_with_http(Box::new(env.client.clone()))
-        .from_key(
-            (key, PrivateKeyDer::try_from(key_der.clone())?),
-            directory_url,
-        )
-        .await?;
+    let (account2, credentials2) =
+        Account::builder_with_http(Box::new(env.client.clone()), provider)
+            .from_key(
+                (key, PrivateKeyDer::try_from(key_der.clone())?),
+                directory_url,
+            )
+            .await?;
 
     assert_eq!(account1.id(), account2.id());
     assert_eq!(
@@ -425,8 +430,8 @@ async fn account_from_key() -> Result<(), Box<dyn StdError>> {
     let env = Environment::new(EnvironmentConfig::default()).await?;
     let directory_url = format!("https://{}/dir", &env.config.pebble.listen_address);
 
-    let key = Key::from_pkcs8_der(PrivatePkcs8KeyDer::from(key_der.clone()))?;
-    let result = Account::builder_with_http(Box::new(env.client.clone()))
+    let key = Key::from_pkcs8_der(PrivatePkcs8KeyDer::from(key_der.clone()), provider)?;
+    let result = Account::builder_with_http(Box::new(env.client.clone()), provider)
         .from_key((key, PrivateKeyDer::try_from(key_der)?), directory_url)
         .await;
 
@@ -456,18 +461,21 @@ async fn account_create_from_key() -> Result<(), Box<dyn StdError>> {
     let directory_url = format!("https://{}/dir", &env.config.pebble.listen_address);
 
     // Generate a new key
-    let (key, key_pkcs8) = Key::generate_pkcs8()?;
+    let provider = test_provider();
+    let (key, key_pkcs8) = Key::generate(provider)?;
 
     // Create a new account with the generated key
-    let (account1, credentials1) = Account::builder_with_http(Box::new(env.client.clone()))
-        .create_from_key(
-            (
-                key,
-                PrivateKeyDer::try_from(key_pkcs8.secret_pkcs8_der().to_vec())?,
-            ),
-            directory_url.clone(),
-        )
-        .await?;
+    let (account1, credentials1) =
+        Account::builder_with_http(Box::new(env.client.clone()), provider)
+            .create_from_key(
+                (
+                    key,
+                    PrivateKeyDer::try_from(key_pkcs8.secret_pkcs8_der().to_vec())
+                        .expect("PKCS#8 key should be valid"),
+                ),
+                directory_url.clone(),
+            )
+            .await?;
 
     // Extract the key to verify it matches what we provided
     #[derive(Deserialize)]
@@ -483,10 +491,11 @@ async fn account_create_from_key() -> Result<(), Box<dyn StdError>> {
     assert_eq!(key_der, key_pkcs8.secret_pkcs8_der());
 
     // Now try to load the account using from_key to verify it was created
-    let key2 = Key::from_pkcs8_der(PrivatePkcs8KeyDer::from(key_der.clone()))?;
-    let (account2, credentials2) = Account::builder_with_http(Box::new(env.client.clone()))
-        .from_key((key2, PrivateKeyDer::try_from(key_der)?), directory_url)
-        .await?;
+    let key2 = Key::from_pkcs8_der(PrivatePkcs8KeyDer::from(key_der.clone()), provider)?;
+    let (account2, credentials2) =
+        Account::builder_with_http(Box::new(env.client.clone()), provider)
+            .from_key((key2, PrivateKeyDer::try_from(key_der)?), directory_url)
+            .await?;
 
     // Both should be the same account
     assert_eq!(account1.id(), account2.id());
@@ -602,7 +611,7 @@ impl Environment {
 
         // Create a new `Account` with the ACME server.
         debug!("creating test account");
-        let (account, _) = Account::builder_with_http(Box::new(client.clone()))
+        let (account, _) = Account::builder_with_http(Box::new(client.clone()), test_provider())
             .create(
                 &NewAccount {
                     contact: &[],
@@ -648,7 +657,7 @@ impl Environment {
                 .challenge(A::TYPE)
                 .ok_or_else(|| format!("no {:?} challenge found", A::TYPE))?;
 
-            let key_authz = challenge.key_authorization();
+            let key_authz = challenge.key_authorization()?;
             self.request_challenge::<A>(&challenge, &key_authz).await?;
 
             debug!(challenge_url = challenge.url, "marking challenge ready");
@@ -669,7 +678,7 @@ impl Environment {
         let ee_cert = ParsedCertificate::try_from(ee_cert_der).unwrap();
 
         // Use the default crypto provider to verify the certificate chain to the Pebble CA root.
-        let crypto_provider = CryptoProvider::get_default().unwrap();
+        let crypto_provider = RustlsCryptoProvider::get_default().unwrap();
         verify_server_cert_signed_by_trust_anchor(
             &ee_cert,
             &self.issuer_roots().await?,
@@ -1021,3 +1030,10 @@ impl Drop for Subprocess {
 
 static NEXT_PORT: AtomicU16 = AtomicU16::new(5555);
 const RETRY_POLICY: RetryPolicy = RetryPolicy::new().backoff(1.0);
+
+fn test_provider() -> &'static CryptoProvider {
+    #[cfg(feature = "aws-lc-rs")]
+    return CryptoProvider::aws_lc_rs();
+    #[cfg(all(feature = "ring", not(feature = "aws-lc-rs")))]
+    return CryptoProvider::ring();
+}
