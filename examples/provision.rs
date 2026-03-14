@@ -1,11 +1,13 @@
+#![cfg(any(feature = "ring", feature = "aws-lc-rs"))]
 use std::io;
 
 use clap::Parser;
+use rustls::crypto::CryptoProvider as RustlsCryptoProvider;
 use tracing::info;
 
 use instant_acme::{
-    Account, AuthorizationStatus, ChallengeType, Identifier, LetsEncrypt, NewAccount, NewOrder,
-    OrderStatus, RetryPolicy,
+    Account, AuthorizationStatus, ChallengeType, CryptoProvider, Identifier, LetsEncrypt,
+    NewAccount, NewOrder, OrderStatus, RetryPolicy,
 };
 
 #[tokio::main]
@@ -17,7 +19,13 @@ async fn main() -> anyhow::Result<()> {
     // Alternatively, restore an account from serialized credentials by
     // using `Account::from_credentials()`.
 
-    let (account, credentials) = Account::builder()?
+    #[cfg(feature = "aws-lc-rs")]
+    let provider = CryptoProvider::aws_lc_rs();
+
+    #[cfg(all(feature = "ring", not(feature = "aws-lc-rs")))]
+    let provider = CryptoProvider::ring();
+
+    let (account, credentials) = Account::builder(provider, rustls_crypto_provider())?
         .create(
             &NewAccount {
                 contact: &[],
@@ -71,7 +79,7 @@ async fn main() -> anyhow::Result<()> {
         println!(
             "_acme-challenge.{} IN TXT {}",
             challenge.identifier(),
-            challenge.key_authorization().dns_value()
+            challenge.key_authorization()?.dns_value()
         );
         io::stdin().read_line(&mut String::new())?;
 
@@ -99,4 +107,14 @@ async fn main() -> anyhow::Result<()> {
 struct Options {
     #[clap(long)]
     names: Vec<String>,
+}
+
+#[cfg(feature = "aws-lc-rs")]
+fn rustls_crypto_provider() -> RustlsCryptoProvider {
+    rustls::crypto::aws_lc_rs::default_provider()
+}
+
+#[cfg(all(feature = "ring", not(feature = "aws-lc-rs")))]
+fn rustls_crypto_provider() -> RustlsCryptoProvider {
+    rustls::crypto::ring::default_provider()
 }
