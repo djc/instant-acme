@@ -787,6 +787,41 @@ pub struct Http01Challenge {
     pub token: String,
 }
 
+/// Challenge authorization data for an RFC 8555 http-01 challenge
+pub struct Http01ChallengeAuthorization {
+    token: String,
+    key_auth: String,
+}
+
+impl Http01ChallengeAuthorization {
+    /// The path prefix defined by RFC 8555 for HTTP-01 challenge responses.
+    pub const PREFIX: &'static str = "/.well-known/acme-challenge/";
+
+    pub(crate) fn new(token: &str, key: &Key) -> Self {
+        Self {
+            token: token.to_owned(),
+            key_auth: format!("{token}.{}", &key.thumb),
+        }
+    }
+
+    /// The challenge token for this challenge authorization.
+    pub fn token(&self) -> &str {
+        &self.token
+    }
+
+    /// The path at which you should provision a file containing [`Self::key_authorization()`]
+    pub fn webroot_path(&self) -> String {
+        format!("{}{}", Self::PREFIX, self.token)
+    }
+
+    /// The key authorization content that should be placed in the challenge response file.
+    ///
+    /// The file should be provisioned at [`Self::webroot_path()`] in your webserver's web root.
+    pub fn key_authorization(&self) -> &str {
+        &self.key_auth
+    }
+}
+
 /// Challenge state for an RFC 8555 dns-01 challenge
 ///
 /// See <https://www.rfc-editor.org/rfc/rfc8555#section-8.4>
@@ -797,6 +832,45 @@ pub struct Dns01Challenge {
     pub token: String,
 }
 
+/// Challenge authorization data for an RFC 8555 http-01 challenge
+pub struct Dns01ChallengeAuthorization {
+    domain: String,
+    rdata: String,
+}
+
+impl Dns01ChallengeAuthorization {
+    /// The prefix added to the identifier value to form the TXT record host
+    pub const PREFIX: &'static str = "_acme-challenge.";
+
+    pub(crate) fn new(identifier: &Identifier, token: &str, key: &Key) -> Self {
+        let Identifier::Dns(domain) = identifier else {
+            unreachable!("DNS-01 only supports domain identifiers");
+        };
+
+        Self {
+            domain: domain.clone(),
+            rdata: BASE64_URL_SAFE_NO_PAD.encode(crypto::digest(
+                &crypto::SHA256,
+                format!("{token}.{}", &key.thumb).as_bytes(),
+            )),
+        }
+    }
+
+    /// Fully qualified hostname for the challenge response TXT record to be provisioned
+    ///
+    /// Includes a trailing dot.
+    pub fn host(&self) -> String {
+        format!("{}{}.", Self::PREFIX, self.domain)
+    }
+
+    /// The TXT record RDATA to provision for [`Self::host()`]
+    ///
+    /// This is the base64-encoded SHA256 digest of the challenge key authorization.
+    pub fn rdata(&self) -> &str {
+        &self.rdata
+    }
+}
+
 /// Challenge state for an RFC 8737 tls-alpn-01 challenge
 ///
 /// See <https://www.rfc-editor.org/rfc/rfc8737#section-3>
@@ -805,6 +879,43 @@ pub struct Dns01Challenge {
 pub struct TlsAlpn01Challenge {
     /// A token for constructing a key authorization to complete this challenge
     pub token: String,
+}
+
+/// Challenge authorization data for an RFC 8737 tls-alpn-01 challenge
+pub struct TlsAlpn01ChallengeAuthorization {
+    key_auth: String,
+    extension_value: Vec<u8>,
+}
+
+impl TlsAlpn01ChallengeAuthorization {
+    pub(crate) fn new(token: &str, key: &Key) -> Self {
+        let key_auth = format!("{token}.{}", &key.thumb);
+        Self {
+            extension_value: crypto::digest(&crypto::SHA256, key_auth.as_bytes())
+                .as_ref()
+                .to_vec(),
+            key_auth,
+        }
+    }
+
+    /// The unhashed key authorization string
+    ///
+    /// Typically, you would prefer using [`Self::extension_value`] to construct
+    /// a DER encoded id-pe-acmeIdentifier extension.
+    ///
+    /// This API may be useful when using a higher-level TLS-ALPN-01 certificate generation
+    /// API that expects the RFC-8555 §8.1 key authorization string as input.
+    pub fn key_authorization(&self) -> &str {
+        &self.key_auth
+    }
+
+    /// The SHA-256 digest of the RFC-8555 §8.1 key authorization string
+    ///
+    /// This can be used to construct a DER encoded id-pe-acmeIdentifier extension
+    /// for embedding in a provisioned TLS-ALPN-01 challenge response certificate.
+    pub fn extension_value(&self) -> &[u8] {
+        &self.extension_value
+    }
 }
 
 /// Status of an ACME [Challenge]
@@ -1042,47 +1153,6 @@ pub(crate) enum SigningAlgorithm {
     Es256,
     /// HMAC with SHA-256,
     Hs256,
-}
-
-/// A key authorization computed by combining a challenge token and the base64 account thumbprint
-///
-/// The HTTP-01, DNS-01 and TLS-ALPN-01 challenge types use this as part of provisioning a
-/// challenge response. See <https://datatracker.ietf.org/doc/html/rfc8555#section-8.1>.
-pub struct KeyAuthorization(String);
-
-impl KeyAuthorization {
-    pub(crate) fn new(token: &str, key: &Key) -> Self {
-        Self(format!("{token}.{}", &key.thumb))
-    }
-
-    /// Get the key authorization value
-    ///
-    /// This can be used for HTTP-01 challenge responses.
-    pub fn as_str(&self) -> &str {
-        &self.0
-    }
-
-    /// Get the SHA-256 digest of the key authorization
-    ///
-    /// This can be used for TLS-ALPN-01 challenge responses.
-    ///
-    /// <https://datatracker.ietf.org/doc/html/rfc8737#section-3>
-    pub fn digest(&self) -> impl AsRef<[u8]> {
-        crypto::digest(&crypto::SHA256, self.0.as_bytes())
-    }
-
-    /// Get the base64-encoded SHA256 digest of the key authorization
-    ///
-    /// This can be used for DNS-01 challenge responses.
-    pub fn dns_value(&self) -> String {
-        BASE64_URL_SAFE_NO_PAD.encode(self.digest())
-    }
-}
-
-impl fmt::Debug for KeyAuthorization {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_tuple("KeyAuthorization").finish()
-    }
 }
 
 /// Attestation payload used for device-attest-01

@@ -45,9 +45,10 @@ mod types;
 pub use types::{
     AccountCredentials, Authorization, AuthorizationState, AuthorizationStatus,
     AuthorizedIdentifier, CertificateIdentifier, Challenge, ChallengeState, ChallengeStatus,
-    ChallengeType, DeviceAttestation, Dns01Challenge, Error, Http01Challenge, Identifier,
-    KeyAuthorization, LetsEncrypt, NewAccount, NewOrder, OrderState, OrderStatus, Problem,
-    ProfileMeta, RevocationReason, RevocationRequest, Subproblem, TlsAlpn01Challenge, ZeroSsl,
+    ChallengeType, DeviceAttestation, Dns01Challenge, Dns01ChallengeAuthorization, Error,
+    Http01Challenge, Http01ChallengeAuthorization, Identifier, LetsEncrypt, NewAccount, NewOrder,
+    OrderState, OrderStatus, Problem, ProfileMeta, RevocationReason, RevocationRequest, Subproblem,
+    TlsAlpn01Challenge, TlsAlpn01ChallengeAuthorization, ZeroSsl,
 };
 use types::{Directory, JoseJson, Signer};
 #[cfg(feature = "time")]
