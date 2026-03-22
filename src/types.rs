@@ -782,7 +782,7 @@ impl Identifier {
 
 /// An [`Identifier`] which knows its `wildcard` context
 #[non_exhaustive]
-#[derive(Debug)]
+#[derive(Clone, Copy, Debug)]
 pub struct AuthorizedIdentifier<'a> {
     /// The source identifier, missing any wildcard context
     pub identifier: &'a Identifier,

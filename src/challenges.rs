@@ -2,9 +2,11 @@
 
 use std::borrow::Cow;
 
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
-use crate::types::Problem;
+use crate::account::AccountInner;
+use crate::nonce_from_response;
+use crate::types::{AuthorizationState, AuthorizedIdentifier, Empty, Error, Problem};
 
 /// An ACME challenge as described in RFC 8555 (section 7.1.5)
 ///
@@ -47,20 +49,6 @@ pub enum ChallengeState {
 }
 
 impl ChallengeState {
-    /// Get the token associated with this challenge (if applicable)
-    ///
-    /// DNS-01, HTTP-01 and TLS-ALPN-01 challenge types offer a token. Other challenge types
-    /// do not rely on RFC 8555 key authorizations and will return `None`, expecting the
-    /// challenge to be satisfied with another method specific to its type.
-    pub fn token(&self) -> Option<&str> {
-        Some(match self {
-            Self::Http01(http01::Challenge { token })
-            | Self::Dns01(dns01::Challenge { token })
-            | Self::TlsAlpn01(tls_alpn01::Challenge { token }) => token,
-            Self::DeviceAttest01(_) | Self::Unknown => return None,
-        })
-    }
-
     /// Get the challenge type associated with this challenge state
     pub fn r#type(&self) -> ChallengeType {
         match self {
@@ -102,12 +90,106 @@ pub enum ChallengeStatus {
     Invalid,
 }
 
+/// A handle for interacting with a challenge of a specific type
+///
+/// The `T` type parameter is the challenge type specific state type (e.g.
+/// [`http01::Challenge`]) and determines which operations are available.
+/// Obtain a handle from the accessor for the challenge type on
+/// [`AuthorizationHandle`][crate::AuthorizationHandle] (e.g.
+/// [`AuthorizationHandle::http01()`][crate::AuthorizationHandle::http01()]).
+pub struct ChallengeHandle<'a, T> {
+    state: ChallengeHandleState<'a>,
+    challenge: &'a T,
+}
+
+impl<'a, T> ChallengeHandle<'a, T> {
+    pub(crate) fn new(
+        authz: &'a AuthorizationState,
+        nonce: &'a mut Option<String>,
+        account: &'a AccountInner,
+    ) -> Option<Self>
+    where
+        T: ChallengeVariant,
+    {
+        let (challenge, data) = authz
+            .challenges
+            .iter()
+            .find_map(|c| Some((c, T::from_state(&c.state)?)))?;
+        Some(Self {
+            state: ChallengeHandleState {
+                identifier: authz.identifier(),
+                challenge,
+                nonce,
+                account,
+            },
+            challenge: data,
+        })
+    }
+}
+
+impl<T> ChallengeHandle<'_, T> {
+    /// The underlying ACME challenge
+    pub fn challenge(&self) -> &Challenge {
+        self.state.challenge
+    }
+
+    /// The identifier for this challenge's authorization
+    pub fn identifier(&self) -> &AuthorizedIdentifier<'_> {
+        &self.state.identifier
+    }
+}
+
+/// Shared state common to all challenge handles
+struct ChallengeHandleState<'a> {
+    identifier: AuthorizedIdentifier<'a>,
+    challenge: &'a Challenge,
+    nonce: &'a mut Option<String>,
+    account: &'a AccountInner,
+}
+
+impl ChallengeHandleState<'_> {
+    /// Notify the server that the given challenge is ready to be completed
+    ///
+    /// Traditional token-based challenges are acknowledged with an empty object body.
+    async fn set_ready(&mut self) -> Result<(), Error> {
+        self.respond(&Empty {}).await.map(drop)
+    }
+
+    /// Respond to the challenge with a type-specific payload
+    async fn respond(&mut self, payload: &impl Serialize) -> Result<ChallengeStatus, Error> {
+        let rsp = self
+            .account
+            .post(Some(payload), self.nonce.take(), &self.challenge.url)
+            .await?;
+
+        *self.nonce = nonce_from_response(&rsp);
+        let response = Problem::check::<Challenge>(rsp).await?;
+        match response.error {
+            Some(details) => Err(Error::Api(details)),
+            None => Ok(response.status),
+        }
+    }
+
+}
+
+/// A challenge state type corresponding to one [`ChallengeState`] variant
+///
+/// Implemented by the challenge state types in the per-challenge type submodules
+/// (e.g. [`http01::Challenge`]).
+pub(crate) trait ChallengeVariant: Sized {
+    /// Get a reference to this state type's data from `state`, if the type matches
+    fn from_state(state: &ChallengeState) -> Option<&Self>;
+}
+
 pub mod http01 {
     //! Support for RFC 8555 http-01 challenges
     //!
     //! See <https://www.rfc-editor.org/rfc/rfc8555#section-8.3>
 
     use serde::Deserialize;
+
+    use super::{ChallengeHandle, ChallengeState, ChallengeVariant};
+    use crate::{Error, KeyAuthorization};
 
     /// Challenge state for an http-01 challenge
     #[derive(Clone, Debug, Deserialize, Eq, PartialEq)]
@@ -116,6 +198,35 @@ pub mod http01 {
         /// A token for constructing a key authorization to complete this challenge
         pub token: String,
     }
+
+    impl ChallengeVariant for Challenge {
+        fn from_state(state: &ChallengeState) -> Option<&Self> {
+            match state {
+                ChallengeState::Http01(data) => Some(data),
+                _ => None,
+            }
+        }
+    }
+
+    impl ChallengeHandle<'_, Challenge> {
+        /// Notify the server that the challenge is ready to be completed
+        pub async fn set_ready(&mut self) -> Result<(), Error> {
+            self.state.set_ready().await
+        }
+
+        /// The token for this challenge
+        pub fn token(&self) -> &str {
+            &self.challenge.token
+        }
+
+        /// Create a [`KeyAuthorization`] for this challenge
+        pub fn key_authorization(&self) -> Result<KeyAuthorization, Error> {
+            KeyAuthorization::new(&self.challenge.token, &self.state.account.key)
+        }
+    }
+
+    /// A handle for interacting with an http-01 challenge
+    pub type Handle<'a> = ChallengeHandle<'a, Challenge>;
 }
 
 pub mod dns01 {
@@ -125,6 +236,9 @@ pub mod dns01 {
 
     use serde::Deserialize;
 
+    use super::{ChallengeHandle, ChallengeState, ChallengeVariant};
+    use crate::{Error, KeyAuthorization};
+
     /// Challenge state for a dns-01 challenge
     #[derive(Clone, Debug, Deserialize, Eq, PartialEq)]
     #[non_exhaustive]
@@ -132,6 +246,35 @@ pub mod dns01 {
         /// A token for constructing a key authorization to complete this challenge
         pub token: String,
     }
+
+    impl ChallengeVariant for Challenge {
+        fn from_state(state: &ChallengeState) -> Option<&Self> {
+            match state {
+                ChallengeState::Dns01(data) => Some(data),
+                _ => None,
+            }
+        }
+    }
+
+    impl ChallengeHandle<'_, Challenge> {
+        /// Notify the server that the challenge is ready to be completed
+        pub async fn set_ready(&mut self) -> Result<(), Error> {
+            self.state.set_ready().await
+        }
+
+        /// The token for this challenge
+        pub fn token(&self) -> &str {
+            &self.challenge.token
+        }
+
+        /// Create a [`KeyAuthorization`] for this challenge
+        pub fn key_authorization(&self) -> Result<KeyAuthorization, Error> {
+            KeyAuthorization::new(&self.challenge.token, &self.state.account.key)
+        }
+    }
+
+    /// A handle for interacting with a dns-01 challenge
+    pub type Handle<'a> = ChallengeHandle<'a, Challenge>;
 }
 
 pub mod tls_alpn01 {
@@ -141,6 +284,9 @@ pub mod tls_alpn01 {
 
     use serde::Deserialize;
 
+    use super::{ChallengeHandle, ChallengeState, ChallengeVariant};
+    use crate::{Error, KeyAuthorization};
+
     /// Challenge state for a tls-alpn-01 challenge
     #[derive(Clone, Debug, Deserialize, Eq, PartialEq)]
     #[non_exhaustive]
@@ -148,6 +294,35 @@ pub mod tls_alpn01 {
         /// A token for constructing a key authorization to complete this challenge
         pub token: String,
     }
+
+    impl ChallengeVariant for Challenge {
+        fn from_state(state: &ChallengeState) -> Option<&Self> {
+            match state {
+                ChallengeState::TlsAlpn01(data) => Some(data),
+                _ => None,
+            }
+        }
+    }
+
+    impl ChallengeHandle<'_, Challenge> {
+        /// Notify the server that the challenge is ready to be completed
+        pub async fn set_ready(&mut self) -> Result<(), Error> {
+            self.state.set_ready().await
+        }
+
+        /// The token for this challenge
+        pub fn token(&self) -> &str {
+            &self.challenge.token
+        }
+
+        /// Create a [`KeyAuthorization`] for this challenge
+        pub fn key_authorization(&self) -> Result<KeyAuthorization, Error> {
+            KeyAuthorization::new(&self.challenge.token, &self.state.account.key)
+        }
+    }
+
+    /// A handle for interacting with a tls-alpn-01 challenge
+    pub type Handle<'a> = ChallengeHandle<'a, Challenge>;
 }
 
 pub mod device_attest01 {
@@ -157,7 +332,15 @@ pub mod device_attest01 {
     //!
     //! Note: device attestation support is experimental.
 
-    use serde::Deserialize;
+    use std::borrow::Cow;
+
+    use base64::prelude::{BASE64_URL_SAFE_NO_PAD, Engine};
+    use serde::{Deserialize, Serialize};
+
+    use super::{
+        ChallengeHandle, ChallengeState, ChallengeStatus, ChallengeVariant, DeviceAttestation,
+    };
+    use crate::types::Error;
 
     /// Challenge state for a device-attest-01 challenge
     ///
@@ -165,6 +348,43 @@ pub mod device_attest01 {
     #[derive(Clone, Debug, Deserialize, Eq, PartialEq)]
     #[non_exhaustive]
     pub struct Challenge {}
+
+    impl ChallengeVariant for Challenge {
+        fn from_state(state: &ChallengeState) -> Option<&Self> {
+            match state {
+                ChallengeState::DeviceAttest01(data) => Some(data),
+                _ => None,
+            }
+        }
+    }
+
+    impl ChallengeHandle<'_, Challenge> {
+        /// Notify the server that the challenge is ready by sending a device attestation
+        ///
+        /// See <https://datatracker.ietf.org/doc/draft-ietf-acme-device-attest/> for details.
+        ///
+        /// `payload` is the device attestation object. Provide the attestation
+        /// object as a raw blob; base64 encoding is done by this function.
+        pub async fn send_attestation(
+            &mut self,
+            payload: &DeviceAttestation<'_>,
+        ) -> Result<ChallengeStatus, Error> {
+            #[derive(Serialize)]
+            #[serde(rename_all = "camelCase")]
+            struct DeviceAttestationBase64<'a> {
+                att_obj: Cow<'a, str>,
+            }
+
+            let payload = DeviceAttestationBase64 {
+                att_obj: Cow::Owned(BASE64_URL_SAFE_NO_PAD.encode(&payload.att_obj)),
+            };
+
+            self.state.respond(&payload).await
+        }
+    }
+
+    /// A handle for interacting with a device-attest-01 challenge
+    pub type Handle<'a> = ChallengeHandle<'a, Challenge>;
 }
 
 /// Attestation payload used for device-attest-01
@@ -193,9 +413,13 @@ mod tests {
         assert_eq!(obj.state.r#type(), ChallengeType::Dns01);
         assert_eq!(obj.url, "https://example.com/acme/chall/Rg5dV14Gh1Q");
         assert_eq!(obj.status, ChallengeStatus::Pending);
+
+        let ChallengeState::Dns01(chall_state) = obj.state else {
+            panic!("wrong challenge state type");
+        };
         assert_eq!(
-            obj.state.token(),
-            Some("evaGxfADs6pSRb2LAv9IZf17Dt3juxGJ-PCt92wr-oA")
+            chall_state.token,
+            "evaGxfADs6pSRb2LAv9IZf17Dt3juxGJ-PCt92wr-oA",
         );
     }
 }

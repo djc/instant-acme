@@ -1,4 +1,3 @@
-use std::borrow::Cow;
 use std::ops::{ControlFlow, Deref};
 use std::sync::Arc;
 use std::time::{Duration, Instant, SystemTime};
@@ -11,7 +10,7 @@ use serde::Serialize;
 use tokio::time::sleep;
 
 use crate::account::AccountInner;
-use crate::challenges::{Challenge, ChallengeStatus, ChallengeType, DeviceAttestation};
+use crate::challenges::{ChallengeHandle, device_attest01, dns01, http01, tls_alpn01};
 use crate::types::{
     Authorization, AuthorizationState, AuthorizationStatus, AuthorizedIdentifier, Empty, Error,
     FinalizeRequest, OrderState, OrderStatus, Problem,
@@ -320,9 +319,15 @@ impl<'a> AuthStream<'a> {
 ///
 /// For each authorization, you'll need to:
 ///
-/// * Select which [`ChallengeType`] you want to complete
-/// * Call [`AuthorizationHandle::challenge()`] to get a [`ChallengeHandle`]
-/// * Use the `ChallengeHandle` to complete the authorization's challenge
+/// * Select which [`ChallengeType`][crate::ChallengeType] you want to complete
+/// * Call the appropriate challenge handle accessor to get a type specific challenge
+///   handle (e.g. [`AuthorizationHandle::http01()`], [`AuthorizationHandle::dns01()`],
+///   etc).
+/// * Use the type-specific handle API to complete the authorization's challenge (e.g.
+///   provisioning an HTTP-01 response with [`http01::Handle::key_authorization()`]).
+/// * Use the type-specific handle API to indicate to the ACME CA that you're ready for
+///   validation to occur (e.g. [`http01::Handle::set_ready()`] for HTTP-01, or
+///   [`device_attest01::Handle::send_attestation()`] for device-attest-01).
 ///
 /// <https://datatracker.ietf.org/doc/html/rfc8555#section-7.1.3>
 pub struct AuthorizationHandle<'a> {
@@ -391,21 +396,30 @@ impl<'a> AuthorizationHandle<'a> {
         }
     }
 
-    /// Get a [`ChallengeHandle`] for the given `type`
+    /// Get a handle for the HTTP-01 challenge, if present
+    #[must_use = "the returned challenge handle should be used to complete the authorization"]
+    pub fn http01(&mut self) -> Option<http01::Handle<'_>> {
+        ChallengeHandle::new(self.state, self.nonce, self.account)
+    }
+
+    /// Get a handle for the DNS-01 challenge, if present
+    #[must_use = "the returned challenge handle should be used to complete the authorization"]
+    pub fn dns01(&mut self) -> Option<dns01::Handle<'_>> {
+        ChallengeHandle::new(self.state, self.nonce, self.account)
+    }
+
+    /// Get a handle for the TLS-ALPN-01 challenge, if present
+    #[must_use = "the returned challenge handle should be used to complete the authorization"]
+    pub fn tls_alpn01(&mut self) -> Option<tls_alpn01::Handle<'_>> {
+        ChallengeHandle::new(self.state, self.nonce, self.account)
+    }
+
+    /// Get a handle for the device-attest-01 challenge, if present
     ///
-    /// Yields an object to interact with the challenge for the given type, if available.
-    pub fn challenge(&'a mut self, r#type: ChallengeType) -> Option<ChallengeHandle<'a>> {
-        let challenge = self
-            .state
-            .challenges
-            .iter()
-            .find(|c| c.state.r#type() == r#type)?;
-        Some(ChallengeHandle {
-            identifier: self.state.identifier(),
-            challenge,
-            nonce: self.nonce,
-            account: self.account,
-        })
+    /// Note: Device attestation support is experimental.
+    #[must_use = "the returned challenge handle should be used to complete the authorization"]
+    pub fn device_attest01(&mut self) -> Option<device_attest01::Handle<'_>> {
+        ChallengeHandle::new(self.state, self.nonce, self.account)
     }
 
     /// Get the URL of the authorization
@@ -422,118 +436,6 @@ impl Deref for AuthorizationHandle<'_> {
     }
 }
 
-/// Wrapper type for interacting with a [`Challenge`]'s state
-///
-/// For each challenge, you'll need to:
-///
-/// * Obtain the [`ChallengeHandle::key_authorization()`] for the challenge response
-/// * Set up the challenge response in your infrastructure (details vary by challenge type)
-/// * Call [`ChallengeHandle::set_ready()`] for that challenge after setup is complete
-///
-/// After the challenges have been set to ready, call [`Order::poll_ready()`] to wait until the
-/// order is ready to be finalized (or to learn if it becomes invalid). Once it is ready, call
-/// [`Order::finalize()`] to get the certificate.
-///
-/// Dereferences to the underlying [`Challenge`] for easy access to the challenge's state.
-pub struct ChallengeHandle<'a> {
-    identifier: AuthorizedIdentifier<'a>,
-    challenge: &'a Challenge,
-    nonce: &'a mut Option<String>,
-    account: &'a AccountInner,
-}
-
-impl ChallengeHandle<'_> {
-    /// Notify the server that the given challenge is ready to be completed
-    pub async fn set_ready(&mut self) -> Result<(), Error> {
-        let rsp = self
-            .account
-            .post(Some(&Empty {}), self.nonce.take(), &self.challenge.url)
-            .await?;
-
-        *self.nonce = nonce_from_response(&rsp);
-        let response = Problem::check::<Challenge>(rsp).await?;
-        match response.error {
-            Some(details) => Err(Error::Api(details)),
-            None => Ok(()),
-        }
-    }
-
-    /// Notify the server that the challenge is ready by sending a device attestation
-    ///
-    /// This function is for the ACME challenge device-attest-01. It should not be used
-    /// with other challenge types.
-    /// See <https://datatracker.ietf.org/doc/draft-acme-device-attest/> for details.
-    ///
-    /// `payload` is the device attestation object as defined in link. Provide the attestation
-    /// object as a raw blob. Base64 encoding of the attestation object `payload.att_obj`
-    /// is done by this function.
-    ///
-    /// The function yields the challenge status from the ACME server that validated the
-    /// attestation challenge.
-    ///
-    /// Note: Device attestation support is experimental.
-    pub async fn send_device_attestation(
-        &mut self,
-        payload: &DeviceAttestation<'_>,
-    ) -> Result<ChallengeStatus, Error> {
-        if self.challenge.state.r#type() != ChallengeType::DeviceAttest01 {
-            return Err(Error::Str("challenge type should be device-attest-01"));
-        }
-
-        #[derive(Serialize)]
-        #[serde(rename_all = "camelCase")]
-        struct DeviceAttestationBase64<'a> {
-            att_obj: Cow<'a, str>,
-        }
-
-        let payload = DeviceAttestationBase64 {
-            att_obj: Cow::Owned(BASE64_URL_SAFE_NO_PAD.encode(&payload.att_obj)),
-        };
-
-        let rsp = self
-            .account
-            .post(Some(&payload), self.nonce.take(), &self.challenge.url)
-            .await?;
-
-        *self.nonce = nonce_from_response(&rsp);
-        let response = Problem::check::<Challenge>(rsp).await?;
-        match response.error {
-            Some(details) => Err(Error::Api(details)),
-            None => Ok(response.status),
-        }
-    }
-
-    /// Create a [`KeyAuthorization`] for this challenge if applicable
-    ///
-    /// Combines a challenge's token with the thumbprint of the account's public key to compute
-    /// the challenge's `KeyAuthorization`. The `KeyAuthorization` must be used to provision the
-    /// expected challenge response based on the challenge type in use.
-    ///
-    /// DNS-01, HTTP-01 and TLS-ALPN-01 challenge types offer a `KeyAuthorization`. Other challenge
-    /// types do not rely on this mechanism and will return `Ok(None)`, expecting the challenge to be
-    /// satisfied with another method specific to its type.
-    pub fn key_authorization(&self) -> Result<Option<KeyAuthorization>, Error> {
-        self.challenge
-            .state
-            .token()
-            .map(|t| KeyAuthorization::new(t, &self.account.key))
-            .transpose()
-    }
-
-    /// The identifier for this challenge's authorization
-    pub fn identifier(&self) -> &AuthorizedIdentifier<'_> {
-        &self.identifier
-    }
-}
-
-impl Deref for ChallengeHandle<'_> {
-    type Target = Challenge;
-
-    fn deref(&self) -> &Self::Target {
-        self.challenge
-    }
-}
-
 /// The response value to use for challenge responses
 ///
 /// Refer to the methods below to see which encoding to use for your challenge type.
@@ -545,7 +447,7 @@ pub struct KeyAuthorization {
 }
 
 impl KeyAuthorization {
-    fn new(token: &str, key: &Key) -> Result<Self, Error> {
+    pub(crate) fn new(token: &str, key: &Key) -> Result<Self, Error> {
         let inner = format!(
             "{}.{}",
             token,

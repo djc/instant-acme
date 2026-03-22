@@ -7,8 +7,8 @@ use clap::Parser;
 use tracing::info;
 
 use instant_acme::{
-    Account, AuthorizationStatus, ChallengeType, CryptoProvider, DefaultClient, Identifier,
-    LetsEncrypt, NewAccount, NewOrder, OrderStatus, RetryPolicy,
+    Account, AuthorizationStatus, CryptoProvider, DefaultClient, Identifier, LetsEncrypt,
+    NewAccount, NewOrder, OrderStatus, RetryPolicy,
 };
 
 #[tokio::main]
@@ -82,14 +82,14 @@ async fn main() -> anyhow::Result<()> {
         // pick something else to use here.
 
         let mut challenge = authz
-            .challenge(ChallengeType::Dns01)
+            .dns01()
             .ok_or_else(|| anyhow::anyhow!("no dns01 challenge found"))?;
 
         println!("Please set the following DNS record then press the Return key:");
         println!(
             "_acme-challenge.{} IN TXT {}",
             challenge.identifier(),
-            challenge.key_authorization()?.unwrap().dns_value()
+            challenge.key_authorization()?.dns_value()
         );
         io::stdin().read_line(&mut String::new())?;
 
