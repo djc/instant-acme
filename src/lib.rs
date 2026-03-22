@@ -52,17 +52,16 @@ pub use crypto::{
 
 mod order;
 pub use order::{
-    AuthorizationHandle, Authorizations, ChallengeHandle, Identifiers, KeyAuthorization, Order,
-    RetryPolicy,
+    AuthorizationHandle, Authorizations, ChallengeHandle, Identifiers, Order, RetryPolicy,
 };
 
 mod types;
 pub use types::{
     AccountCredentials, Authorization, AuthorizationState, AuthorizationStatus,
     AuthorizedIdentifier, CertificateIdentifier, Challenge, ChallengeStatus, ChallengeType,
-    DeviceAttestation, EcCurve, Error, Identifier, Jwk, JwkThumbFields, LetsEncrypt, NewAccount,
-    NewOrder, OctetKeyCurve, OrderState, OrderStatus, Problem, ProfileMeta, RevocationReason,
-    RevocationRequest, SigningAlgorithm, Subproblem, ZeroSsl,
+    DeviceAttestation, EcCurve, Error, Identifier, Jwk, JwkThumbFields, KeyAuthorization,
+    LetsEncrypt, NewAccount, NewOrder, OctetKeyCurve, OrderState, OrderStatus, Problem,
+    ProfileMeta, RevocationReason, RevocationRequest, SigningAlgorithm, Subproblem, ZeroSsl,
 };
 use types::{Directory, JoseJson, Signer};
 #[cfg(feature = "time")]
