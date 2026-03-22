@@ -58,10 +58,11 @@ pub use order::{
 mod types;
 pub use types::{
     AccountCredentials, Authorization, AuthorizationState, AuthorizationStatus,
-    AuthorizedIdentifier, CertificateIdentifier, Challenge, ChallengeStatus, ChallengeType,
-    DeviceAttestation, EcCurve, Error, Identifier, Jwk, JwkThumbFields, KeyAuthorization,
-    LetsEncrypt, NewAccount, NewOrder, OctetKeyCurve, OrderState, OrderStatus, Problem,
-    ProfileMeta, RevocationReason, RevocationRequest, SigningAlgorithm, Subproblem, ZeroSsl,
+    AuthorizedIdentifier, CertificateIdentifier, Challenge, ChallengeState, ChallengeStatus,
+    ChallengeType, DeviceAttestation, Dns01Challenge, EcCurve, Error, Http01Challenge, Identifier,
+    Jwk, JwkThumbFields, KeyAuthorization, LetsEncrypt, NewAccount, NewOrder, OctetKeyCurve,
+    OrderState, OrderStatus, Problem, ProfileMeta, RevocationReason, RevocationRequest,
+    SigningAlgorithm, Subproblem, TlsAlpn01Challenge, ZeroSsl,
 };
 use types::{Directory, JoseJson, Signer};
 #[cfg(feature = "time")]
