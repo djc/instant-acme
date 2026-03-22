@@ -18,7 +18,7 @@ use x509_parser::extensions::ParsedExtension;
 #[cfg(feature = "x509-parser")]
 use x509_parser::parse_x509_certificate;
 
-use crate::{BytesResponse, Sha256};
+use crate::{BytesResponse, Key, Sha256};
 
 /// Error type for instant-acme
 #[derive(Debug, Error)]
@@ -1054,6 +1054,60 @@ pub enum SigningAlgorithm {
     /// Other algorithm not represented in the enum
     #[serde(untagged)]
     Other(&'static str),
+}
+
+/// The response value to use for challenge responses
+///
+/// Refer to the methods below to see which encoding to use for your challenge type.
+///
+/// <https://datatracker.ietf.org/doc/html/rfc8555#section-8.1>
+pub struct KeyAuthorization {
+    inner: String,
+    digest: [u8; 32],
+}
+
+impl KeyAuthorization {
+    pub(crate) fn new(token: &str, key: &Key) -> Result<Self, Error> {
+        let inner = format!(
+            "{}.{}",
+            token,
+            BASE64_URL_SAFE_NO_PAD.encode(key.thumb_sha256()?)
+        );
+
+        Ok(Self {
+            digest: key.provider.sha256.hash(inner.as_bytes()),
+            inner,
+        })
+    }
+
+    /// Get the key authorization value
+    ///
+    /// This can be used for HTTP-01 challenge responses.
+    pub fn as_str(&self) -> &str {
+        &self.inner
+    }
+
+    /// Get the SHA-256 digest of the key authorization
+    ///
+    /// This can be used for TLS-ALPN-01 challenge responses.
+    ///
+    /// <https://datatracker.ietf.org/doc/html/rfc8737#section-3>
+    pub fn digest(&self) -> [u8; 32] {
+        self.digest
+    }
+
+    /// Get the base64-encoded SHA256 digest of the key authorization
+    ///
+    /// This can be used for DNS-01 challenge responses.
+    pub fn dns_value(&self) -> String {
+        BASE64_URL_SAFE_NO_PAD.encode(self.digest)
+    }
+}
+
+impl fmt::Debug for KeyAuthorization {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_tuple("KeyAuthorization").finish()
+    }
 }
 
 /// Attestation payload used for device-attest-01
