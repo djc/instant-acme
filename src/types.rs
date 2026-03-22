@@ -802,20 +802,6 @@ impl ChallengeState {
             Self::Unknown(r#type) => ChallengeType::Unknown(r#type.clone()),
         }
     }
-
-    /// Get the token associated with this challenge (if applicable)
-    ///
-    /// DNS-01, HTTP-01 and TLS-ALPN-01 challenge types offer a token. Other challenge types
-    /// do not rely on RFC 8555 key authorizations and will return `None`, expecting the
-    /// challenge to be satisfied with another method specific to its type.
-    pub fn token(&self) -> Option<&str> {
-        Some(match self {
-            Self::Http01(Http01Challenge { token })
-            | Self::Dns01(Dns01Challenge { token })
-            | Self::TlsAlpn01(TlsAlpn01Challenge { token }) => token,
-            Self::DeviceAttest01 | Self::Unknown { .. } => return None,
-        })
-    }
 }
 
 impl<'de> Deserialize<'de> for ChallengeState {
@@ -1308,9 +1294,13 @@ mod tests {
         assert_eq!(obj.state.r#type(), ChallengeType::Dns01);
         assert_eq!(obj.url, "https://example.com/acme/chall/Rg5dV14Gh1Q");
         assert_eq!(obj.status, ChallengeStatus::Pending);
+
+        let ChallengeState::Dns01(chall_state) = obj.state else {
+            panic!("wrong challenge state type");
+        };
         assert_eq!(
-            obj.state.token(),
-            Some("evaGxfADs6pSRb2LAv9IZf17Dt3juxGJ-PCt92wr-oA")
+            chall_state.token,
+            "evaGxfADs6pSRb2LAv9IZf17Dt3juxGJ-PCt92wr-oA",
         );
     }
 
