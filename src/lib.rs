@@ -38,7 +38,8 @@ pub use account::Key;
 pub use account::{Account, AccountBuilder, ExternalAccountKey};
 mod order;
 pub use order::{
-    AuthorizationHandle, Authorizations, ChallengeHandle, Identifiers, Order, RetryPolicy,
+    AuthorizationHandle, Authorizations, DeviceAttest01ChallengeHandle, Dns01ChallengeHandle,
+    Http01ChallengeHandle, Identifiers, Order, RetryPolicy, TlsAlpn01ChallengeHandle,
 };
 mod types;
 pub use types::{
