@@ -648,7 +648,7 @@ impl Environment {
                 .challenge(A::TYPE)
                 .ok_or_else(|| format!("no {:?} challenge found", A::TYPE))?;
 
-            let key_authz = challenge.key_authorization();
+            let key_authz = challenge.key_authorization().unwrap();
             self.request_challenge::<A>(&challenge, &key_authz).await?;
 
             debug!(challenge_url = challenge.url, "marking challenge ready");
@@ -787,7 +787,7 @@ impl AuthorizationMethod for Http01 {
         key_auth: &'a KeyAuthorization,
     ) -> impl Serialize + 'a {
         debug!(
-            token = challenge.token,
+            token = challenge.state.token(),
             key_auth = key_auth.as_str(),
             "provisioning HTTP-01 response",
         );
@@ -799,7 +799,7 @@ impl AuthorizationMethod for Http01 {
         }
 
         AddHttp01Request {
-            token: &challenge.token,
+            token: challenge.state.token().unwrap(),
             content: key_auth.as_str(),
         }
     }
