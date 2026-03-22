@@ -13,9 +13,10 @@ use tokio::time::sleep;
 use crate::account::AccountInner;
 use crate::types::{
     Authorization, AuthorizationState, AuthorizationStatus, AuthorizedIdentifier, Challenge,
-    ChallengeType, DeviceAttestation, Empty, FinalizeRequest, OrderState, OrderStatus, Problem,
+    ChallengeStatus, ChallengeType, DeviceAttestation, Empty, Error, FinalizeRequest, OrderState,
+    OrderStatus, Problem,
 };
-use crate::{ChallengeStatus, Error, Key, nonce_from_response, retry_after};
+use crate::{Key, nonce_from_response, retry_after};
 
 /// An ACME order as described in RFC 8555 (section 7.1.3)
 ///
