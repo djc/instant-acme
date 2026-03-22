@@ -13,12 +13,13 @@ use tokio::time::sleep;
 use crate::account::AccountInner;
 use crate::types::{
     Authorization, AuthorizationState, AuthorizationStatus, AuthorizedIdentifier, Challenge,
-    ChallengeStatus, ChallengeType, DeviceAttestation, Empty, Error, FinalizeRequest,
-    KeyAuthorization, OrderState, OrderStatus, Problem,
+    ChallengeStatus, ChallengeType, DeviceAttestation, Empty, Error, FinalizeRequest, OrderState,
+    OrderStatus, Problem,
 };
 use crate::{
-    ChallengeState, Dns01Challenge, Http01Challenge, TlsAlpn01Challenge, nonce_from_response,
-    retry_after,
+    ChallengeState, Dns01Challenge, Dns01ChallengeAuthorization, Http01Challenge,
+    Http01ChallengeAuthorization, TlsAlpn01Challenge, TlsAlpn01ChallengeAuthorization,
+    nonce_from_response, retry_after,
 };
 
 /// An ACME order as described in RFC 8555 (section 7.1.3)
@@ -510,9 +511,9 @@ impl Http01ChallengeHandle<'_> {
         &self.challenge.token
     }
 
-    /// Create a [`KeyAuthorization`] for this challenge
-    pub fn key_authorization(&self) -> Result<KeyAuthorization, Error> {
-        KeyAuthorization::new(&self.challenge.token, &self.state.account.key)
+    /// Create a [`Http01ChallengeAuthorization`] for this challenge
+    pub fn authorization(&self) -> Result<Http01ChallengeAuthorization, Error> {
+        Http01ChallengeAuthorization::new(&self.challenge.token, &self.state.account.key)
     }
 }
 
@@ -546,9 +547,13 @@ impl Dns01ChallengeHandle<'_> {
         &self.challenge.token
     }
 
-    /// Create a [`KeyAuthorization`] for this challenge
-    pub fn key_authorization(&self) -> Result<KeyAuthorization, Error> {
-        KeyAuthorization::new(&self.challenge.token, &self.state.account.key)
+    /// Create a [`Dns01ChallengeAuthorization`] for this challenge
+    pub fn authorization(&self) -> Result<Dns01ChallengeAuthorization, Error> {
+        Dns01ChallengeAuthorization::new(
+            self.state.identifier.identifier,
+            &self.challenge.token,
+            &self.state.account.key,
+        )
     }
 }
 
@@ -582,9 +587,9 @@ impl TlsAlpn01ChallengeHandle<'_> {
         &self.challenge.token
     }
 
-    /// Create a [`KeyAuthorization`] for this challenge
-    pub fn key_authorization(&self) -> Result<KeyAuthorization, Error> {
-        KeyAuthorization::new(&self.challenge.token, &self.state.account.key)
+    /// Create a [`TlsAlpn01ChallengeAuthorization`] for this challenge
+    pub fn authorization(&self) -> Result<TlsAlpn01ChallengeAuthorization, Error> {
+        TlsAlpn01ChallengeAuthorization::new(&self.challenge.token, &self.state.account.key)
     }
 }
 

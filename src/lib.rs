@@ -60,10 +60,11 @@ mod types;
 pub use types::{
     AccountCredentials, Authorization, AuthorizationState, AuthorizationStatus,
     AuthorizedIdentifier, CertificateIdentifier, Challenge, ChallengeState, ChallengeStatus,
-    ChallengeType, DeviceAttestation, Dns01Challenge, EcCurve, Error, Http01Challenge, Identifier,
-    Jwk, JwkThumbFields, KeyAuthorization, LetsEncrypt, NewAccount, NewOrder, OctetKeyCurve,
-    OrderState, OrderStatus, Problem, ProfileMeta, RevocationReason, RevocationRequest,
-    SigningAlgorithm, Subproblem, TlsAlpn01Challenge, ZeroSsl,
+    ChallengeType, DeviceAttestation, Dns01Challenge, Dns01ChallengeAuthorization, EcCurve, Error,
+    Http01Challenge, Http01ChallengeAuthorization, Identifier, Jwk, JwkThumbFields, LetsEncrypt,
+    NewAccount, NewOrder, OctetKeyCurve, OrderState, OrderStatus, Problem, ProfileMeta,
+    RevocationReason, RevocationRequest, SigningAlgorithm, Subproblem, TlsAlpn01Challenge,
+    TlsAlpn01ChallengeAuthorization, ZeroSsl,
 };
 use types::{Directory, JoseJson, Signer};
 #[cfg(feature = "time")]
