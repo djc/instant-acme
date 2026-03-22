@@ -18,6 +18,7 @@ specification.
   * [ACME renewal information (ARI)]
   * [Profiles]
   * [draft-ietf-acme-device-attest] (**Experimental**)
+  * [draft-ietf-acme-dns-persist] (**Experimental**)
 * Support for external account binding, key rollover, and contact updates
 * Support for certificate revocation
 * Store/recover your account credentials by serializing/deserializing
@@ -30,6 +31,7 @@ specification.
 [ACME renewal information (ARI)]: https://www.rfc-editor.org/rfc/rfc9773.html
 [profiles]: https://datatracker.ietf.org/doc/draft-aaron-acme-profiles/
 [draft-ietf-acme-device-attest]: https://datatracker.ietf.org/doc/draft-ietf-acme-device-attest/
+[draft-ietf-acme-dns-persist]: https://datatracker.ietf.org/doc/draft-ietf-acme-dns-persist/
 
 ## Cargo features
 
@@ -47,6 +49,7 @@ If both `ring` and `aws-lc-rs` are enabled, `aws-lc-rs` will be used.
 
 * Only supports P-256 ECDSA account keys for now
 * Device attestation support is experimental
+* dns-persist-01 support is experimental
 
 ## Getting started
 

@@ -13,13 +13,13 @@ use tokio::time::sleep;
 use crate::account::AccountInner;
 use crate::types::{
     Authorization, AuthorizationState, AuthorizationStatus, AuthorizedIdentifier, Challenge,
-    ChallengeStatus, ChallengeType, DeviceAttestation, Empty, Error, FinalizeRequest, OrderState,
-    OrderStatus, Problem,
+    ChallengeStatus, ChallengeType, DeviceAttestation, DnsPersist01ChallengeAuthorization, Empty,
+    Error, FinalizeRequest, OrderState, OrderStatus, Problem,
 };
 use crate::{
-    ChallengeState, Dns01Challenge, Dns01ChallengeAuthorization, Http01Challenge,
-    Http01ChallengeAuthorization, Identifier, TlsAlpn01Challenge, TlsAlpn01ChallengeAuthorization,
-    nonce_from_response, retry_after,
+    ChallengeState, Dns01Challenge, Dns01ChallengeAuthorization, DnsPersist01Challenge,
+    Http01Challenge, Http01ChallengeAuthorization, Identifier, IssuerDomainName, IssuerDomainNames,
+    TlsAlpn01Challenge, TlsAlpn01ChallengeAuthorization, nonce_from_response, retry_after,
 };
 
 /// An ACME order as described in RFC 8555 (section 7.1.3)
@@ -457,6 +457,35 @@ impl<'a> AuthorizationHandle<'a> {
         })
     }
 
+    /// Get a handle for the dns-persist-01 challenge, if present
+    ///
+    /// Returns `None` if the challenge type isn't offered, or the challenge identifer is not
+    /// a [`Identifier::Dns`] type identifier.
+    ///
+    /// Note: DNS persist challenge support is experimental.
+    pub fn dns_persist01(&'a mut self) -> Option<DnsPersist01ChallengeHandle<'a>> {
+        // Notably dns-persist-01 does not support IP address identifiers.
+        if !matches!(self.state.identifier().identifier, Identifier::Dns(_)) {
+            return None;
+        }
+
+        let challenge = challenge_for_type(&self.state.challenges, ChallengeType::DnsPersist01)?;
+
+        let ChallengeState::DnsPersist01(data) = &challenge.state else {
+            return None;
+        };
+
+        Some(DnsPersist01ChallengeHandle {
+            state: ChallengeHandleState {
+                identifier: self.state.identifier(),
+                challenge,
+                nonce: self.nonce,
+                account: self.account,
+            },
+            challenge: data,
+        })
+    }
+
     /// Get a handle for the TLS-ALPN-01 challenge, if present
     ///
     /// Returns `None` if the challenge type isn't offered, or the challenge identifier is not
@@ -600,6 +629,166 @@ impl Deref for Dns01ChallengeHandle<'_> {
 
     fn deref(&self) -> &Self::Target {
         self.state.challenge
+    }
+}
+
+/// Handle for DNS-PERSIST-01 challenges
+///
+/// Note: DNS persist challenge support is experimental.
+pub struct DnsPersist01ChallengeHandle<'a> {
+    state: ChallengeHandleState<'a>,
+    challenge: &'a DnsPersist01Challenge,
+}
+
+impl DnsPersist01ChallengeHandle<'_> {
+    /// Notify the server that the challenge is ready to be completed
+    pub async fn set_ready(&mut self) -> Result<(), Error> {
+        self.state.set_ready().await
+    }
+
+    /// The issuer domain names accepted by the CA
+    pub fn issuer_domain_names(&self) -> &IssuerDomainNames {
+        &self.challenge.issuer_domain_names
+    }
+
+    /// The identifier for this challenge's authorization
+    pub fn identifier(&self) -> &AuthorizedIdentifier<'_> {
+        &self.state.identifier
+    }
+
+    /// Create a builder for the DNS TXT record response
+    ///
+    /// The `issuer` must be one of the issuer domain names returned by
+    /// [`issuer_domain_names()`][Self::issuer_domain_names()]. Returns an error
+    /// if the provided issuer is not in the challenge's list of accepted issuers.
+    ///
+    /// The account URI is automatically populated from the account used to create
+    /// the order.
+    ///
+    /// If the challenge authorizes a wildcard DNS identifier, the challenge response
+    /// wildcard policy will be automatically set to true.
+    pub fn response_txt_record<'a>(
+        &'a self,
+        issuer: &'a IssuerDomainName,
+    ) -> Result<DnsPersist01RecordBuilder<'a>, Error> {
+        DnsPersist01RecordBuilder::new(
+            &self.state.account.id,
+            issuer,
+            self.challenge,
+            self.state.identifier.clone(),
+        )
+    }
+}
+
+impl Deref for DnsPersist01ChallengeHandle<'_> {
+    type Target = Challenge;
+
+    fn deref(&self) -> &Self::Target {
+        self.state.challenge
+    }
+}
+
+/// Builder for creating a DNS-PERSIST-01 TXT record
+///
+/// Created via [`DnsPersist01ChallengeHandle::response_txt_record()`].
+#[derive(Debug)]
+pub struct DnsPersist01RecordBuilder<'a> {
+    account_uri: &'a str,
+    issuer: &'a IssuerDomainName,
+    identifier: AuthorizedIdentifier<'a>,
+    persist_until: Option<u64>,
+    wildcard: bool,
+}
+
+impl<'a> DnsPersist01RecordBuilder<'a> {
+    /// Create a new builder for a DNS-PERSIST-01 record
+    ///
+    /// Validates that:
+    /// - The issuer is in the challenge's list of accepted issuer domain names
+    /// - The identifier is a DNS identifier
+    ///
+    /// The `wildcard` field is automatically set based on the identifier's wildcard flag.
+    pub(crate) fn new(
+        account_uri: &'a str,
+        issuer: &'a IssuerDomainName,
+        challenge: &'a DnsPersist01Challenge,
+        identifier: AuthorizedIdentifier<'a>,
+    ) -> Result<Self, Error> {
+        if !matches!(identifier.identifier, Identifier::Dns(_)) {
+            return Err(Error::Str(
+                "dns-persist-01 challenge requires a DNS identifier",
+            ));
+        }
+
+        if !account_uri.is_ascii() {
+            return Err(Error::Str("account URI must be ASCII"));
+        }
+
+        if !challenge.issuer_domain_names.as_ref().contains(issuer) {
+            return Err(Error::InvalidIssuerDomains(format!(
+                "issuer '{}' is not in the challenge's issuer domain names",
+                issuer.as_ref()
+            )));
+        }
+
+        Ok(Self {
+            account_uri,
+            issuer,
+            persist_until: None,
+            wildcard: identifier.wildcard,
+            identifier,
+        })
+    }
+
+    /// Set the `persistUntil` parameter
+    ///
+    /// The value must be a base-10 encoded integer representing a UNIX timestamp
+    /// (the number of seconds since 1970-01-01T00:00:00Z ignoring leap seconds).
+    ///
+    /// CAs will not consider the validation record valid for new validation
+    /// attempts after the specified timestamp.
+    ///
+    /// See <https://datatracker.ietf.org/doc/html/draft-ietf-acme-dns-persist-00#section-7.9>
+    /// for important considerations for domain owners using this parameter.
+    pub fn persist_until(mut self, timestamp: u64) -> Self {
+        self.persist_until = Some(timestamp);
+        self
+    }
+
+    /// Enable the `policy=wildcard` parameter
+    ///
+    /// Builders created from a [`DnsPersist01ChallengeHandle`] corresponding to a
+    /// wildcard identifier will automatically enable this policy.
+    ///
+    /// For other non-wildcard identifiers, opting in to this policy by calling
+    /// `wildcard()` will allow you to issue for wildcard identifiers using the
+    /// same ACME account in the future.
+    ///
+    /// When set, the validation will be sufficient for issuing certificates for:
+    /// - The validated FQDN itself
+    /// - Wildcard certificates (e.g., `*.example.com`)
+    /// - Specific subdomains of the validated FQDN
+    pub fn wildcard(mut self) -> Self {
+        self.wildcard = true;
+        self
+    }
+
+    /// Build the final [`DnsPersist01ChallengeAuthorization`]
+    ///
+    /// Use the returned record to update your authoritative DNS with the challenge
+    /// response record contents.
+    pub fn build(self) -> DnsPersist01ChallengeAuthorization {
+        let mut rdata = format!("{}; accounturi={}", self.issuer.as_ref(), self.account_uri);
+
+        if self.wildcard {
+            rdata.push_str("; policy=wildcard");
+        }
+
+        if let Some(timestamp) = self.persist_until {
+            rdata.push_str(&format!("; persistUntil={}", timestamp));
+        }
+
+        DnsPersist01ChallengeAuthorization::new(self.identifier.identifier, &rdata)
     }
 }
 

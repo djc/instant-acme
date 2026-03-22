@@ -39,16 +39,18 @@ pub use account::{Account, AccountBuilder, ExternalAccountKey};
 mod order;
 pub use order::{
     AuthorizationHandle, Authorizations, DeviceAttest01ChallengeHandle, Dns01ChallengeHandle,
-    Http01ChallengeHandle, Identifiers, Order, RetryPolicy, TlsAlpn01ChallengeHandle,
+    DnsPersist01ChallengeHandle, DnsPersist01RecordBuilder, Http01ChallengeHandle, Identifiers,
+    Order, RetryPolicy, TlsAlpn01ChallengeHandle,
 };
 mod types;
 pub use types::{
     AccountCredentials, Authorization, AuthorizationState, AuthorizationStatus,
     AuthorizedIdentifier, CertificateIdentifier, Challenge, ChallengeState, ChallengeStatus,
-    ChallengeType, DeviceAttestation, Dns01Challenge, Dns01ChallengeAuthorization, Error,
-    Http01Challenge, Http01ChallengeAuthorization, Identifier, LetsEncrypt, NewAccount, NewOrder,
-    OrderState, OrderStatus, Problem, ProfileMeta, RevocationReason, RevocationRequest, Subproblem,
-    TlsAlpn01Challenge, TlsAlpn01ChallengeAuthorization, ZeroSsl,
+    ChallengeType, DeviceAttestation, Dns01Challenge, Dns01ChallengeAuthorization,
+    DnsPersist01Challenge, DnsPersist01ChallengeAuthorization, Error, Http01Challenge,
+    Http01ChallengeAuthorization, Identifier, IssuerDomainName, IssuerDomainNames, LetsEncrypt,
+    NewAccount, NewOrder, OrderState, OrderStatus, Problem, ProfileMeta, RevocationReason,
+    RevocationRequest, Subproblem, TlsAlpn01Challenge, TlsAlpn01ChallengeAuthorization, ZeroSsl,
 };
 use types::{Directory, JoseJson, Signer};
 #[cfg(feature = "time")]
