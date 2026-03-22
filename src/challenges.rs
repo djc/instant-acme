@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::account::{AccountInner, Key};
 use crate::nonce_from_response;
-use crate::types::{AuthorizationState, AuthorizedIdentifier, Empty, Error, Problem};
+use crate::types::{AuthorizationState, AuthorizedIdentifier, Empty, Error, Identifier, Problem};
 
 /// An ACME challenge as described in RFC 8555 (section 7.1.5)
 ///
@@ -80,6 +80,10 @@ impl<'a, T> ChallengeHandle<'a, T> {
     where
         T: ChallengeVariant,
     {
+        if !T::supports_identifier(authz.identifier().identifier) {
+            return None;
+        }
+
         let (challenge, data) = authz
             .challenges
             .iter()
@@ -147,6 +151,9 @@ impl ChallengeHandleState<'_> {
 pub(crate) trait ChallengeVariant: Sized {
     /// Get a reference to this state type's data from `state`, if the type matches
     fn from_state(state: &ChallengeState) -> Option<&Self>;
+
+    /// Whether this challenge type supports authorizations for `identifier`
+    fn supports_identifier(identifier: &Identifier) -> bool;
 }
 
 #[derive(Debug)]
@@ -181,7 +188,7 @@ pub mod http01 {
     use serde::Deserialize;
 
     use super::{ChallengeHandle, ChallengeState, ChallengeVariant, KeyAuthorization};
-    use crate::types::Error;
+    use crate::types::{Error, Identifier};
 
     /// Challenge state for an http-01 challenge
     #[derive(Clone, Debug, Deserialize, Eq, PartialEq)]
@@ -197,6 +204,12 @@ pub mod http01 {
                 ChallengeState::Http01(data) => Some(data),
                 _ => None,
             }
+        }
+
+        fn supports_identifier(identifier: &Identifier) -> bool {
+            // https://www.rfc-editor.org/info/rfc8555/#section-9.7.8
+            // https://www.rfc-editor.org/info/rfc8738/#section-8.2
+            matches!(identifier, Identifier::Dns(_) | Identifier::Ip(_))
         }
     }
 
@@ -276,6 +289,12 @@ pub mod dns01 {
                 _ => None,
             }
         }
+
+        fn supports_identifier(identifier: &Identifier) -> bool {
+            // https://www.rfc-editor.org/info/rfc8555/#section-9.7.8
+            // https://www.rfc-editor.org/rfc/rfc8738#section-7
+            matches!(identifier, Identifier::Dns(_))
+        }
     }
 
     impl ChallengeHandle<'_, Challenge> {
@@ -348,7 +367,7 @@ pub mod tls_alpn01 {
     use serde::Deserialize;
 
     use super::{ChallengeHandle, ChallengeState, ChallengeVariant, KeyAuthorization};
-    use crate::types::Error;
+    use crate::types::{Error, Identifier};
 
     /// Challenge state for a tls-alpn-01 challenge
     #[derive(Clone, Debug, Deserialize, Eq, PartialEq)]
@@ -364,6 +383,12 @@ pub mod tls_alpn01 {
                 ChallengeState::TlsAlpn01(data) => Some(data),
                 _ => None,
             }
+        }
+
+        fn supports_identifier(identifier: &Identifier) -> bool {
+            // https://www.rfc-editor.org/info/rfc8737/#section-6.3
+            // https://www.rfc-editor.org/info/rfc8738/#section-8.2
+            matches!(identifier, Identifier::Dns(_) | Identifier::Ip(_))
         }
     }
 
@@ -437,7 +462,7 @@ pub mod device_attest01 {
     use super::{
         ChallengeHandle, ChallengeState, ChallengeStatus, ChallengeVariant, DeviceAttestation,
     };
-    use crate::types::Error;
+    use crate::types::{Error, Identifier};
 
     /// Challenge state for a device-attest-01 challenge
     ///
@@ -452,6 +477,14 @@ pub mod device_attest01 {
                 ChallengeState::DeviceAttest01(data) => Some(data),
                 _ => None,
             }
+        }
+
+        fn supports_identifier(identifier: &Identifier) -> bool {
+            // https://datatracker.ietf.org/doc/html/draft-acme-device-attest-08#section-7.2
+            matches!(
+                identifier,
+                Identifier::PermanentIdentifier(_) | Identifier::HardwareModule(_)
+            )
         }
     }
 

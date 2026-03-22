@@ -396,24 +396,40 @@ impl<'a> AuthorizationHandle<'a> {
     }
 
     /// Get a handle for the HTTP-01 challenge, if present
+    ///
+    /// Returns `None` if the challenge type isn't offered, or the challenge identifier is not
+    /// a [`Identifier::Dns`][crate::Identifier::Dns] or [`Identifier::Ip`][crate::Identifier::Ip]
+    /// type identifier.
     #[must_use = "the returned challenge handle should be used to complete the authorization"]
     pub fn http01(&mut self) -> Option<http01::Handle<'_>> {
         ChallengeHandle::new(self.state, self.nonce, self.account)
     }
 
     /// Get a handle for the DNS-01 challenge, if present
+    ///
+    /// Returns `None` if the challenge type isn't offered, or the challenge identifier is not
+    /// a [`Identifier::Dns`][crate::Identifier::Dns] type identifier. Notably, DNS-01 does not
+    /// support IP address identifiers.
     #[must_use = "the returned challenge handle should be used to complete the authorization"]
     pub fn dns01(&mut self) -> Option<dns01::Handle<'_>> {
         ChallengeHandle::new(self.state, self.nonce, self.account)
     }
 
     /// Get a handle for the TLS-ALPN-01 challenge, if present
+    ///
+    /// Returns `None` if the challenge type isn't offered, or the challenge identifier is not
+    /// a [`Identifier::Dns`][crate::Identifier::Dns] or [`Identifier::Ip`][crate::Identifier::Ip]
+    /// type identifier.
     #[must_use = "the returned challenge handle should be used to complete the authorization"]
     pub fn tls_alpn01(&mut self) -> Option<tls_alpn01::Handle<'_>> {
         ChallengeHandle::new(self.state, self.nonce, self.account)
     }
 
     /// Get a handle for the device-attest-01 challenge, if present
+    ///
+    /// Returns `None` if the challenge type isn't offered, or the challenge identifier is not
+    /// a [`Identifier::PermanentIdentifier`][crate::Identifier::PermanentIdentifier] or
+    /// [`Identifier::HardwareModule`][crate::Identifier::HardwareModule] type identifier.
     ///
     /// Note: Device attestation support is experimental.
     #[must_use = "the returned challenge handle should be used to complete the authorization"]
