@@ -18,7 +18,7 @@ use crate::types::{
 };
 use crate::{
     ChallengeState, Dns01Challenge, Dns01ChallengeAuthorization, Http01Challenge,
-    Http01ChallengeAuthorization, TlsAlpn01Challenge, TlsAlpn01ChallengeAuthorization,
+    Http01ChallengeAuthorization, Identifier, TlsAlpn01Challenge, TlsAlpn01ChallengeAuthorization,
     nonce_from_response, retry_after,
 };
 
@@ -280,7 +280,7 @@ pub struct Identifiers<'a> {
 }
 
 impl<'a> Identifiers<'a> {
-    /// Yield the next [`Identifier`][crate::Identifier], fetching the authorization's state if
+    /// Yield the next [`Identifier`], fetching the authorization's state if
     /// we don't have it yet
     pub async fn next(&mut self) -> Option<Result<AuthorizedIdentifier<'a>, Error>> {
         Some(match self.inner.next().await? {
@@ -402,7 +402,17 @@ impl<'a> AuthorizationHandle<'a> {
     }
 
     /// Get a handle for the HTTP-01 challenge, if present
+    ///
+    /// Returns `None` if the challenge type isn't offered, or the challenge identifier is not
+    /// a [`Identifier::Dns`] or [`Identifier::Ip`] type identifier.
     pub fn http01(&'a mut self) -> Option<Http01ChallengeHandle<'a>> {
+        if !matches!(
+            self.state.identifier().identifier,
+            Identifier::Dns(_) | Identifier::Ip(_)
+        ) {
+            return None;
+        }
+
         let challenge = challenge_for_type(&self.state.challenges, ChallengeType::Http01)?;
 
         let ChallengeState::Http01(data) = &challenge.state else {
@@ -421,7 +431,15 @@ impl<'a> AuthorizationHandle<'a> {
     }
 
     /// Get a handle for the DNS-01 challenge, if present
+    ///
+    /// Returns `None` if the challenge type isn't offered, or the challenge identifier is not
+    /// a [`Identifier::Dns`] type identifier.
     pub fn dns01(&'a mut self) -> Option<Dns01ChallengeHandle<'a>> {
+        // Notably DNS-01 does not support IP address identifiers.
+        if !matches!(self.state.identifier().identifier, Identifier::Dns(_)) {
+            return None;
+        }
+
         let challenge = challenge_for_type(&self.state.challenges, ChallengeType::Dns01)?;
 
         let ChallengeState::Dns01(data) = &challenge.state else {
@@ -440,7 +458,17 @@ impl<'a> AuthorizationHandle<'a> {
     }
 
     /// Get a handle for the TLS-ALPN-01 challenge, if present
+    ///
+    /// Returns `None` if the challenge type isn't offered, or the challenge identifier is not
+    /// a [`Identifier::Dns`] or [`Identifier::Ip`] type identifier.
     pub fn tls_alpn01(&'a mut self) -> Option<TlsAlpn01ChallengeHandle<'a>> {
+        if !matches!(
+            self.state.identifier().identifier,
+            Identifier::Dns(_) | Identifier::Ip(_)
+        ) {
+            return None;
+        }
+
         let challenge = challenge_for_type(&self.state.challenges, ChallengeType::TlsAlpn01)?;
 
         let ChallengeState::TlsAlpn01(data) = &challenge.state else {
@@ -460,8 +488,18 @@ impl<'a> AuthorizationHandle<'a> {
 
     /// Get a handle for the device-attest-01 challenge, if present
     ///
+    /// Returns `None` if the challenge type isn't offered, or the challenge identifier is not
+    /// a [`Identifier::PermanentIdentifier`] or [`Identifier::HardwareModule`] type identifier.
+    ///
     /// Note: Device attestation support is experimental.
     pub fn device_attest01(&'a mut self) -> Option<DeviceAttest01ChallengeHandle<'a>> {
+        if !matches!(
+            self.state.identifier().identifier,
+            Identifier::PermanentIdentifier(_) | Identifier::HardwareModule(_)
+        ) {
+            return None;
+        }
+
         Some(DeviceAttest01ChallengeHandle {
             state: ChallengeHandleState {
                 identifier: self.state.identifier(),
