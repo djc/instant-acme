@@ -4,7 +4,7 @@ use std::borrow::Cow;
 
 use serde::{Deserialize, Serialize};
 
-use crate::account::AccountInner;
+use crate::account::{AccountInner, Key};
 use crate::nonce_from_response;
 use crate::types::{AuthorizationState, AuthorizedIdentifier, Empty, Error, Problem};
 
@@ -138,7 +138,6 @@ impl ChallengeHandleState<'_> {
             None => Ok(response.status),
         }
     }
-
 }
 
 /// A challenge state type corresponding to one [`ChallengeState`] variant
@@ -150,6 +149,30 @@ pub(crate) trait ChallengeVariant: Sized {
     fn from_state(state: &ChallengeState) -> Option<&Self>;
 }
 
+#[derive(Debug)]
+struct KeyAuthorization {
+    // The token is stored as the key authorization's prefix; retaining its length lets
+    // token() borrow that prefix without allocating a second String.
+    token_len: usize,
+    value: String,
+    digest: [u8; 32],
+}
+
+impl KeyAuthorization {
+    fn new(token: &str, key: &Key) -> Self {
+        let value = format!("{token}.{}", key.thumbprint());
+        Self {
+            digest: key.provider.sha256.hash(value.as_bytes()),
+            token_len: token.len(),
+            value,
+        }
+    }
+
+    fn token(&self) -> &str {
+        &self.value[..self.token_len]
+    }
+}
+
 pub mod http01 {
     //! Support for RFC 8555 http-01 challenges
     //!
@@ -157,8 +180,8 @@ pub mod http01 {
 
     use serde::Deserialize;
 
-    use super::{ChallengeHandle, ChallengeState, ChallengeVariant};
-    use crate::{Error, KeyAuthorization};
+    use super::{ChallengeHandle, ChallengeState, ChallengeVariant, KeyAuthorization};
+    use crate::types::Error;
 
     /// Challenge state for an http-01 challenge
     #[derive(Clone, Debug, Deserialize, Eq, PartialEq)]
@@ -188,9 +211,37 @@ pub mod http01 {
             &self.challenge.token
         }
 
-        /// Create a [`KeyAuthorization`] for this challenge
-        pub fn key_authorization(&self) -> Result<KeyAuthorization, Error> {
-            KeyAuthorization::new(&self.challenge.token, &self.state.account.key)
+        /// Create a [`Response`] for this challenge
+        pub fn response(&self) -> Response {
+            Response::new(&self.challenge.token, &self.state.account.key)
+        }
+    }
+
+    /// Challenge response data for an http-01 challenge
+    #[must_use = "the response data must be provisioned before marking the challenge ready"]
+    #[derive(Debug)]
+    pub struct Response {
+        key_authorization: KeyAuthorization,
+    }
+
+    impl Response {
+        fn new(token: &str, key: &super::Key) -> Self {
+            Self {
+                key_authorization: KeyAuthorization::new(token, key),
+            }
+        }
+
+        /// The challenge token for this challenge response.
+        pub fn token(&self) -> &str {
+            self.key_authorization.token()
+        }
+
+        /// The key authorization content that should be placed in the challenge response file.
+        ///
+        /// The file should be provisioned at `/.well-known/acme-challenge/<token>` in your
+        /// webserver's web root.
+        pub fn key_authorization(&self) -> &str {
+            &self.key_authorization.value
         }
     }
 
@@ -203,10 +254,12 @@ pub mod dns01 {
     //!
     //! See <https://www.rfc-editor.org/rfc/rfc8555#section-8.4>
 
+    use base64::prelude::{BASE64_URL_SAFE_NO_PAD, Engine};
     use serde::Deserialize;
 
-    use super::{ChallengeHandle, ChallengeState, ChallengeVariant};
-    use crate::{Error, KeyAuthorization};
+    use super::{ChallengeHandle, ChallengeState, ChallengeVariant, KeyAuthorization};
+    use crate::account::Key;
+    use crate::types::{Error, Identifier};
 
     /// Challenge state for a dns-01 challenge
     #[derive(Clone, Debug, Deserialize, Eq, PartialEq)]
@@ -236,9 +289,50 @@ pub mod dns01 {
             &self.challenge.token
         }
 
-        /// Create a [`KeyAuthorization`] for this challenge
-        pub fn key_authorization(&self) -> Result<KeyAuthorization, Error> {
-            KeyAuthorization::new(&self.challenge.token, &self.state.account.key)
+        /// Create a [`Response`] for this challenge
+        pub fn response(&self) -> Response {
+            Response::new(
+                self.state.identifier.identifier,
+                &self.challenge.token,
+                &self.state.account.key,
+            )
+        }
+    }
+
+    /// Challenge response data for a dns-01 challenge
+    #[must_use = "the response data must be provisioned before marking the challenge ready"]
+    #[derive(Debug)]
+    pub struct Response {
+        host: String,
+        rdata: String,
+    }
+
+    impl Response {
+        fn new(identifier: &Identifier, token: &str, key: &Key) -> Self {
+            let Identifier::Dns(domain) = identifier else {
+                unreachable!("DNS-01 only supports domain identifiers");
+            };
+
+            let key_authorization = KeyAuthorization::new(token, key);
+
+            Self {
+                host: format!("_acme-challenge.{domain}."),
+                rdata: BASE64_URL_SAFE_NO_PAD.encode(key_authorization.digest),
+            }
+        }
+
+        /// Fully qualified hostname for the challenge response TXT record to be provisioned
+        ///
+        /// Includes a trailing dot.
+        pub fn host(&self) -> &str {
+            &self.host
+        }
+
+        /// The TXT record RDATA to provision for [`Self::host()`]
+        ///
+        /// This is the base64-encoded SHA256 digest of the challenge key authorization.
+        pub fn rdata(&self) -> &str {
+            &self.rdata
         }
     }
 
@@ -253,8 +347,8 @@ pub mod tls_alpn01 {
 
     use serde::Deserialize;
 
-    use super::{ChallengeHandle, ChallengeState, ChallengeVariant};
-    use crate::{Error, KeyAuthorization};
+    use super::{ChallengeHandle, ChallengeState, ChallengeVariant, KeyAuthorization};
+    use crate::types::Error;
 
     /// Challenge state for a tls-alpn-01 challenge
     #[derive(Clone, Debug, Deserialize, Eq, PartialEq)]
@@ -284,9 +378,43 @@ pub mod tls_alpn01 {
             &self.challenge.token
         }
 
-        /// Create a [`KeyAuthorization`] for this challenge
-        pub fn key_authorization(&self) -> Result<KeyAuthorization, Error> {
-            KeyAuthorization::new(&self.challenge.token, &self.state.account.key)
+        /// Create a [`Response`] for this challenge
+        pub fn response(&self) -> Response {
+            Response::new(&self.challenge.token, &self.state.account.key)
+        }
+    }
+
+    /// Challenge response data for a tls-alpn-01 challenge
+    #[must_use = "the response data must be provisioned before marking the challenge ready"]
+    #[derive(Debug)]
+    pub struct Response {
+        key_authorization: KeyAuthorization,
+    }
+
+    impl Response {
+        fn new(token: &str, key: &super::Key) -> Self {
+            Self {
+                key_authorization: KeyAuthorization::new(token, key),
+            }
+        }
+
+        /// The unhashed key authorization string
+        ///
+        /// Typically, you would prefer using [`Self::extension_value`] to construct
+        /// a DER encoded id-pe-acmeIdentifier extension.
+        ///
+        /// This API may be useful when using a higher-level TLS-ALPN-01 certificate generation
+        /// API that expects the RFC-8555 §8.1 key authorization string as input.
+        pub fn key_authorization(&self) -> &str {
+            &self.key_authorization.value
+        }
+
+        /// The SHA-256 digest of the RFC-8555 §8.1 key authorization string
+        ///
+        /// This can be used to construct a DER encoded id-pe-acmeIdentifier extension
+        /// for embedding in a provisioned TLS-ALPN-01 challenge response certificate.
+        pub fn extension_value(&self) -> &[u8; 32] {
+            &self.key_authorization.digest
         }
     }
 

@@ -86,11 +86,8 @@ async fn main() -> anyhow::Result<()> {
             .ok_or_else(|| anyhow::anyhow!("no dns01 challenge found"))?;
 
         println!("Please set the following DNS record then press the Return key:");
-        println!(
-            "_acme-challenge.{} IN TXT {}",
-            challenge.identifier(),
-            challenge.key_authorization()?.dns_value()
-        );
+        let response = challenge.response();
+        println!("{} IN TXT {}", response.host(), response.rdata());
         io::stdin().read_line(&mut String::new())?;
 
         challenge.set_ready().await?;

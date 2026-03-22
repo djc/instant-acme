@@ -54,9 +54,7 @@ pub use crypto::{
 };
 
 mod order;
-pub use order::{
-    AuthorizationHandle, Authorizations, Identifiers, KeyAuthorization, Order, RetryPolicy,
-};
+pub use order::{AuthorizationHandle, Authorizations, Identifiers, Order, RetryPolicy};
 
 mod types;
 pub use types::{

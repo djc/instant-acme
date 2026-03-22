@@ -1,9 +1,8 @@
 use std::ops::{ControlFlow, Deref};
+use std::slice;
 use std::sync::Arc;
 use std::time::{Duration, Instant, SystemTime};
-use std::{fmt, slice};
 
-use base64::prelude::{BASE64_URL_SAFE_NO_PAD, Engine};
 #[cfg(all(feature = "rcgen", any(feature = "aws-lc-rs", feature = "ring")))]
 use rcgen::{CertificateParams, DistinguishedName, KeyPair};
 use serde::Serialize;
@@ -15,7 +14,7 @@ use crate::types::{
     Authorization, AuthorizationState, AuthorizationStatus, AuthorizedIdentifier, Empty, Error,
     FinalizeRequest, OrderState, OrderStatus, Problem,
 };
-use crate::{Key, nonce_from_response, retry_after};
+use crate::{nonce_from_response, retry_after};
 
 /// An ACME order as described in RFC 8555 (section 7.1.3)
 ///
@@ -324,7 +323,7 @@ impl<'a> AuthStream<'a> {
 ///   handle (e.g. [`AuthorizationHandle::http01()`], [`AuthorizationHandle::dns01()`],
 ///   etc).
 /// * Use the type-specific handle API to complete the authorization's challenge (e.g.
-///   provisioning an HTTP-01 response with [`http01::Handle::key_authorization()`]).
+///   provisioning an HTTP-01 response with [`http01::Handle::response()`]).
 /// * Use the type-specific handle API to indicate to the ACME CA that you're ready for
 ///   validation to occur (e.g. [`http01::Handle::set_ready()`] for HTTP-01, or
 ///   [`device_attest01::Handle::send_attestation()`] for device-attest-01).
@@ -433,56 +432,6 @@ impl Deref for AuthorizationHandle<'_> {
 
     fn deref(&self) -> &Self::Target {
         self.state
-    }
-}
-
-/// The response value to use for challenge responses
-///
-/// Refer to the methods below to see which encoding to use for your challenge type.
-///
-/// <https://datatracker.ietf.org/doc/html/rfc8555#section-8.1>
-pub struct KeyAuthorization {
-    inner: String,
-    digest: [u8; 32],
-}
-
-impl KeyAuthorization {
-    pub(crate) fn new(token: &str, key: &Key) -> Result<Self, Error> {
-        let inner = format!("{}.{}", token, key.thumbprint());
-
-        Ok(Self {
-            digest: key.provider.sha256.hash(inner.as_bytes()),
-            inner,
-        })
-    }
-
-    /// Get the base64-encoded SHA256 digest of the key authorization
-    ///
-    /// This can be used for DNS-01 challenge responses.
-    pub fn dns_value(&self) -> String {
-        BASE64_URL_SAFE_NO_PAD.encode(self.digest)
-    }
-
-    /// Get the key authorization value
-    ///
-    /// This can be used for HTTP-01 challenge responses.
-    pub fn as_str(&self) -> &str {
-        &self.inner
-    }
-
-    /// Get the SHA-256 digest of the key authorization
-    ///
-    /// This can be used for TLS-ALPN-01 challenge responses.
-    ///
-    /// <https://datatracker.ietf.org/doc/html/rfc8737#section-3>
-    pub fn digest(&self) -> [u8; 32] {
-        self.digest
-    }
-}
-
-impl fmt::Debug for KeyAuthorization {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_tuple("KeyAuthorization").finish()
     }
 }
 

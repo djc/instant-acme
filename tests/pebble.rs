@@ -811,13 +811,10 @@ impl AuthorizationMethod for Http01 {
     ) -> Result<(), Box<dyn StdError>> {
         let mut http_chall = authz.http01().expect("missing HTTP-01 challenge");
         let token = http_chall.token();
-        let key_auth = http_chall.key_authorization()?;
+        let response = http_chall.response();
+        let key_auth = response.key_authorization();
 
-        debug!(
-            token,
-            key_auth = key_auth.as_str(),
-            "provisioning HTTP-01 response",
-        );
+        debug!(token, key_auth, "provisioning HTTP-01 response",);
 
         #[derive(Serialize)]
         struct AddHttp01Request<'a> {
@@ -827,7 +824,7 @@ impl AuthorizationMethod for Http01 {
 
         let body = serde_json::to_vec(&AddHttp01Request {
             token,
-            content: key_auth.as_str(),
+            content: key_auth,
         })?;
         let url = format!("http://[::1]:{challtestsrv_port}/add-http01");
         client
@@ -855,26 +852,19 @@ impl AuthorizationMethod for Dns01 {
         challtestsrv_port: u16,
     ) -> Result<(), Box<dyn StdError>> {
         let mut dns_chall = authz.dns01().expect("missing DNS-01 challenge");
-        let key_auth = dns_chall.key_authorization()?.dns_value();
-        let identifier = dns_chall.identifier();
+        let response = dns_chall.response();
 
-        let Identifier::Dns(domain) = identifier.identifier else {
-            unreachable!("unsupported identifier {identifier:?}");
-        };
-
-        let host = format!("_acme-challenge.{domain}.");
-        debug!(host, key_auth, "provisioning DNS-01 response");
+        let host = response.host();
+        let rdata = response.rdata();
+        debug!(host, rdata, "provisioning DNS-01 response");
 
         #[derive(Serialize)]
-        struct AddDns01Request {
-            host: String,
-            value: String,
+        struct AddDns01Request<'a> {
+            host: &'a str,
+            value: &'a str,
         }
 
-        let body = serde_json::to_vec(&AddDns01Request {
-            host,
-            value: key_auth,
-        })?;
+        let body = serde_json::to_vec(&AddDns01Request { host, value: rdata })?;
         let url = format!("http://[::1]:{challtestsrv_port}/set-txt");
         client
             .request(
@@ -901,12 +891,15 @@ impl AuthorizationMethod for Alpn01 {
         challtestsrv_port: u16,
     ) -> Result<(), Box<dyn StdError>> {
         let mut tls_chall = authz.tls_alpn01().expect("missing TLS-ALPN-01 challenge");
-        let key_auth = tls_chall.key_authorization()?;
+        let response = tls_chall.response();
+        // Note: pebble-challtestsrv wants to hash the key auth itself, so we
+        // don't use `response.extension_value()` here.
+        let key_auth = response.key_authorization();
         let identifier = tls_chall.identifier();
 
         debug!(
             %identifier,
-            key_auth = key_auth.as_str(),
+            key_auth,
             "provisioning TLS-ALPN-01 response",
         );
 
@@ -918,9 +911,7 @@ impl AuthorizationMethod for Alpn01 {
 
         let body = serde_json::to_vec(&AddAlpn01Request {
             host: identifier.to_string(),
-            // Note: pebble-challtestsrv wants to hash the key auth itself, so we
-            // don't use key_auth.digest() here.
-            content: key_auth.as_str(),
+            content: key_auth,
         })?;
         let url = format!("http://[::1]:{}/add-tlsalpn01", challtestsrv_port);
         client
