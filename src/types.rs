@@ -762,19 +762,89 @@ impl fmt::Display for AuthorizedIdentifier<'_> {
 /// <https://datatracker.ietf.org/doc/html/rfc8555#section-7.1.5>
 #[derive(Debug, Deserialize)]
 pub struct Challenge {
-    /// Type of challenge
-    pub r#type: ChallengeType,
     /// Challenge identifier
     pub url: String,
-    /// Token for this challenge
-    ///
-    /// Unknown `ChallengeType` instances may omit this field, leaving it empty.
-    #[serde(default)]
-    pub token: String,
+    /// Challenge type specific state
+    #[serde(flatten)]
+    pub state: ChallengeState,
     /// Current status
     pub status: ChallengeStatus,
     /// Potential error state
     pub error: Option<Problem>,
+}
+
+/// Challenge type specific state
+#[derive(Clone, Debug, Eq, PartialEq)]
+#[non_exhaustive]
+pub enum ChallengeState {
+    /// State for an RFC 8555 HTTP-01 challenge
+    Http01(Http01Challenge),
+    /// State for an RFC 8555 DNS-01 challenge
+    Dns01(Dns01Challenge),
+    /// State for an RFC 8737 TLS-ALPN-01 challenge
+    TlsAlpn01(TlsAlpn01Challenge),
+    /// State for a draft-acme-device-attest-08 challenge
+    ///
+    /// Note: Device attestation support is experimental
+    DeviceAttest01,
+    /// An unknown challenge type
+    Unknown(String),
+}
+
+impl ChallengeState {
+    /// Get the challenge type associated with this challenge state
+    pub fn r#type(&self) -> ChallengeType {
+        match self {
+            Self::Http01(_) => ChallengeType::Http01,
+            Self::Dns01(_) => ChallengeType::Dns01,
+            Self::TlsAlpn01(_) => ChallengeType::TlsAlpn01,
+            Self::DeviceAttest01 => ChallengeType::DeviceAttest01,
+            Self::Unknown(r#type) => ChallengeType::Unknown(r#type.clone()),
+        }
+    }
+
+    /// Get the token associated with this challenge (if applicable)
+    ///
+    /// DNS-01, HTTP-01 and TLS-ALPN-01 challenge types offer a token. Other challenge types
+    /// do not rely on RFC 8555 key authorizations and will return `None`, expecting the
+    /// challenge to be satisfied with another method specific to its type.
+    pub fn token(&self) -> Option<&str> {
+        Some(match self {
+            Self::Http01(Http01Challenge { token })
+            | Self::Dns01(Dns01Challenge { token })
+            | Self::TlsAlpn01(TlsAlpn01Challenge { token }) => token,
+            Self::DeviceAttest01 | Self::Unknown { .. } => return None,
+        })
+    }
+}
+
+impl<'de> Deserialize<'de> for ChallengeState {
+    // Deriving `Deserialize` for the `ChallengeState` enum w/ an untagged variant
+    // for unknown challenge types would mean we swallow deser errors for _known_
+    // challenge types. Instead, we want to deser the type string, and then either
+    // capture it as an `Unknown` variant, or dispatch the full value to a more specific
+    // challenge deser, propagating an error result if necessary.
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let value = serde_json::Value::deserialize(deserializer)?;
+
+        let r#type = value["type"]
+            .as_str()
+            .ok_or_else(|| de::Error::missing_field("type"))?;
+
+        match r#type {
+            "http-01" => serde_json::from_value(value)
+                .map(Self::Http01)
+                .map_err(de::Error::custom),
+            "dns-01" => serde_json::from_value(value)
+                .map(Self::Dns01)
+                .map_err(de::Error::custom),
+            "tls-alpn-01" => serde_json::from_value(value)
+                .map(Self::TlsAlpn01)
+                .map_err(de::Error::custom),
+            "device-attest-01" => Ok(Self::DeviceAttest01),
+            unknown_type => Ok(Self::Unknown(unknown_type.to_owned())),
+        }
+    }
 }
 
 /// The challenge type
@@ -793,6 +863,36 @@ pub enum ChallengeType {
     DeviceAttest01,
     #[serde(untagged)]
     Unknown(String),
+}
+
+/// Challenge state for an RFC 8555 http-01 challenge
+///
+/// See <https://www.rfc-editor.org/rfc/rfc8555#section-8.3>
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq)]
+#[non_exhaustive]
+pub struct Http01Challenge {
+    /// A token for constructing a key authorization to complete this challenge
+    pub token: String,
+}
+
+/// Challenge state for an RFC 8555 dns-01 challenge
+///
+/// See <https://www.rfc-editor.org/rfc/rfc8555#section-8.4>
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq)]
+#[non_exhaustive]
+pub struct Dns01Challenge {
+    /// A token for constructing a key authorization to complete this challenge
+    pub token: String,
+}
+
+/// Challenge state for an RFC 8737 tls-alpn-01 challenge
+///
+/// See <https://www.rfc-editor.org/rfc/rfc8737#section-3>
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq)]
+#[non_exhaustive]
+pub struct TlsAlpn01Challenge {
+    /// A token for constructing a key authorization to complete this challenge
+    pub token: String,
 }
 
 /// Status of an ACME [Challenge]
@@ -1056,11 +1156,13 @@ pub enum SigningAlgorithm {
     Other(&'static str),
 }
 
-/// The response value to use for challenge responses
+/// A key authorization computed by combining a challenge token and the base64 account thumbprint
 ///
-/// Refer to the methods below to see which encoding to use for your challenge type.
+/// The HTTP-01, DNS-01 and TLS-ALPN-01 challenge types use this as part of provisioning a
+/// challenge response. Refer to the methods below to see which encoding to use for your
+/// challenge type.
 ///
-/// <https://datatracker.ietf.org/doc/html/rfc8555#section-8.1>
+/// See <https://datatracker.ietf.org/doc/html/rfc8555#section-8.1>.
 pub struct KeyAuthorization {
     inner: String,
     digest: [u8; 32],
@@ -1203,10 +1305,13 @@ mod tests {
         }"#;
 
         let obj = serde_json::from_str::<Challenge>(CHALLENGE).unwrap();
-        assert_eq!(obj.r#type, ChallengeType::Dns01);
+        assert_eq!(obj.state.r#type(), ChallengeType::Dns01);
         assert_eq!(obj.url, "https://example.com/acme/chall/Rg5dV14Gh1Q");
         assert_eq!(obj.status, ChallengeStatus::Pending);
-        assert_eq!(obj.token, "evaGxfADs6pSRb2LAv9IZf17Dt3juxGJ-PCt92wr-oA");
+        assert_eq!(
+            obj.state.token(),
+            Some("evaGxfADs6pSRb2LAv9IZf17Dt3juxGJ-PCt92wr-oA")
+        );
     }
 
     // https://datatracker.ietf.org/doc/html/rfc8555#section-7.6
