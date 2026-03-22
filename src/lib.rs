@@ -38,15 +38,15 @@ pub use account::Key;
 pub use account::{Account, AccountBuilder, ExternalAccountKey};
 mod order;
 pub use order::{
-    AuthorizationHandle, Authorizations, ChallengeHandle, Identifiers, KeyAuthorization, Order,
-    RetryPolicy,
+    AuthorizationHandle, Authorizations, ChallengeHandle, Identifiers, Order, RetryPolicy,
 };
 mod types;
 pub use types::{
     AccountCredentials, Authorization, AuthorizationState, AuthorizationStatus,
     AuthorizedIdentifier, CertificateIdentifier, Challenge, ChallengeStatus, ChallengeType,
-    DeviceAttestation, Error, Identifier, LetsEncrypt, NewAccount, NewOrder, OrderState,
-    OrderStatus, Problem, ProfileMeta, RevocationReason, RevocationRequest, Subproblem, ZeroSsl,
+    DeviceAttestation, Error, Identifier, KeyAuthorization, LetsEncrypt, NewAccount, NewOrder,
+    OrderState, OrderStatus, Problem, ProfileMeta, RevocationReason, RevocationRequest, Subproblem,
+    ZeroSsl,
 };
 use types::{Directory, JoseJson, Signer};
 #[cfg(feature = "time")]
