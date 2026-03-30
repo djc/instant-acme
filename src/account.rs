@@ -59,7 +59,7 @@ impl Account {
     #[cfg(feature = "hyper-rustls")]
     pub fn builder(
         provider: &'static CryptoProvider,
-        rustls_crypto_provider: rustls::crypto::CryptoProvider,
+        rustls_crypto_provider: Arc<rustls::crypto::CryptoProvider>,
     ) -> Result<AccountBuilder, Error> {
         Ok(AccountBuilder {
             http: Box::new(DefaultClient::try_new(rustls_crypto_provider)?),
@@ -75,7 +75,7 @@ impl Account {
     pub fn builder_with_root(
         pem_path: impl AsRef<Path>,
         provider: &'static CryptoProvider,
-        rustls_crypto_provider: rustls::crypto::CryptoProvider,
+        rustls_crypto_provider: Arc<rustls::crypto::CryptoProvider>,
     ) -> Result<AccountBuilder, Error> {
         let root_der = match CertificateDer::from_pem_file(pem_path) {
             Ok(root_der) => root_der,

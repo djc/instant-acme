@@ -206,7 +206,7 @@ struct DefaultClient(HyperClient<hyper_rustls::HttpsConnector<HttpConnector>, Bo
 
 #[cfg(feature = "hyper-rustls")]
 impl DefaultClient {
-    fn try_new(provider: rustls::crypto::CryptoProvider) -> Result<Self, Error> {
+    fn try_new(provider: Arc<rustls::crypto::CryptoProvider>) -> Result<Self, Error> {
         Ok(Self::new(
             HttpsConnectorBuilder::new()
                 .with_provider_and_platform_verifier(provider)
@@ -216,11 +216,11 @@ impl DefaultClient {
 
     fn with_roots(
         roots: rustls::RootCertStore,
-        provider: rustls::crypto::CryptoProvider,
+        provider: Arc<rustls::crypto::CryptoProvider>,
     ) -> Result<Self, Error> {
         Ok(Self::new(
             HttpsConnectorBuilder::new().with_tls_config(
-                rustls::ClientConfig::builder_with_provider(Arc::new(provider))
+                rustls::ClientConfig::builder_with_provider(provider)
                     .with_safe_default_protocol_versions()
                     .map_err(|e| Error::Other(Box::new(e)))?
                     .with_root_certificates(roots)
@@ -423,6 +423,6 @@ mod tests {
             rustls::crypto::ring::default_provider(),
         );
 
-        Account::builder(provider, rustls_crypto_provider)
+        Account::builder(provider, Arc::new(rustls_crypto_provider))
     }
 }
