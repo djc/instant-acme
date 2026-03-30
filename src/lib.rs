@@ -209,7 +209,7 @@ struct DefaultClient(HyperClient<hyper_rustls::HttpsConnector<HttpConnector>, Bo
 #[cfg(feature = "hyper-rustls")]
 impl DefaultClient {
     fn try_new(provider: Arc<rustls::crypto::CryptoProvider>) -> Result<Self, Error> {
-        Ok(Self::new(
+        Ok(Self::build(
             HttpsConnectorBuilder::new()
                 .with_provider_and_platform_verifier(provider)
                 .map_err(|e| Error::Other(Box::new(e)))?,
@@ -220,7 +220,7 @@ impl DefaultClient {
         roots: rustls::RootCertStore,
         provider: Arc<rustls::crypto::CryptoProvider>,
     ) -> Result<Self, Error> {
-        Ok(Self::new(
+        Ok(Self::build(
             HttpsConnectorBuilder::new().with_tls_config(
                 rustls::ClientConfig::builder_with_provider(provider)
                     .with_safe_default_protocol_versions()
@@ -231,7 +231,7 @@ impl DefaultClient {
         ))
     }
 
-    fn new(builder: HttpsConnectorBuilder<WantsSchemes>) -> Self {
+    fn build(builder: HttpsConnectorBuilder<WantsSchemes>) -> Self {
         Self(
             HyperClient::builder(TokioExecutor::new())
                 .build(builder.https_only().enable_http1().enable_http2().build()),
