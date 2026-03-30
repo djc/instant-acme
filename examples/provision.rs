@@ -2,7 +2,6 @@
 use std::io;
 
 use clap::Parser;
-use rustls::crypto::CryptoProvider as RustlsCryptoProvider;
 use tracing::info;
 
 use instant_acme::{
@@ -110,11 +109,11 @@ struct Options {
 }
 
 #[cfg(feature = "aws-lc-rs")]
-fn rustls_crypto_provider() -> RustlsCryptoProvider {
+fn rustls_crypto_provider() -> rustls::crypto::CryptoProvider {
     rustls::crypto::aws_lc_rs::default_provider()
 }
 
 #[cfg(all(feature = "ring", not(feature = "aws-lc-rs")))]
-fn rustls_crypto_provider() -> RustlsCryptoProvider {
+fn rustls_crypto_provider() -> rustls::crypto::CryptoProvider {
     rustls::crypto::ring::default_provider()
 }

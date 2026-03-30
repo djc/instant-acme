@@ -12,7 +12,7 @@ use http::header::USER_AGENT;
 #[cfg(feature = "time")]
 use http::{Method, Request};
 #[cfg(feature = "hyper-rustls")]
-use rustls::{RootCertStore, crypto::CryptoProvider as RustlsCryptoProvider};
+use rustls::RootCertStore;
 #[cfg(feature = "hyper-rustls")]
 use rustls_pki_types::{CertificateDer, pem::PemObject};
 use rustls_pki_types::{PrivateKeyDer, PrivatePkcs8KeyDer};
@@ -59,7 +59,7 @@ impl Account {
     #[cfg(feature = "hyper-rustls")]
     pub fn builder(
         provider: &'static CryptoProvider,
-        rustls_crypto_provider: RustlsCryptoProvider,
+        rustls_crypto_provider: rustls::crypto::CryptoProvider,
     ) -> Result<AccountBuilder, Error> {
         Ok(AccountBuilder {
             http: Box::new(DefaultClient::try_new(rustls_crypto_provider)?),
@@ -75,7 +75,7 @@ impl Account {
     pub fn builder_with_root(
         pem_path: impl AsRef<Path>,
         provider: &'static CryptoProvider,
-        rustls_crypto_provider: RustlsCryptoProvider,
+        rustls_crypto_provider: rustls::crypto::CryptoProvider,
     ) -> Result<AccountBuilder, Error> {
         let root_der = match CertificateDer::from_pem_file(pem_path) {
             Ok(root_der) => root_der,

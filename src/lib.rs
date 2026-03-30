@@ -32,8 +32,6 @@ use hyper_util::client::legacy::{
 };
 #[cfg(feature = "hyper-rustls")]
 use hyper_util::rt::TokioExecutor;
-#[cfg(feature = "hyper-rustls")]
-use rustls::crypto::CryptoProvider as RustlsCryptoProvider;
 use serde::Serialize;
 
 mod account;
@@ -208,21 +206,21 @@ struct DefaultClient(HyperClient<hyper_rustls::HttpsConnector<HttpConnector>, Bo
 
 #[cfg(feature = "hyper-rustls")]
 impl DefaultClient {
-    fn try_new(rustls_crypto_provider: RustlsCryptoProvider) -> Result<Self, Error> {
+    fn try_new(provider: rustls::crypto::CryptoProvider) -> Result<Self, Error> {
         Ok(Self::new(
             HttpsConnectorBuilder::new()
-                .with_provider_and_platform_verifier(rustls_crypto_provider)
+                .with_provider_and_platform_verifier(provider)
                 .map_err(|e| Error::Other(Box::new(e)))?,
         ))
     }
 
     fn with_roots(
         roots: rustls::RootCertStore,
-        rustls_crypto_provider: RustlsCryptoProvider,
+        provider: rustls::crypto::CryptoProvider,
     ) -> Result<Self, Error> {
         Ok(Self::new(
             HttpsConnectorBuilder::new().with_tls_config(
-                rustls::ClientConfig::builder_with_provider(Arc::new(rustls_crypto_provider))
+                rustls::ClientConfig::builder_with_provider(Arc::new(provider))
                     .with_safe_default_protocol_versions()
                     .map_err(|e| Error::Other(Box::new(e)))?
                     .with_root_certificates(roots)
@@ -392,8 +390,6 @@ const REPLAY_NONCE: &str = "Replay-Nonce";
     any(feature = "aws-lc-rs", feature = "ring")
 ))]
 mod tests {
-    use rustls::crypto::CryptoProvider as RustlsCryptoProvider;
-
     use super::*;
 
     #[tokio::test]
@@ -415,12 +411,12 @@ mod tests {
     }
 
     #[cfg(feature = "aws-lc-rs")]
-    fn rustls_crypto_provider() -> RustlsCryptoProvider {
+    fn rustls_crypto_provider() -> rustls::crypto::CryptoProvider {
         rustls::crypto::aws_lc_rs::default_provider()
     }
 
     #[cfg(all(feature = "ring", not(feature = "aws-lc-rs")))]
-    fn rustls_crypto_provider() -> RustlsCryptoProvider {
+    fn rustls_crypto_provider() -> rustls::crypto::CryptoProvider {
         rustls::crypto::ring::default_provider()
     }
 

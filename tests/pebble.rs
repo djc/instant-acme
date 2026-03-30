@@ -33,7 +33,6 @@ use instant_acme::{
 use instant_acme::{CertificateIdentifier, RevocationRequest};
 use rustls::RootCertStore;
 use rustls::client::{verify_server_cert_signed_by_trust_anchor, verify_server_name};
-use rustls::crypto::CryptoProvider as RustlsCryptoProvider;
 use rustls::pki_types::pem::PemObject;
 use rustls::pki_types::{CertificateDer, ServerName};
 use rustls::server::ParsedCertificate;
@@ -677,7 +676,7 @@ impl Environment {
         let ee_cert = ParsedCertificate::try_from(ee_cert_der).unwrap();
 
         // Use the default crypto provider to verify the certificate chain to the Pebble CA root.
-        let crypto_provider = RustlsCryptoProvider::get_default().unwrap();
+        let crypto_provider = rustls::crypto::CryptoProvider::get_default().unwrap();
         verify_server_cert_signed_by_trust_anchor(
             &ee_cert,
             &self.issuer_roots().await?,
