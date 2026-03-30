@@ -625,7 +625,7 @@ impl Key {
     pub fn generate(
         provider: &'static CryptoProvider,
     ) -> Result<(Self, PrivatePkcs8KeyDer<'static>), Error> {
-        let (key, pkcs8) = provider.signing_key.generate_key()?;
+        let (key, pkcs8) = provider.key_provider.generate_key()?;
         Ok((
             Self {
                 inner: key,
@@ -649,7 +649,7 @@ impl Key {
         provider: &'static CryptoProvider,
     ) -> Result<Self, Error> {
         let owned = PrivatePkcs8KeyDer::from(pkcs8_der.secret_pkcs8_der().to_vec());
-        let key = provider.signing_key.load_key(owned)?;
+        let key = provider.key_provider.load_key(owned)?;
         Ok(Self {
             inner: key,
             provider,

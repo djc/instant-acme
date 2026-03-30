@@ -23,7 +23,7 @@ mod ring;
 /// [rustls_provider]: rustls::crypto::CryptoProvider
 pub struct CryptoProvider {
     /// Load and generate signing keys.
-    pub signing_key: &'static dyn SigningKeyProvider,
+    pub key_provider: &'static dyn SigningKeyProvider,
     /// SHA-256 hash for ACME protocol operations.
     ///
     /// Used for JWK thumbprints ([RFC 7638]) and challenge digests ([RFC 8555 section 8.1]).
