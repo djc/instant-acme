@@ -305,8 +305,8 @@ impl<'a> Jwk<'a> {
 pub enum JwkThumbFields<'a> {
     /// Elliptic Curve key (P-256, P-384, etc.)
     Ec {
-        /// The curve name (e.g., `"P-256"`)
-        crv: &'static str,
+        /// The curve name
+        crv: EcCurve,
         /// The x coordinate (serialized as base64url)
         x: &'a [u8],
         /// The y coordinate (serialized as base64url)
@@ -314,8 +314,8 @@ pub enum JwkThumbFields<'a> {
     },
     /// Octet Key Pair (Ed25519, Ed448, X25519, etc.)
     Okp {
-        /// The curve name (e.g., `"Ed25519"`)
-        crv: &'static str,
+        /// The curve name
+        crv: OctetKeyCurve,
         /// The public key (serialized as base64url)
         x: &'a [u8],
     },
@@ -366,6 +366,35 @@ impl Serialize for Base64Bytes<'_> {
     fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
         serializer.serialize_str(&BASE64_URL_SAFE_NO_PAD.encode(self.0))
     }
+}
+
+/// Elliptic curve names for EC keys
+#[derive(Debug, Serialize)]
+#[non_exhaustive]
+pub enum EcCurve {
+    /// P-256, <https://www.iana.org/go/rfc7518#section-6.2.1.1>
+    #[serde(rename = "P-256")]
+    P256,
+    /// P-384, <https://www.iana.org/go/rfc7518#section-6.2.1.1>
+    #[serde(rename = "P-384")]
+    P384,
+    /// P-521, <https://www.iana.org/go/rfc7518#section-6.2.1.1>
+    #[serde(rename = "P-521")]
+    P521,
+}
+
+/// Elliptic curve names for OKP keys
+#[derive(Debug, Serialize)]
+#[non_exhaustive]
+pub enum OctetKeyCurve {
+    /// Ed25519, <https://datatracker.ietf.org/doc/html/rfc8037#section-3.1>
+    Ed25519,
+    /// Ed448, <https://datatracker.ietf.org/doc/html/rfc8037#section-3.1>
+    Ed448,
+    /// X25519, <https://datatracker.ietf.org/doc/html/rfc8037#section-3.2>
+    X25519,
+    /// X448, <https://datatracker.ietf.org/doc/html/rfc8037#section-3.2>
+    X448,
 }
 
 /// An ACME challenge as described in RFC 8555 (section 7.1.5)
