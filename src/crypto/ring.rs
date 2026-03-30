@@ -93,11 +93,11 @@ impl HmacKeyProvider for HmacSha256Provider {
 struct HmacSha256Key(hmac::Key);
 
 impl HmacKey for HmacSha256Key {
-    fn algorithm(&self) -> SigningAlgorithm {
-        SigningAlgorithm::Hs256
-    }
-
     fn sign(&self, data: &[u8]) -> Vec<u8> {
         hmac::sign(&self.0, data).as_ref().to_vec()
+    }
+
+    fn algorithm(&self) -> SigningAlgorithm {
+        SigningAlgorithm::Hs256
     }
 }

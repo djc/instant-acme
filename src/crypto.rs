@@ -116,9 +116,9 @@ pub trait HmacKeyProvider: Send + Sync {
 
 /// An HMAC key for signing External Account Binding payloads.
 pub trait HmacKey: Send + Sync {
-    /// The JWS `alg` header value for this key (e.g., `Hs256`).
-    fn algorithm(&self) -> SigningAlgorithm;
-
     /// Compute the HMAC of `data` using this key.
     fn sign(&self, data: &[u8]) -> Vec<u8>;
+
+    /// The JWS `alg` header value for this key (e.g., `Hs256`).
+    fn algorithm(&self) -> SigningAlgorithm;
 }
