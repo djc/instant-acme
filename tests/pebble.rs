@@ -676,13 +676,17 @@ impl Environment {
         let ee_cert = ParsedCertificate::try_from(ee_cert_der).unwrap();
 
         // Use the default crypto provider to verify the certificate chain to the Pebble CA root.
-        let crypto_provider = rustls::crypto::CryptoProvider::get_default().unwrap();
+        #[cfg(feature = "aws-lc-rs")]
+        let provider = rustls::crypto::aws_lc_rs::default_provider();
+        #[cfg(all(feature = "ring", not(feature = "aws-lc-rs")))]
+        let provider = rustls::crypto::ring::default_provider();
+
         verify_server_cert_signed_by_trust_anchor(
             &ee_cert,
             &self.issuer_roots().await?,
             intermediates,
             UnixTime::now(),
-            crypto_provider.signature_verification_algorithms.all,
+            provider.signature_verification_algorithms.all,
         )
         .unwrap();
 
