@@ -47,10 +47,10 @@ struct P256Key {
 
 impl SigningKey for P256Key {
     fn sign(&self, data: &[u8]) -> Result<Vec<u8>, Error> {
-        self.key_pair
-            .sign(&self.rng, data)
-            .map(|sig| sig.as_ref().to_vec())
-            .map_err(|_| Error::Crypto)
+        match self.key_pair.sign(&self.rng, data) {
+            Ok(sig) => Ok(sig.as_ref().to_vec()),
+            Err(_) => Err(Error::Crypto),
+        }
     }
 
     fn jws_algorithm(&self) -> SigningAlgorithm {
