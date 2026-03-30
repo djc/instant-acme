@@ -545,6 +545,13 @@ impl KeyAuthorization {
         })
     }
 
+    /// Get the base64-encoded SHA256 digest of the key authorization
+    ///
+    /// This can be used for DNS-01 challenge responses.
+    pub fn dns_value(&self) -> String {
+        BASE64_URL_SAFE_NO_PAD.encode(self.digest)
+    }
+
     /// Get the key authorization value
     ///
     /// This can be used for HTTP-01 challenge responses.
@@ -559,13 +566,6 @@ impl KeyAuthorization {
     /// <https://datatracker.ietf.org/doc/html/rfc8737#section-3>
     pub fn digest(&self) -> [u8; 32] {
         self.digest
-    }
-
-    /// Get the base64-encoded SHA256 digest of the key authorization
-    ///
-    /// This can be used for DNS-01 challenge responses.
-    pub fn dns_value(&self) -> String {
-        BASE64_URL_SAFE_NO_PAD.encode(self.digest)
     }
 }
 
