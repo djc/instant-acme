@@ -84,11 +84,11 @@ pub trait SigningKey: Send + Sync {
     /// (e.g., SHA-256 for ES256, SHA-512 for Ed25519).
     fn sign(&self, data: &[u8]) -> Result<Vec<u8>, Error>;
 
-    /// The JWS `alg` header value (e.g., `ES256`).
-    fn jws_algorithm(&self) -> SigningAlgorithm;
-
     /// Serialize the public key as a JWK JSON object for the `jwk` JWS header.
     fn as_jwk(&self) -> Jwk<'_>;
+
+    /// The JWS `alg` header value (e.g., `ES256`).
+    fn jws_algorithm(&self) -> SigningAlgorithm;
 }
 
 /// SHA-256 hash function for ACME protocol operations.
