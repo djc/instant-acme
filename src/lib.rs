@@ -395,7 +395,7 @@ mod tests {
     #[tokio::test]
     async fn deserialize_old_credentials() -> Result<(), Error> {
         const CREDENTIALS: &str = r#"{"id":"id","key_pkcs8":"MIGHAgEAMBMGByqGSM49AgEGCCqGSM49AwEHBG0wawIBAQQgJVWC_QzOTCS5vtsJp2IG-UDc8cdDfeoKtxSZxaznM-mhRANCAAQenCPoGgPFTdPJ7VLLKt56RxPlYT1wNXnHc54PEyBg3LxKaH0-sJkX0mL8LyPEdsfL_Oz4TxHkWLJGrXVtNhfH","urls":{"newNonce":"new-nonce","newAccount":"new-acct","newOrder":"new-order", "revokeCert": "revoke-cert"}}"#;
-        Account::builder(crypto_provider(), rustls_crypto_provider())?
+        builder()?
             .from_credentials(serde_json::from_str::<AccountCredentials>(CREDENTIALS)?)
             .await?;
         Ok(())
@@ -404,29 +404,25 @@ mod tests {
     #[tokio::test]
     async fn deserialize_new_credentials() -> Result<(), Error> {
         const CREDENTIALS: &str = r#"{"id":"id","key_pkcs8":"MIGHAgEAMBMGByqGSM49AgEGCCqGSM49AwEHBG0wawIBAQQgJVWC_QzOTCS5vtsJp2IG-UDc8cdDfeoKtxSZxaznM-mhRANCAAQenCPoGgPFTdPJ7VLLKt56RxPlYT1wNXnHc54PEyBg3LxKaH0-sJkX0mL8LyPEdsfL_Oz4TxHkWLJGrXVtNhfH","directory":"https://acme-staging-v02.api.letsencrypt.org/directory"}"#;
-        Account::builder(crypto_provider(), rustls_crypto_provider())?
+        builder()?
             .from_credentials(serde_json::from_str::<AccountCredentials>(CREDENTIALS)?)
             .await?;
         Ok(())
     }
 
-    #[cfg(feature = "aws-lc-rs")]
-    fn rustls_crypto_provider() -> rustls::crypto::CryptoProvider {
-        rustls::crypto::aws_lc_rs::default_provider()
-    }
+    fn builder() -> Result<AccountBuilder, Error> {
+        #[cfg(feature = "aws-lc-rs")]
+        let (provider, rustls_crypto_provider) = (
+            CryptoProvider::aws_lc_rs(),
+            rustls::crypto::aws_lc_rs::default_provider(),
+        );
 
-    #[cfg(all(feature = "ring", not(feature = "aws-lc-rs")))]
-    fn rustls_crypto_provider() -> rustls::crypto::CryptoProvider {
-        rustls::crypto::ring::default_provider()
-    }
+        #[cfg(all(not(feature = "aws-lc-rs"), feature = "ring"))]
+        let (provider, rustls_crypto_provider) = (
+            CryptoProvider::ring(),
+            rustls::crypto::ring::default_provider(),
+        );
 
-    #[cfg(feature = "aws-lc-rs")]
-    fn crypto_provider() -> &'static CryptoProvider {
-        CryptoProvider::aws_lc_rs()
-    }
-
-    #[cfg(all(feature = "ring", not(feature = "aws-lc-rs")))]
-    fn crypto_provider() -> &'static CryptoProvider {
-        CryptoProvider::ring()
+        Account::builder(provider, rustls_crypto_provider)
     }
 }
