@@ -57,7 +57,7 @@ impl SigningKey for P256Key {
         let (x, y) = self.key_pair.public_key().as_ref()[1..].split_at(32);
         Jwk {
             alg: SigningAlgorithm::Es256,
-            key: JwkThumbFields::ec("P-256", x, y),
+            key: JwkThumbFields::Ec { crv: "P-256", x, y },
             r#use: "sig",
         }
     }

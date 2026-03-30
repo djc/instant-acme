@@ -300,83 +300,71 @@ impl<'a> Jwk<'a> {
 ///
 /// Each variant's fields are declared in lexicographic order for correct
 /// [RFC 7638](https://www.rfc-editor.org/rfc/rfc7638) thumbprint computation.
-#[derive(Debug, Serialize)]
-#[serde(untagged)]
+#[derive(Debug)]
 #[non_exhaustive]
 pub enum JwkThumbFields<'a> {
     /// Elliptic Curve key (P-256, P-384, etc.)
-    ///
-    /// Construct via [`JwkThumbFields::ec()`].
-    #[non_exhaustive]
     Ec {
         /// The curve name (e.g., `"P-256"`)
         crv: &'static str,
-        /// Key type (always `"EC"`, set automatically by [`JwkThumbFields::ec`])
-        kty: &'static str,
         /// The x coordinate (serialized as base64url)
-        #[serde(serialize_with = "base64url::serialize")]
         x: &'a [u8],
         /// The y coordinate (serialized as base64url)
-        #[serde(serialize_with = "base64url::serialize")]
         y: &'a [u8],
     },
     /// Octet Key Pair (Ed25519, Ed448, X25519, etc.)
-    ///
-    /// Construct via [`JwkThumbFields::okp()`].
-    #[non_exhaustive]
     Okp {
         /// The curve name (e.g., `"Ed25519"`)
         crv: &'static str,
-        /// Key type (always `"OKP"`, set automatically by [`JwkThumbFields::okp`])
-        kty: &'static str,
         /// The public key (serialized as base64url)
-        #[serde(serialize_with = "base64url::serialize")]
         x: &'a [u8],
     },
     /// RSA key
-    ///
-    /// Construct via [`JwkThumbFields::rsa()`].
-    #[non_exhaustive]
     Rsa {
         /// The public exponent (serialized as base64url)
-        #[serde(serialize_with = "base64url::serialize")]
         e: &'a [u8],
-        /// Key type (always `"RSA"`, set automatically by [`JwkThumbFields::rsa`])
-        kty: &'static str,
         /// The modulus (serialized as base64url)
-        #[serde(serialize_with = "base64url::serialize")]
         n: &'a [u8],
     },
 }
 
-impl<'a> JwkThumbFields<'a> {
-    /// Create an Elliptic Curve JWK with the given curve name and coordinates
-    pub fn ec(crv: &'static str, x: &'a [u8], y: &'a [u8]) -> Self {
-        Self::Ec {
-            crv,
-            kty: "EC",
-            x,
-            y,
+impl Serialize for JwkThumbFields<'_> {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        // Do this manually, because fields must be in lexicographic order for thumbprints.
+        // In particular, this means the `kty` tag field must come after `crv` or `e` fields.
+        // https://www.rfc-editor.org/rfc/rfc7638#section-3.3
+        match self {
+            Self::Ec { crv, x, y } => {
+                let mut map = serializer.serialize_map(Some(4))?;
+                map.serialize_entry("crv", crv)?;
+                map.serialize_entry("kty", "EC")?;
+                map.serialize_entry("x", &Base64Bytes(x))?;
+                map.serialize_entry("y", &Base64Bytes(y))?;
+                map.end()
+            }
+            Self::Okp { crv, x } => {
+                let mut map = serializer.serialize_map(Some(3))?;
+                map.serialize_entry("crv", crv)?;
+                map.serialize_entry("kty", "OKP")?;
+                map.serialize_entry("x", &Base64Bytes(x))?;
+                map.end()
+            }
+            Self::Rsa { e, n } => {
+                let mut map = serializer.serialize_map(Some(3))?;
+                map.serialize_entry("e", &Base64Bytes(e))?;
+                map.serialize_entry("kty", "RSA")?;
+                map.serialize_entry("n", &Base64Bytes(n))?;
+                map.end()
+            }
         }
-    }
-
-    /// Create an Octet Key Pair JWK with the given curve name and public key
-    pub fn okp(crv: &'static str, x: &'a [u8]) -> Self {
-        Self::Okp { crv, kty: "OKP", x }
-    }
-
-    /// Create an RSA JWK with the given public exponent and modulus
-    pub fn rsa(e: &'a [u8], n: &'a [u8]) -> Self {
-        Self::Rsa { e, kty: "RSA", n }
     }
 }
 
-mod base64url {
-    use base64::prelude::{BASE64_URL_SAFE_NO_PAD, Engine};
-    use serde::Serializer;
+struct Base64Bytes<'a>(&'a [u8]);
 
-    pub(crate) fn serialize<S: Serializer>(data: &&[u8], serializer: S) -> Result<S::Ok, S::Error> {
-        serializer.serialize_str(&BASE64_URL_SAFE_NO_PAD.encode(*data))
+impl Serialize for Base64Bytes<'_> {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.serialize_str(&BASE64_URL_SAFE_NO_PAD.encode(self.0))
     }
 }
 
