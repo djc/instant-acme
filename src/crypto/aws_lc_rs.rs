@@ -49,10 +49,6 @@ impl SigningKey for P256Key {
         }
     }
 
-    fn jws_algorithm(&self) -> SigningAlgorithm {
-        SigningAlgorithm::Es256
-    }
-
     fn as_jwk(&self) -> Jwk<'_> {
         let (x, y) = self.key_pair.public_key().as_ref()[1..].split_at(32);
         Jwk {
@@ -64,6 +60,10 @@ impl SigningKey for P256Key {
             },
             r#use: "sig",
         }
+    }
+
+    fn jws_algorithm(&self) -> SigningAlgorithm {
+        SigningAlgorithm::Es256
     }
 }
 
