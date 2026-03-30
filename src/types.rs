@@ -1034,7 +1034,6 @@ pub enum SigningAlgorithm {
     /// EdDSA using the Ed25519 parameter set in Section 5.1 of [RFC 8032](https://www.rfc-editor.org/rfc/rfc8032)
     ///
     /// [RFC 9864, Section 2.2](https://www.rfc-editor.org/rfc/rfc9864#section-2.2)
-    #[serde(rename = "Ed25519")]
     Ed25519,
     /// ECDSA using P-256 and SHA-256
     ///
