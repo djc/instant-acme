@@ -35,25 +35,26 @@ use hyper_util::rt::TokioExecutor;
 use serde::Serialize;
 
 mod account;
-pub use account::Key;
-pub use account::{Account, AccountBuilder, ExternalAccountKey};
+pub use account::{Account, AccountBuilder, ExternalAccountKey, Key};
+
 mod crypto;
 pub use crypto::{
     CryptoProvider, HmacKey, HmacKeyProvider, Sha256, SigningKey, SigningKeyProvider,
 };
-pub use types::{Jwk, JwkThumbFields, SigningAlgorithm};
+
 mod order;
 pub use order::{
     AuthorizationHandle, Authorizations, ChallengeHandle, Identifiers, KeyAuthorization, Order,
     RetryPolicy,
 };
+
 mod types;
 pub use types::{
     AccountCredentials, Authorization, AuthorizationState, AuthorizationStatus,
     AuthorizedIdentifier, CertificateIdentifier, Challenge, ChallengeStatus, ChallengeType,
-    DeviceAttestation, EcCurve, Error, Identifier, LetsEncrypt, NewAccount, NewOrder,
-    OctetKeyCurve, OrderState, OrderStatus, Problem, ProfileMeta, RevocationReason,
-    RevocationRequest, Subproblem, ZeroSsl,
+    DeviceAttestation, EcCurve, Error, Identifier, Jwk, JwkThumbFields, LetsEncrypt, NewAccount,
+    NewOrder, OctetKeyCurve, OrderState, OrderStatus, Problem, ProfileMeta, RevocationReason,
+    RevocationRequest, SigningAlgorithm, Subproblem, ZeroSsl,
 };
 use types::{Directory, JoseJson, Signer};
 #[cfg(feature = "time")]
