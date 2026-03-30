@@ -88,7 +88,7 @@ pub trait SigningKey: Send + Sync {
     fn as_jwk(&self) -> Jwk<'_>;
 
     /// The JWS `alg` header value (e.g., `ES256`).
-    fn jws_algorithm(&self) -> SigningAlgorithm;
+    fn algorithm(&self) -> SigningAlgorithm;
 }
 
 /// SHA-256 hash function for ACME protocol operations.
