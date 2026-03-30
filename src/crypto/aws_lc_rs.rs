@@ -9,7 +9,7 @@ use crate::Error;
 use crate::types::{EcCurve, Jwk, JwkThumbFields, SigningAlgorithm};
 
 pub(crate) static PROVIDER: &super::CryptoProvider = &super::CryptoProvider {
-    signing_key: &P256SigningKeyProvider,
+    key_provider: &P256SigningKeyProvider,
     sha256: &Sha256,
     hmac: &HmacSha256Provider,
 };
