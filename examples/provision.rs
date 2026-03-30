@@ -7,8 +7,8 @@ use clap::Parser;
 use tracing::info;
 
 use instant_acme::{
-    Account, AuthorizationStatus, ChallengeType, CryptoProvider, Identifier, LetsEncrypt,
-    NewAccount, NewOrder, OrderStatus, RetryPolicy,
+    Account, AuthorizationStatus, ChallengeType, CryptoProvider, DefaultClient, Identifier,
+    LetsEncrypt, NewAccount, NewOrder, OrderStatus, RetryPolicy,
 };
 
 #[tokio::main]
@@ -32,17 +32,20 @@ async fn main() -> anyhow::Result<()> {
         rustls::crypto::ring::default_provider(),
     );
 
-    let (account, credentials) = Account::builder(provider, Arc::new(rustls_crypto_provider))?
-        .create(
-            &NewAccount {
-                contact: &[],
-                terms_of_service_agreed: true,
-                only_return_existing: false,
-            },
-            LetsEncrypt::Staging.url().to_owned(),
-            None,
-        )
-        .await?;
+    let (account, credentials) = Account::builder(
+        Box::new(DefaultClient::new(Arc::new(rustls_crypto_provider))?),
+        provider,
+    )?
+    .create(
+        &NewAccount {
+            contact: &[],
+            terms_of_service_agreed: true,
+            only_return_existing: false,
+        },
+        LetsEncrypt::Staging.url().to_owned(),
+        None,
+    )
+    .await?;
     info!(
         "account credentials:\n\n{}",
         serde_json::to_string_pretty(&credentials)?

@@ -1,5 +1,3 @@
-#[cfg(feature = "hyper-rustls")]
-use std::path::Path;
 use std::sync::Arc;
 
 #[cfg(feature = "time")]
@@ -11,16 +9,10 @@ use http::header::LOCATION;
 use http::header::USER_AGENT;
 #[cfg(feature = "time")]
 use http::{Method, Request};
-#[cfg(feature = "hyper-rustls")]
-use rustls::RootCertStore;
-#[cfg(feature = "hyper-rustls")]
-use rustls_pki_types::{CertificateDer, pem::PemObject};
 use rustls_pki_types::{PrivateKeyDer, PrivatePkcs8KeyDer};
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 
-#[cfg(feature = "hyper-rustls")]
-use crate::DefaultClient;
 use crate::crypto::HmacKey;
 #[cfg(doc)]
 use crate::crypto::HmacKeyProvider;
@@ -38,10 +30,9 @@ use crate::{BytesResponse, Client, Error, HttpClient, nonce_from_response};
 
 /// An ACME account as described in RFC 8555 (section 7.1.2)
 ///
-/// Create an [`Account`] via [`Account::builder()`] or [`Account::builder_with_http()`],
-/// then use [`AccountBuilder::create()`] to create a new account or restore one from
-/// serialized data by passing deserialized [`AccountCredentials`] to
-/// [`AccountBuilder::from_credentials()`].
+/// Create an [`Account`] via [`Account::builder()`], then use [`AccountBuilder::create()`]
+/// to create a new account or restore one from serialized data by passing deserialized
+/// [`AccountCredentials`] to [`AccountBuilder::from_credentials()`].
 ///
 /// The [`Account`] type is cheap to clone.
 ///
@@ -52,52 +43,14 @@ pub struct Account {
 }
 
 impl Account {
-    /// Create an account builder with the given [`CryptoProvider`] and default HTTP client
+    /// Create an account builder with the given [`CryptoProvider`] and [`HttpClient`]
     ///
-    /// The `rustls_crypto_provider` configures TLS for the HTTPS connection to the
-    /// ACME server and is separate from the ACME-level [`CryptoProvider`].
-    #[cfg(feature = "hyper-rustls")]
+    /// When the `hyper-rustls` feature is enabled, you can use the [`DefaultClient`][crate::DefaultClient].
     pub fn builder(
-        provider: &'static CryptoProvider,
-        rustls_crypto_provider: Arc<rustls::crypto::CryptoProvider>,
-    ) -> Result<AccountBuilder, Error> {
-        Ok(AccountBuilder {
-            http: Box::new(DefaultClient::try_new(rustls_crypto_provider)?),
-            provider,
-        })
-    }
-
-    /// Create an account builder with an HTTP client configured using a custom root CA
-    ///
-    /// This is useful if your ACME server uses a testing PKI and not a certificate
-    /// chain issued by a publicly trusted CA.
-    #[cfg(feature = "hyper-rustls")]
-    pub fn builder_with_root(
-        pem_path: impl AsRef<Path>,
-        provider: &'static CryptoProvider,
-        rustls_crypto_provider: Arc<rustls::crypto::CryptoProvider>,
-    ) -> Result<AccountBuilder, Error> {
-        let root_der = match CertificateDer::from_pem_file(pem_path) {
-            Ok(root_der) => root_der,
-            Err(err) => return Err(Error::Other(err.into())),
-        };
-
-        let mut roots = RootCertStore::empty();
-        match roots.add(root_der) {
-            Ok(()) => Ok(AccountBuilder {
-                http: Box::new(DefaultClient::with_roots(roots, rustls_crypto_provider)?),
-                provider,
-            }),
-            Err(err) => Err(Error::Other(err.into())),
-        }
-    }
-
-    /// Create an account builder with the given [`CryptoProvider`] and HTTP client
-    pub fn builder_with_http(
         http: Box<dyn HttpClient>,
         provider: &'static CryptoProvider,
-    ) -> AccountBuilder {
-        AccountBuilder { http, provider }
+    ) -> Result<AccountBuilder, Error> {
+        Ok(AccountBuilder { http, provider })
     }
 
     /// Create a new order based on the given [`NewOrder`]
@@ -443,7 +396,7 @@ impl Signer for AccountInner {
 
 /// Builder for `Account` values
 ///
-/// Create one via [`Account::builder()`] or [`Account::builder_with_http()`].
+/// Create one via [`Account::builder()`].
 pub struct AccountBuilder {
     http: Box<dyn HttpClient>,
     provider: &'static CryptoProvider,

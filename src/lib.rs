@@ -7,6 +7,8 @@ use std::convert::Infallible;
 use std::error::Error as StdError;
 use std::fmt;
 use std::future::Future;
+#[cfg(feature = "hyper-rustls")]
+use std::path::Path;
 use std::pin::Pin;
 use std::str::FromStr;
 #[cfg(feature = "hyper-rustls")]
@@ -32,6 +34,12 @@ use hyper_util::client::legacy::{
 };
 #[cfg(feature = "hyper-rustls")]
 use hyper_util::rt::TokioExecutor;
+#[cfg(feature = "hyper-rustls")]
+use rustls::RootCertStore;
+#[cfg(feature = "hyper-rustls")]
+use rustls_pki_types::CertificateDer;
+#[cfg(feature = "hyper-rustls")]
+use rustls_pki_types::pem::PemObject;
 use serde::Serialize;
 
 mod account;
@@ -203,12 +211,16 @@ fn retry_after(rsp: &BytesResponse) -> Option<SystemTime> {
     })
 }
 
+/// Default HTTP client implementation using hyper and rustls
 #[cfg(feature = "hyper-rustls")]
-struct DefaultClient(HyperClient<hyper_rustls::HttpsConnector<HttpConnector>, BodyWrapper<Bytes>>);
+pub struct DefaultClient(
+    HyperClient<hyper_rustls::HttpsConnector<HttpConnector>, BodyWrapper<Bytes>>,
+);
 
 #[cfg(feature = "hyper-rustls")]
 impl DefaultClient {
-    fn try_new(provider: Arc<rustls::crypto::CryptoProvider>) -> Result<Self, Error> {
+    /// Create a new `DefaultClient` with the given rustls `CryptoProvider`
+    pub fn new(provider: Arc<rustls::crypto::CryptoProvider>) -> Result<Self, Error> {
         Ok(Self::build(
             HttpsConnectorBuilder::new()
                 .with_provider_and_platform_verifier(provider)
@@ -216,8 +228,28 @@ impl DefaultClient {
         ))
     }
 
+    /// Create a new `DefaultClient` using a custom root CA and rustls `CryptoProvider`
+    ///
+    /// This is useful if your ACME server uses a testing PKI and not a certificate
+    /// chain issued by a publicly trusted CA.
+    pub fn with_pem_root(
+        pem_path: impl AsRef<Path>,
+        provider: Arc<rustls::crypto::CryptoProvider>,
+    ) -> Result<Self, Error> {
+        let root_der = match CertificateDer::from_pem_file(pem_path) {
+            Ok(root_der) => root_der,
+            Err(err) => return Err(Error::Other(err.into())),
+        };
+
+        let mut roots = RootCertStore::empty();
+        match roots.add(root_der) {
+            Ok(()) => Self::with_roots(roots, provider),
+            Err(err) => Err(Error::Other(err.into())),
+        }
+    }
+
     fn with_roots(
-        roots: rustls::RootCertStore,
+        roots: RootCertStore,
         provider: Arc<rustls::crypto::CryptoProvider>,
     ) -> Result<Self, Error> {
         Ok(Self::build(
@@ -425,6 +457,9 @@ mod tests {
             rustls::crypto::ring::default_provider(),
         );
 
-        Account::builder(provider, Arc::new(rustls_crypto_provider))
+        Account::builder(
+            Box::new(DefaultClient::new(Arc::new(rustls_crypto_provider))?),
+            provider,
+        )
     }
 }
