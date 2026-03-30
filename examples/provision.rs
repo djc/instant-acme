@@ -19,12 +19,18 @@ async fn main() -> anyhow::Result<()> {
     // using `Account::from_credentials()`.
 
     #[cfg(feature = "aws-lc-rs")]
-    let provider = CryptoProvider::aws_lc_rs();
+    let (provider, rustls_crypto_provider) = (
+        CryptoProvider::aws_lc_rs(),
+        rustls::crypto::aws_lc_rs::default_provider(),
+    );
 
     #[cfg(all(feature = "ring", not(feature = "aws-lc-rs")))]
-    let provider = CryptoProvider::ring();
+    let (provider, rustls_crypto_provider) = (
+        CryptoProvider::ring(),
+        rustls::crypto::ring::default_provider(),
+    );
 
-    let (account, credentials) = Account::builder(provider, rustls_crypto_provider())?
+    let (account, credentials) = Account::builder(provider, rustls_crypto_provider)?
         .create(
             &NewAccount {
                 contact: &[],
@@ -106,14 +112,4 @@ async fn main() -> anyhow::Result<()> {
 struct Options {
     #[clap(long)]
     names: Vec<String>,
-}
-
-#[cfg(feature = "aws-lc-rs")]
-fn rustls_crypto_provider() -> rustls::crypto::CryptoProvider {
-    rustls::crypto::aws_lc_rs::default_provider()
-}
-
-#[cfg(all(feature = "ring", not(feature = "aws-lc-rs")))]
-fn rustls_crypto_provider() -> rustls::crypto::CryptoProvider {
-    rustls::crypto::ring::default_provider()
 }
