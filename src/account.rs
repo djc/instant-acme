@@ -429,7 +429,7 @@ impl Signer for AccountInner {
     fn header<'n, 'u: 'n, 's: 'u>(&'s self, nonce: Option<&'n str>, url: &'u str) -> Header<'n> {
         debug_assert!(nonce.is_some());
         Header {
-            alg: self.key.inner.jws_algorithm(),
+            alg: self.key.inner.algorithm(),
             key: KeyOrKeyId::KeyId(&self.id),
             nonce,
             url,
@@ -663,7 +663,7 @@ impl Signer for Key {
     fn header<'n, 'u: 'n, 's: 'u>(&'s self, nonce: Option<&'n str>, url: &'u str) -> Header<'n> {
         debug_assert!(nonce.is_some());
         Header {
-            alg: self.inner.jws_algorithm(),
+            alg: self.inner.algorithm(),
             key: KeyOrKeyId::Key(self.inner.as_jwk()),
             nonce,
             url,

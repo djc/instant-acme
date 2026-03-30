@@ -66,7 +66,7 @@ impl SigningKey for P256Key {
         }
     }
 
-    fn jws_algorithm(&self) -> SigningAlgorithm {
+    fn algorithm(&self) -> SigningAlgorithm {
         SigningAlgorithm::Es256
     }
 }
