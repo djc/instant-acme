@@ -362,7 +362,7 @@ async fn update_key() -> Result<(), Box<dyn StdError>> {
     );
 
     // Change the Pebble environment to use the new ACME account key.
-    env.account = Account::builder_with_http(Box::new(env.client.clone()), test_provider())
+    env.account = Account::builder(Box::new(env.client.clone()), test_provider())?
         .from_credentials(new_credentials)
         .await?;
 
@@ -386,18 +386,17 @@ async fn account_from_key() -> Result<(), Box<dyn StdError>> {
     let directory_url = format!("https://{}/dir", &env.config.pebble.listen_address);
 
     let provider = test_provider();
-    let (account1, credentials) =
-        Account::builder_with_http(Box::new(env.client.clone()), provider)
-            .create(
-                &NewAccount {
-                    contact: &[],
-                    terms_of_service_agreed: true,
-                    only_return_existing: false,
-                },
-                directory_url.clone(),
-                None,
-            )
-            .await?;
+    let (account1, credentials) = Account::builder(Box::new(env.client.clone()), provider)?
+        .create(
+            &NewAccount {
+                contact: &[],
+                terms_of_service_agreed: true,
+                only_return_existing: false,
+            },
+            directory_url.clone(),
+            None,
+        )
+        .await?;
 
     #[derive(Deserialize)]
     struct JsonKey<'a> {
@@ -409,13 +408,12 @@ async fn account_from_key() -> Result<(), Box<dyn StdError>> {
     let key_der = BASE64_URL_SAFE_NO_PAD.decode(json_key.key_pkcs8)?;
     let key = Key::from_pkcs8_der(PrivatePkcs8KeyDer::from(key_der.clone()), provider)?;
 
-    let (account2, credentials2) =
-        Account::builder_with_http(Box::new(env.client.clone()), provider)
-            .from_key(
-                (key, PrivateKeyDer::try_from(key_der.clone())?),
-                directory_url,
-            )
-            .await?;
+    let (account2, credentials2) = Account::builder(Box::new(env.client.clone()), provider)?
+        .from_key(
+            (key, PrivateKeyDer::try_from(key_der.clone())?),
+            directory_url,
+        )
+        .await?;
 
     assert_eq!(account1.id(), account2.id());
     assert_eq!(
@@ -429,7 +427,7 @@ async fn account_from_key() -> Result<(), Box<dyn StdError>> {
     let directory_url = format!("https://{}/dir", &env.config.pebble.listen_address);
 
     let key = Key::from_pkcs8_der(PrivatePkcs8KeyDer::from(key_der.clone()), provider)?;
-    let result = Account::builder_with_http(Box::new(env.client.clone()), provider)
+    let result = Account::builder(Box::new(env.client.clone()), provider)?
         .from_key((key, PrivateKeyDer::try_from(key_der)?), directory_url)
         .await;
 
@@ -463,17 +461,16 @@ async fn account_create_from_key() -> Result<(), Box<dyn StdError>> {
     let (key, key_pkcs8) = Key::generate(provider)?;
 
     // Create a new account with the generated key
-    let (account1, credentials1) =
-        Account::builder_with_http(Box::new(env.client.clone()), provider)
-            .create_from_key(
-                (
-                    key,
-                    PrivateKeyDer::try_from(key_pkcs8.secret_pkcs8_der().to_vec())
-                        .expect("PKCS#8 key should be valid"),
-                ),
-                directory_url.clone(),
-            )
-            .await?;
+    let (account1, credentials1) = Account::builder(Box::new(env.client.clone()), provider)?
+        .create_from_key(
+            (
+                key,
+                PrivateKeyDer::try_from(key_pkcs8.secret_pkcs8_der().to_vec())
+                    .expect("PKCS#8 key should be valid"),
+            ),
+            directory_url.clone(),
+        )
+        .await?;
 
     // Extract the key to verify it matches what we provided
     #[derive(Deserialize)]
@@ -490,10 +487,9 @@ async fn account_create_from_key() -> Result<(), Box<dyn StdError>> {
 
     // Now try to load the account using from_key to verify it was created
     let key2 = Key::from_pkcs8_der(PrivatePkcs8KeyDer::from(key_der.clone()), provider)?;
-    let (account2, credentials2) =
-        Account::builder_with_http(Box::new(env.client.clone()), provider)
-            .from_key((key2, PrivateKeyDer::try_from(key_der)?), directory_url)
-            .await?;
+    let (account2, credentials2) = Account::builder(Box::new(env.client.clone()), provider)?
+        .from_key((key2, PrivateKeyDer::try_from(key_der)?), directory_url)
+        .await?;
 
     // Both should be the same account
     assert_eq!(account1.id(), account2.id());
@@ -609,7 +605,7 @@ impl Environment {
 
         // Create a new `Account` with the ACME server.
         debug!("creating test account");
-        let (account, _) = Account::builder_with_http(Box::new(client.clone()), test_provider())
+        let (account, _) = Account::builder(Box::new(client.clone()), test_provider())?
             .create(
                 &NewAccount {
                     contact: &[],
