@@ -1,5 +1,7 @@
 #![cfg(any(feature = "ring", feature = "aws-lc-rs"))]
+
 use std::io;
+use std::sync::Arc;
 
 use clap::Parser;
 use tracing::info;
@@ -30,7 +32,7 @@ async fn main() -> anyhow::Result<()> {
         rustls::crypto::ring::default_provider(),
     );
 
-    let (account, credentials) = Account::builder(provider, rustls_crypto_provider)?
+    let (account, credentials) = Account::builder(provider, Arc::new(rustls_crypto_provider))?
         .create(
             &NewAccount {
                 contact: &[],
