@@ -538,8 +538,11 @@ impl KeyAuthorization {
             challenge.token,
             BASE64_URL_SAFE_NO_PAD.encode(key.thumb_sha256()?)
         );
-        let digest = key.provider.sha256.hash(inner.as_bytes());
-        Ok(Self { inner, digest })
+
+        Ok(Self {
+            digest: key.provider.sha256.hash(inner.as_bytes()),
+            inner,
+        })
     }
 
     /// Get the key authorization value
