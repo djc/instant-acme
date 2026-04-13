@@ -24,7 +24,7 @@ specification.
 * Support for processing multiple orders concurrently
 * Uses hyper with rustls and Tokio for HTTP requests
 * Uses aws-lc-rs or *ring* for ECDSA signing
-* Minimum supported Rust version (MSRV): 1.70
+* Relatively conservative MSRV policy
 
 [ACME renewal information (ARI)]: https://www.rfc-editor.org/rfc/rfc9773.html
 [profiles]: https://datatracker.ietf.org/doc/draft-aaron-acme-profiles/
