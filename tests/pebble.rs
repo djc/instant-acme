@@ -6,6 +6,7 @@
 
 use std::collections::HashMap;
 use std::error::Error as StdError;
+use std::future::Future;
 use std::io::{self, Read};
 use std::net::IpAddr;
 use std::path::Path;
@@ -25,9 +26,8 @@ use hyper_util::client::legacy::Client as HyperClient;
 use hyper_util::client::legacy::connect::HttpConnector;
 use hyper_util::rt::TokioExecutor;
 use instant_acme::{
-    Account, AuthorizationStatus, BodyWrapper, ChallengeHandle, ChallengeType, CryptoProvider,
-    Error, ExternalAccountKey, Identifier, Key, KeyAuthorization, NewAccount, NewOrder, Order,
-    OrderStatus, RetryPolicy,
+    Account, AuthorizationHandle, AuthorizationStatus, BodyWrapper, CryptoProvider, Error,
+    ExternalAccountKey, Identifier, Key, NewAccount, NewOrder, Order, OrderStatus, RetryPolicy,
 };
 #[cfg(all(feature = "time", feature = "x509-parser"))]
 use instant_acme::{CertificateIdentifier, RevocationRequest};
@@ -647,15 +647,7 @@ impl Environment {
                 _ => unreachable!("unexpected authz state: {:?}", authz.status),
             }
 
-            let mut challenge = authz
-                .challenge(A::TYPE)
-                .ok_or_else(|| format!("no {:?} challenge found", A::TYPE))?;
-
-            let key_authz = challenge.key_authorization()?;
-            self.request_challenge::<A>(&challenge, &key_authz).await?;
-
-            debug!(challenge_url = challenge.url, "marking challenge ready");
-            challenge.set_ready().await?;
+            A::handle_challenge(&mut authz, &self.client, self.config.challtestsrv_port).await?;
         }
 
         // Poll until the order is ready.
@@ -758,25 +750,6 @@ impl Environment {
         assert_eq!(roots.len(), 1);
         Ok(roots)
     }
-
-    async fn request_challenge<'a, A: AuthorizationMethod>(
-        &self,
-        challenge: &'a ChallengeHandle<'a>,
-        key_auth: &KeyAuthorization,
-    ) -> Result<(), Box<dyn StdError>> {
-        let url = format!("http://[::1]:{}/{}", self.config.challtestsrv_port, A::PATH);
-        let body = serde_json::to_vec(&A::authz_request(challenge, key_auth))?;
-        self.client
-            .request(
-                Request::builder()
-                    .method(Method::POST)
-                    .uri(url)
-                    .header(CONTENT_TYPE, "application/json")
-                    .body(BodyWrapper::from(body))?,
-            )
-            .await?;
-        Ok(())
-    }
 }
 
 fn dns_identifiers(dns_names: impl IntoIterator<Item = impl ToString>) -> Vec<Identifier> {
@@ -789,15 +762,17 @@ fn dns_identifiers(dns_names: impl IntoIterator<Item = impl ToString>) -> Vec<Id
 struct Http01;
 
 impl AuthorizationMethod for Http01 {
-    fn authz_request<'a>(
-        challenge: &'a ChallengeHandle<'a>,
-        key_auth: &'a KeyAuthorization,
-    ) -> impl Serialize + 'a {
-        debug!(
-            token = challenge.token,
-            key_auth = key_auth.as_str(),
-            "provisioning HTTP-01 response",
-        );
+    async fn handle_challenge<'a>(
+        authz: &'a mut AuthorizationHandle<'a>,
+        client: &HyperClient<hyper_rustls::HttpsConnector<HttpConnector>, BodyWrapper<Bytes>>,
+        challtestsrv_port: u16,
+    ) -> Result<(), Box<dyn StdError>> {
+        let mut http_chall = authz.http01().expect("missing HTTP-01 challenge");
+        let token = http_chall.token();
+        let auth_resp = http_chall.authorization()?;
+        let key_auth = auth_resp.key_authorization();
+
+        debug!(token, key_auth, "provisioning HTTP-01 response",);
 
         #[derive(Serialize)]
         struct AddHttp01Request<'a> {
@@ -805,31 +780,41 @@ impl AuthorizationMethod for Http01 {
             content: &'a str,
         }
 
-        AddHttp01Request {
-            token: &challenge.token,
-            content: key_auth.as_str(),
-        }
-    }
+        let body = serde_json::to_vec(&AddHttp01Request {
+            token,
+            content: key_auth,
+        })?;
+        let url = format!("http://[::1]:{challtestsrv_port}/add-http01");
+        client
+            .request(
+                Request::builder()
+                    .method(Method::POST)
+                    .uri(url)
+                    .header(CONTENT_TYPE, "application/json")
+                    .body(BodyWrapper::from(body))?,
+            )
+            .await?;
 
-    const PATH: &str = "add-http01";
-    const TYPE: ChallengeType = ChallengeType::Http01;
+        debug!("marking challenge ready");
+        http_chall.set_ready().await?;
+        Ok(())
+    }
 }
 
 struct Dns01;
 
 impl AuthorizationMethod for Dns01 {
-    fn authz_request<'a>(
-        challenge: &'a ChallengeHandle<'_>,
-        key_auth: &'a KeyAuthorization,
-    ) -> impl Serialize + 'a {
-        let identifier = challenge.identifier();
-        let Identifier::Dns(domain) = identifier.identifier else {
-            unreachable!("unsupported identifier {identifier:?}");
-        };
+    async fn handle_challenge<'a>(
+        authz: &'a mut AuthorizationHandle<'a>,
+        client: &HyperClient<hyper_rustls::HttpsConnector<HttpConnector>, BodyWrapper<Bytes>>,
+        challtestsrv_port: u16,
+    ) -> Result<(), Box<dyn StdError>> {
+        let mut dns_chall = authz.dns01().expect("missing DNS-01 challenge");
+        let auth_resp = dns_chall.authorization()?;
 
-        let host = format!("_acme-challenge.{domain}.");
-        let value = key_auth.dns_value();
-        debug!(host, value, "provisioning DNS-01 response");
+        let host = auth_resp.host();
+        let rdata = auth_resp.rdata();
+        debug!(host, rdata, "provisioning DNS-01 response");
 
         #[derive(Serialize)]
         struct AddDns01Request {
@@ -837,23 +822,45 @@ impl AuthorizationMethod for Dns01 {
             value: String,
         }
 
-        AddDns01Request { host, value }
-    }
+        let body = serde_json::to_vec(&AddDns01Request {
+            host,
+            value: rdata.to_owned(),
+        })?;
+        let url = format!("http://[::1]:{challtestsrv_port}/set-txt");
+        client
+            .request(
+                Request::builder()
+                    .method(Method::POST)
+                    .uri(url)
+                    .header(CONTENT_TYPE, "application/json")
+                    .body(BodyWrapper::from(body))?,
+            )
+            .await?;
 
-    const PATH: &str = "set-txt";
-    const TYPE: ChallengeType = ChallengeType::Dns01;
+        debug!("marking challenge ready");
+        dns_chall.set_ready().await?;
+        Ok(())
+    }
 }
 
 struct Alpn01;
 
 impl AuthorizationMethod for Alpn01 {
-    fn authz_request<'a>(
-        challenge: &'a ChallengeHandle<'a>,
-        key_auth: &'a KeyAuthorization,
-    ) -> impl Serialize + 'a {
+    async fn handle_challenge<'a>(
+        authz: &'a mut AuthorizationHandle<'a>,
+        client: &HyperClient<hyper_rustls::HttpsConnector<HttpConnector>, BodyWrapper<Bytes>>,
+        challtestsrv_port: u16,
+    ) -> Result<(), Box<dyn StdError>> {
+        let mut tls_chall = authz.tls_alpn01().expect("missing TLS-ALPN-01 challenge");
+        let auth_resp = tls_chall.authorization()?;
+        // Note: pebble-challtestsrv wants to hash the key auth itself, so we
+        // don't use `auth_resp.extension_value()` here.
+        let key_auth = auth_resp.key_authorization();
+        let identifier = tls_chall.identifier();
+
         debug!(
-            identifier = %challenge.identifier(),
-            key_auth = key_auth.as_str(),
+            %identifier,
+            key_auth,
             "provisioning TLS-ALPN-01 response",
         );
 
@@ -863,28 +870,38 @@ impl AuthorizationMethod for Alpn01 {
             content: &'a str,
         }
 
-        AddAlpn01Request {
-            host: challenge.identifier().to_string(),
-            // Note: pebble-challtestsrv wants to hash the key auth itself, so we
-            // don't use key_auth.digest() here.
-            content: key_auth.as_str(),
-        }
-    }
+        let body = serde_json::to_vec(&AddAlpn01Request {
+            host: identifier.to_string(),
+            content: key_auth,
+        })?;
+        let url = format!("http://[::1]:{}/add-tlsalpn01", challtestsrv_port);
+        client
+            .request(
+                Request::builder()
+                    .method(Method::POST)
+                    .uri(url)
+                    .header(CONTENT_TYPE, "application/json")
+                    .body(BodyWrapper::from(body))?,
+            )
+            .await?;
 
-    const PATH: &str = "add-tlsalpn01";
-    const TYPE: ChallengeType = ChallengeType::TlsAlpn01;
+        debug!("marking challenge ready");
+        tls_chall.set_ready().await?;
+        Ok(())
+    }
 }
 
-/// A trait for something able to provision a challenge response with an external system
+/// A trait for something able to handle an authorization challenge
+///
+/// Usually this will be accomplished by provisioning a response with an external system,
+/// and then indicating the challenge is ready for validation by the ACME server.
 trait AuthorizationMethod {
-    /// Provision a challenge response for the given identifier, challenge, and key auth.
-    fn authz_request<'a>(
-        challenge: &'a ChallengeHandle<'a>,
-        key_auth: &'a KeyAuthorization,
-    ) -> impl Serialize + 'a;
-
-    const PATH: &str;
-    const TYPE: ChallengeType;
+    /// Handle the challenge for this authorization method
+    fn handle_challenge<'a>(
+        authz: &'a mut AuthorizationHandle<'a>,
+        client: &HyperClient<hyper_rustls::HttpsConnector<HttpConnector>, BodyWrapper<Bytes>>,
+        challtestsrv_port: u16,
+    ) -> impl Future<Output = Result<(), Box<dyn StdError>>> + Send;
 }
 
 /// Wait for the server at the given address to be ready

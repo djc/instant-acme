@@ -18,7 +18,7 @@ use x509_parser::extensions::ParsedExtension;
 #[cfg(feature = "x509-parser")]
 use x509_parser::parse_x509_certificate;
 
-use crate::{BytesResponse, Sha256};
+use crate::{BytesResponse, Key, Sha256};
 
 /// Error type for instant-acme
 #[derive(Debug, Error)]
@@ -397,26 +397,6 @@ pub enum OctetKeyCurve {
     X448,
 }
 
-/// An ACME challenge as described in RFC 8555 (section 7.1.5)
-///
-/// <https://datatracker.ietf.org/doc/html/rfc8555#section-7.1.5>
-#[derive(Debug, Deserialize)]
-pub struct Challenge {
-    /// Type of challenge
-    pub r#type: ChallengeType,
-    /// Challenge identifier
-    pub url: String,
-    /// Token for this challenge
-    ///
-    /// Unknown `ChallengeType` instances may omit this field, leaving it empty.
-    #[serde(default)]
-    pub token: String,
-    /// Current status
-    pub status: ChallengeStatus,
-    /// Potential error state
-    pub error: Option<Problem>,
-}
-
 /// Contents of an ACME order as described in RFC 8555 (section 7.1.3)
 ///
 /// The order identity will usually be represented by an [Order](crate::Order).
@@ -713,19 +693,6 @@ impl AuthorizationState {
     }
 }
 
-/// Status for an [`AuthorizationState`]
-#[allow(missing_docs)]
-#[derive(Clone, Copy, Debug, Serialize, Deserialize, Eq, PartialEq)]
-#[serde(rename_all = "camelCase")]
-pub enum AuthorizationStatus {
-    Pending,
-    Valid,
-    Invalid,
-    Revoked,
-    Expired,
-    Deactivated,
-}
-
 /// Represent an identifier in an ACME [Order](crate::Order)
 #[allow(missing_docs)]
 #[derive(Clone, Debug, Serialize, Deserialize, Eq, PartialEq)]
@@ -790,6 +757,82 @@ impl fmt::Display for AuthorizedIdentifier<'_> {
     }
 }
 
+/// An ACME challenge as described in RFC 8555 (section 7.1.5)
+///
+/// <https://datatracker.ietf.org/doc/html/rfc8555#section-7.1.5>
+#[derive(Debug, Deserialize)]
+pub struct Challenge {
+    /// Challenge identifier
+    pub url: String,
+    /// Challenge type specific state
+    #[serde(flatten)]
+    pub state: ChallengeState,
+    /// Current status
+    pub status: ChallengeStatus,
+    /// Potential error state
+    pub error: Option<Problem>,
+}
+
+/// Challenge type specific state
+#[derive(Clone, Debug, Eq, PartialEq)]
+#[non_exhaustive]
+pub enum ChallengeState {
+    /// State for an RFC 8555 HTTP-01 challenge
+    Http01(Http01Challenge),
+    /// State for an RFC 8555 DNS-01 challenge
+    Dns01(Dns01Challenge),
+    /// State for an RFC 8737 TLS-ALPN-01 challenge
+    TlsAlpn01(TlsAlpn01Challenge),
+    /// State for a draft-acme-device-attest-08 challenge
+    ///
+    /// Note: Device attestation support is experimental
+    DeviceAttest01,
+    /// An unknown challenge type
+    Unknown(String),
+}
+
+impl ChallengeState {
+    /// Get the challenge type associated with this challenge state
+    pub fn r#type(&self) -> ChallengeType {
+        match self {
+            Self::Http01(_) => ChallengeType::Http01,
+            Self::Dns01(_) => ChallengeType::Dns01,
+            Self::TlsAlpn01(_) => ChallengeType::TlsAlpn01,
+            Self::DeviceAttest01 => ChallengeType::DeviceAttest01,
+            Self::Unknown(r#type) => ChallengeType::Unknown(r#type.clone()),
+        }
+    }
+}
+
+impl<'de> Deserialize<'de> for ChallengeState {
+    // Deriving `Deserialize` for the `ChallengeState` enum w/ an untagged variant
+    // for unknown challenge types would mean we swallow deser errors for _known_
+    // challenge types. Instead, we want to deser the type string, and then either
+    // capture it as an `Unknown` variant, or dispatch the full value to a more specific
+    // challenge deser, propagating an error result if necessary.
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let value = serde_json::Value::deserialize(deserializer)?;
+
+        let r#type = value["type"]
+            .as_str()
+            .ok_or_else(|| de::Error::missing_field("type"))?;
+
+        match r#type {
+            "http-01" => serde_json::from_value(value)
+                .map(Self::Http01)
+                .map_err(de::Error::custom),
+            "dns-01" => serde_json::from_value(value)
+                .map(Self::Dns01)
+                .map_err(de::Error::custom),
+            "tls-alpn-01" => serde_json::from_value(value)
+                .map(Self::TlsAlpn01)
+                .map_err(de::Error::custom),
+            "device-attest-01" => Ok(Self::DeviceAttest01),
+            unknown_type => Ok(Self::Unknown(unknown_type.to_owned())),
+        }
+    }
+}
+
 /// The challenge type
 #[allow(missing_docs)]
 #[non_exhaustive]
@@ -808,6 +851,153 @@ pub enum ChallengeType {
     Unknown(String),
 }
 
+/// Challenge state for an RFC 8555 http-01 challenge
+///
+/// See <https://www.rfc-editor.org/rfc/rfc8555#section-8.3>
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq)]
+#[non_exhaustive]
+pub struct Http01Challenge {
+    /// A token for constructing a key authorization to complete this challenge
+    pub token: String,
+}
+
+/// Challenge authorization data for an RFC 8555 http-01 challenge
+pub struct Http01ChallengeAuthorization {
+    token: String,
+    key_auth: String,
+}
+
+impl Http01ChallengeAuthorization {
+    /// The path prefix defined by RFC 8555 for HTTP-01 challenge responses.
+    pub const PREFIX: &'static str = "/.well-known/acme-challenge/";
+
+    pub(crate) fn new(token: &str, key: &Key) -> Result<Self, Error> {
+        Ok(Self {
+            token: token.to_owned(),
+            key_auth: format!(
+                "{token}.{}",
+                BASE64_URL_SAFE_NO_PAD.encode(key.thumb_sha256()?)
+            ),
+        })
+    }
+
+    /// The challenge token for this challenge authorization.
+    pub fn token(&self) -> &str {
+        &self.token
+    }
+
+    /// The path at which you should provision a file containing [`Self::key_authorization()`]
+    pub fn webroot_path(&self) -> String {
+        format!("{}{}", Self::PREFIX, self.token)
+    }
+
+    /// The key authorization content that should be placed in the challenge response file.
+    ///
+    /// The file should be provisioned at [`Self::webroot_path()`] in your webserver's web root.
+    pub fn key_authorization(&self) -> &str {
+        &self.key_auth
+    }
+}
+
+/// Challenge state for an RFC 8555 dns-01 challenge
+///
+/// See <https://www.rfc-editor.org/rfc/rfc8555#section-8.4>
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq)]
+#[non_exhaustive]
+pub struct Dns01Challenge {
+    /// A token for constructing a key authorization to complete this challenge
+    pub token: String,
+}
+
+/// Challenge authorization data for an RFC 8555 http-01 challenge
+pub struct Dns01ChallengeAuthorization {
+    domain: String,
+    rdata: String,
+}
+
+impl Dns01ChallengeAuthorization {
+    /// The prefix added to the identifier value to form the TXT record host
+    pub const PREFIX: &'static str = "_acme-challenge.";
+
+    pub(crate) fn new(identifier: &Identifier, token: &str, key: &Key) -> Result<Self, Error> {
+        let Identifier::Dns(domain) = identifier else {
+            unreachable!("DNS-01 only supports domain identifiers");
+        };
+
+        let key_auth = format!(
+            "{token}.{}",
+            BASE64_URL_SAFE_NO_PAD.encode(key.thumb_sha256()?)
+        );
+
+        Ok(Self {
+            domain: domain.clone(),
+            rdata: BASE64_URL_SAFE_NO_PAD.encode(key.provider.sha256.hash(key_auth.as_bytes())),
+        })
+    }
+
+    /// Fully qualified hostname for the challenge response TXT record to be provisioned
+    ///
+    /// Includes a trailing dot.
+    pub fn host(&self) -> String {
+        format!("{}{}.", Self::PREFIX, self.domain)
+    }
+
+    /// The TXT record RDATA to provision for [`Self::host()`]
+    ///
+    /// This is the base64-encoded SHA256 digest of the challenge key authorization.
+    pub fn rdata(&self) -> &str {
+        &self.rdata
+    }
+}
+
+/// Challenge state for an RFC 8737 tls-alpn-01 challenge
+///
+/// See <https://www.rfc-editor.org/rfc/rfc8737#section-3>
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq)]
+#[non_exhaustive]
+pub struct TlsAlpn01Challenge {
+    /// A token for constructing a key authorization to complete this challenge
+    pub token: String,
+}
+
+/// Challenge authorization data for an RFC 8737 tls-alpn-01 challenge
+pub struct TlsAlpn01ChallengeAuthorization {
+    key_auth: String,
+    extension_value: Vec<u8>,
+}
+
+impl TlsAlpn01ChallengeAuthorization {
+    pub(crate) fn new(token: &str, key: &Key) -> Result<Self, Error> {
+        let key_auth = format!(
+            "{token}.{}",
+            BASE64_URL_SAFE_NO_PAD.encode(key.thumb_sha256()?)
+        );
+        Ok(Self {
+            extension_value: key.provider.sha256.hash(key_auth.as_bytes()).to_vec(),
+            key_auth,
+        })
+    }
+
+    /// The unhashed key authorization string
+    ///
+    /// Typically, you would prefer using [`Self::extension_value`] to construct
+    /// a DER encoded id-pe-acmeIdentifier extension.
+    ///
+    /// This API may be useful when using a higher-level TLS-ALPN-01 certificate generation
+    /// API that expects the RFC-8555 §8.1 key authorization string as input.
+    pub fn key_authorization(&self) -> &str {
+        &self.key_auth
+    }
+
+    /// The SHA-256 digest of the RFC-8555 §8.1 key authorization string
+    ///
+    /// This can be used to construct a DER encoded id-pe-acmeIdentifier extension
+    /// for embedding in a provisioned TLS-ALPN-01 challenge response certificate.
+    pub fn extension_value(&self) -> &[u8] {
+        &self.extension_value
+    }
+}
+
 /// Status of an ACME [Challenge]
 #[allow(missing_docs)]
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq)]
@@ -817,6 +1007,19 @@ pub enum ChallengeStatus {
     Processing,
     Valid,
     Invalid,
+}
+
+/// Status for an [`AuthorizationState`]
+#[allow(missing_docs)]
+#[derive(Clone, Copy, Debug, Serialize, Deserialize, Eq, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub enum AuthorizationStatus {
+    Pending,
+    Valid,
+    Invalid,
+    Revoked,
+    Expired,
+    Deactivated,
 }
 
 /// Status of an [Order](crate::Order)
@@ -1149,10 +1352,17 @@ mod tests {
         }"#;
 
         let obj = serde_json::from_str::<Challenge>(CHALLENGE).unwrap();
-        assert_eq!(obj.r#type, ChallengeType::Dns01);
+        assert_eq!(obj.state.r#type(), ChallengeType::Dns01);
         assert_eq!(obj.url, "https://example.com/acme/chall/Rg5dV14Gh1Q");
         assert_eq!(obj.status, ChallengeStatus::Pending);
-        assert_eq!(obj.token, "evaGxfADs6pSRb2LAv9IZf17Dt3juxGJ-PCt92wr-oA");
+
+        let ChallengeState::Dns01(chall_state) = obj.state else {
+            panic!("wrong challenge state type");
+        };
+        assert_eq!(
+            chall_state.token,
+            "evaGxfADs6pSRb2LAv9IZf17Dt3juxGJ-PCt92wr-oA",
+        );
     }
 
     // https://datatracker.ietf.org/doc/html/rfc8555#section-7.6
