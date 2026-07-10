@@ -383,7 +383,7 @@ async fn account_from_key() -> Result<(), Box<dyn StdError>> {
     // Creat an env/initial account
 
     let env = Environment::new(EnvironmentConfig::default()).await?;
-    let directory_url = format!("https://{}/dir", &env.config.pebble.listen_address);
+    let directory_url = format!("https://{}/dir", env.config.pebble.listen_address);
 
     let provider = test_provider();
     let (account1, credentials) = Account::builder(Box::new(env.client.clone()), provider)?
@@ -424,7 +424,7 @@ async fn account_from_key() -> Result<(), Box<dyn StdError>> {
     drop(env);
 
     let env = Environment::new(EnvironmentConfig::default()).await?;
-    let directory_url = format!("https://{}/dir", &env.config.pebble.listen_address);
+    let directory_url = format!("https://{}/dir", env.config.pebble.listen_address);
 
     let key = Key::from_pkcs8_der(PrivatePkcs8KeyDer::from(key_der.clone()), provider)?;
     let result = Account::builder(Box::new(env.client.clone()), provider)?
@@ -454,7 +454,7 @@ async fn account_create_from_key() -> Result<(), Box<dyn StdError>> {
     try_tracing_init();
 
     let env = Environment::new(EnvironmentConfig::default()).await?;
-    let directory_url = format!("https://{}/dir", &env.config.pebble.listen_address);
+    let directory_url = format!("https://{}/dir", env.config.pebble.listen_address);
 
     // Generate a new key
     let provider = test_provider();
@@ -612,7 +612,7 @@ impl Environment {
                     terms_of_service_agreed: true,
                     only_return_existing: false,
                 },
-                format!("https://{}/dir", &config.pebble.listen_address),
+                format!("https://{}/dir", config.pebble.listen_address),
                 config.eab_key.as_ref(),
             )
             .await?;
@@ -738,7 +738,7 @@ impl Environment {
             .method(Method::GET)
             .uri(format!(
                 "https://{}/roots/0",
-                &self.config.pebble.management_listen_address
+                self.config.pebble.management_listen_address
             ))
             .header(CONTENT_TYPE, "application/json")
             .body(BodyWrapper::default())?;
