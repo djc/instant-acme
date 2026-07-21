@@ -17,6 +17,7 @@ specification.
 * Supported extensions:
   * [ACME renewal information (ARI)]
   * [Profiles]
+  * [draft-ietf-acme-device-attest] (**Experimental**)
 * Support for external account binding, key rollover, and contact updates
 * Support for certificate revocation
 * Store/recover your account credentials by serializing/deserializing
@@ -28,6 +29,7 @@ specification.
 
 [ACME renewal information (ARI)]: https://www.rfc-editor.org/rfc/rfc9773.html
 [profiles]: https://datatracker.ietf.org/doc/draft-aaron-acme-profiles/
+[draft-ietf-acme-device-attest]: https://datatracker.ietf.org/doc/draft-ietf-acme-device-attest/
 
 ## Cargo features
 
