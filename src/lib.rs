@@ -97,7 +97,7 @@ impl Client {
         signer: &impl Signer,
         url: &str,
     ) -> Result<BytesResponse, Error> {
-        let mut retries = 3;
+        let mut retries = 5;
         loop {
             let mut response = self
                 .post_attempt(payload, nonce.clone(), signer, url)
