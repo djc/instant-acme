@@ -11,10 +11,10 @@ use serde::Serialize;
 use tokio::time::sleep;
 
 use crate::account::AccountInner;
+use crate::challenges::{Challenge, ChallengeStatus, ChallengeType, DeviceAttestation};
 use crate::types::{
-    Authorization, AuthorizationState, AuthorizationStatus, AuthorizedIdentifier, Challenge,
-    ChallengeStatus, ChallengeType, DeviceAttestation, Empty, Error, FinalizeRequest, OrderState,
-    OrderStatus, Problem,
+    Authorization, AuthorizationState, AuthorizationStatus, AuthorizedIdentifier, Empty, Error,
+    FinalizeRequest, OrderState, OrderStatus, Problem,
 };
 use crate::{Key, nonce_from_response, retry_after};
 
