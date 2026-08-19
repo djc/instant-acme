@@ -39,8 +39,10 @@ use rustls::server::ParsedCertificate;
 use rustls_pki_types::{PrivateKeyDer, PrivatePkcs8KeyDer, UnixTime};
 use serde::{Deserialize, Serialize, Serializer};
 use tempfile::NamedTempFile;
-#[cfg(all(feature = "time", feature = "x509-parser"))]
+#[cfg(feature = "time")]
 use time::OffsetDateTime;
+#[cfg(feature = "time")]
+use time::format_description::well_known::Rfc3339;
 use tokio::net::TcpStream;
 use tokio::time::sleep;
 use tracing::{debug, info, trace};
@@ -284,6 +286,30 @@ async fn order_deactivate() -> Result<(), Box<dyn StdError>> {
 
     // With all authz's deactivated, the order should be status == Invalid
     assert_eq!(order.refresh().await?.status, OrderStatus::Invalid);
+
+    Ok(())
+}
+
+/// Test order with optional validity
+#[tokio::test]
+#[ignore]
+#[cfg(feature = "time")]
+async fn order_validity() -> Result<(), Box<dyn StdError>> {
+    try_tracing_init();
+
+    let env = Environment::new(EnvironmentConfig::default()).await?;
+    let idents = dns_identifiers(["example.com"]);
+    let not_before = OffsetDateTime::parse("3333-01-02T04:00:00Z", &Rfc3339)?;
+    let not_after = OffsetDateTime::parse("4444-01-02T04:00:00Z", &Rfc3339)?;
+    let new_order = &NewOrder::new(&idents)
+        .not_before(not_before)
+        .not_after(not_after);
+    let mut order = env.account.new_order(new_order).await?;
+
+    // on success the requested validity carries over to pebbles order state.
+    let state = order.state();
+    assert_eq!(state.not_before, Some(not_before));
+    assert_eq!(state.not_after, Some(not_after));
 
     Ok(())
 }
