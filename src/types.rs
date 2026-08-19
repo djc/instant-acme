@@ -451,6 +451,14 @@ pub struct OrderState {
     /// The profile to be used for the order
     #[serde(default)]
     pub profile: Option<String>,
+    /// The requested value of the notBefore field in the certificate
+    #[cfg(feature = "time")]
+    #[serde(default, with = "time::serde::rfc3339::option")]
+    pub not_before: Option<OffsetDateTime>,
+    /// The requested value of the notAfter field in the certificate
+    #[cfg(feature = "time")]
+    #[serde(default, with = "time::serde::rfc3339::option")]
+    pub not_after: Option<OffsetDateTime>,
 }
 
 /// A wrapper for [`AuthorizationState`] as held in the [`OrderState`]
@@ -496,6 +504,18 @@ pub struct NewOrder<'a> {
     identifiers: &'a [Identifier],
     #[serde(skip_serializing_if = "Option::is_none")]
     profile: Option<&'a str>,
+    #[cfg(feature = "time")]
+    #[serde(
+        skip_serializing_if = "Option::is_none",
+        with = "time::serde::rfc3339::option"
+    )]
+    not_before: Option<OffsetDateTime>,
+    #[cfg(feature = "time")]
+    #[serde(
+        skip_serializing_if = "Option::is_none",
+        with = "time::serde::rfc3339::option"
+    )]
+    not_after: Option<OffsetDateTime>,
 }
 
 impl<'a> NewOrder<'a> {
@@ -507,6 +527,10 @@ impl<'a> NewOrder<'a> {
             identifiers,
             replaces: None,
             profile: None,
+            #[cfg(feature = "time")]
+            not_before: None,
+            #[cfg(feature = "time")]
+            not_after: None,
         }
     }
 
@@ -540,6 +564,28 @@ impl<'a> NewOrder<'a> {
     /// Identifiers to be included in the order
     pub fn identifiers(&self) -> &[Identifier] {
         self.identifiers
+    }
+
+    /// Set the requested value of the notBefore field in the certificate
+    ///
+    /// The ACME server is free to ignore this hint: as noted in
+    /// [RFC 8555, Section 7.4](https://www.rfc-editor.org/rfc/rfc8555#section-7.4), the server is
+    /// not required to implement the `notBefore` and `notAfter` fields, and may reject orders that
+    /// include them. Notably, Let's Encrypt does not support them, while private ACME CAs may offer
+    /// more flexibility over the requested validity.
+    #[cfg(feature = "time")]
+    pub fn not_before(mut self, not_before: OffsetDateTime) -> Self {
+        self.not_before = Some(not_before);
+        self
+    }
+
+    /// Set the requested value of the notAfter field in the certificate
+    ///
+    /// See [`not_before()`][Self::not_before()] for caveats.
+    #[cfg(feature = "time")]
+    pub fn not_after(mut self, not_after: OffsetDateTime) -> Self {
+        self.not_after = Some(not_after);
+        self
     }
 }
 
@@ -1074,6 +1120,8 @@ mod tests {
         BasicConstraints, CertificateParams, DistinguishedName, IsCa, Issuer, KeyIdMethod, KeyPair,
         SerialNumber,
     };
+    #[cfg(feature = "time")]
+    use time::format_description::well_known::Rfc3339;
 
     use super::*;
 
@@ -1107,6 +1155,17 @@ mod tests {
             obj.finalize,
             "https://example.com/acme/order/TOlocE8rfgo/finalize"
         );
+        #[cfg(feature = "time")]
+        {
+            assert_eq!(
+                obj.not_before,
+                Some(OffsetDateTime::parse("2016-01-01T00:00:00Z", &Rfc3339).unwrap())
+            );
+            assert_eq!(
+                obj.not_after,
+                Some(OffsetDateTime::parse("2016-01-08T00:00:00Z", &Rfc3339).unwrap())
+            );
+        }
     }
 
     // https://datatracker.ietf.org/doc/html/rfc8555#section-7.5.1
