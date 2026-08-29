@@ -448,11 +448,7 @@ pub struct KeyAuthorization {
 
 impl KeyAuthorization {
     pub(crate) fn new(token: &str, key: &Key) -> Result<Self, Error> {
-        let inner = format!(
-            "{}.{}",
-            token,
-            BASE64_URL_SAFE_NO_PAD.encode(key.thumb_sha256()?)
-        );
+        let inner = format!("{}.{}", token, key.thumbprint());
 
         Ok(Self {
             digest: key.provider.sha256.hash(inner.as_bytes()),
