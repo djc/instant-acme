@@ -48,37 +48,6 @@ pub enum ChallengeState {
     Unknown,
 }
 
-impl ChallengeState {
-    /// Get the challenge type associated with this challenge state
-    pub fn r#type(&self) -> ChallengeType {
-        match self {
-            Self::Http01(_) => ChallengeType::Http01,
-            Self::Dns01(_) => ChallengeType::Dns01,
-            Self::TlsAlpn01(_) => ChallengeType::TlsAlpn01,
-            Self::DeviceAttest01(_) => ChallengeType::DeviceAttest01,
-            Self::Unknown => ChallengeType::Unknown,
-        }
-    }
-}
-
-/// The challenge type
-#[allow(missing_docs)]
-#[non_exhaustive]
-#[derive(Clone, Debug, Deserialize, Eq, PartialEq)]
-pub enum ChallengeType {
-    #[serde(rename = "http-01")]
-    Http01,
-    #[serde(rename = "dns-01")]
-    Dns01,
-    #[serde(rename = "tls-alpn-01")]
-    TlsAlpn01,
-    /// Note: Device attestation support is experimental
-    #[serde(rename = "device-attest-01")]
-    DeviceAttest01,
-    #[serde(untagged)]
-    Unknown,
-}
-
 /// Status of an ACME [Challenge]
 #[allow(missing_docs)]
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq)]
@@ -410,7 +379,6 @@ mod tests {
         }"#;
 
         let obj = serde_json::from_str::<Challenge>(CHALLENGE).unwrap();
-        assert_eq!(obj.state.r#type(), ChallengeType::Dns01);
         assert_eq!(obj.url, "https://example.com/acme/chall/Rg5dV14Gh1Q");
         assert_eq!(obj.status, ChallengeStatus::Pending);
 

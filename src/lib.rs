@@ -46,9 +46,7 @@ mod account;
 pub use account::{Account, AccountBuilder, ExternalAccountKey, Key};
 
 pub mod challenges;
-pub use challenges::{
-    Challenge, ChallengeState, ChallengeStatus, ChallengeType, DeviceAttestation,
-};
+pub use challenges::{Challenge, ChallengeState, ChallengeStatus, DeviceAttestation};
 
 mod crypto;
 pub use crypto::{

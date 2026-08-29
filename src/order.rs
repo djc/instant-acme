@@ -319,7 +319,7 @@ impl<'a> AuthStream<'a> {
 ///
 /// For each authorization, you'll need to:
 ///
-/// * Select which [`ChallengeType`][crate::ChallengeType] you want to complete
+/// * Decide which challenge type you want to complete
 /// * Call the appropriate challenge handle accessor to get a type specific challenge
 ///   handle (e.g. [`AuthorizationHandle::http01()`], [`AuthorizationHandle::dns01()`],
 ///   etc).
