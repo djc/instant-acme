@@ -27,7 +27,7 @@ specification.
 * Relatively conservative MSRV policy
 
 [ACME renewal information (ARI)]: https://www.rfc-editor.org/rfc/rfc9773.html
-[profiles]: https://datatracker.ietf.org/doc/draft-aaron-acme-profiles/
+[profiles]: https://datatracker.ietf.org/doc/draft-ietf-acme-profiles/
 
 ## Cargo features
 
