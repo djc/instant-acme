@@ -253,6 +253,22 @@ async fn profiles() -> Result<(), Box<dyn StdError>> {
 
     // Creat an env/initial account
     let mut env = Environment::new(EnvironmentConfig::default()).await?;
+    assert_eq!(
+        env.account
+            .profiles()
+            .find(|profile| profile.name == "default")
+            .unwrap()
+            .url,
+        "data:text/plain,The%20profile%20you%20know%20and%20love",
+    );
+    assert_eq!(
+        env.account
+            .profiles()
+            .find(|profile| profile.name == "shortlived")
+            .unwrap()
+            .url,
+        "https://example.com/docs/profiles/shortlived",
+    );
     let identifiers = dns_identifiers(["example.com"]);
     let cert = env
         .test::<Http01>(&NewOrder::new(&identifiers).profile("shortlived"))
@@ -991,14 +1007,14 @@ impl Default for PebbleConfig {
                 (
                     "default",
                     Profile {
-                        description: "The profile you know and love",
+                        description: "data:text/plain,The%20profile%20you%20know%20and%20love",
                         validity_period: Duration::from_secs(7776000),
                     },
                 ),
                 (
                     "shortlived",
                     Profile {
-                        description: "A short-lived cert profile, without actual enforcement",
+                        description: "https://example.com/docs/profiles/shortlived",
                         validity_period: Duration::from_secs(518400),
                     },
                 ),

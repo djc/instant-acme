@@ -315,7 +315,7 @@ impl Account {
             .meta
             .profiles
             .iter()
-            .map(|(name, description)| ProfileMeta { name, description })
+            .map(|(name, url)| ProfileMeta { name, url })
     }
 
     /// Get the account ID

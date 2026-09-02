@@ -687,12 +687,15 @@ pub(crate) struct Meta {
     pub(crate) profiles: HashMap<String, String>,
 }
 
-/// Profile meta information from the server directory
-#[allow(missing_docs)]
+/// Profile information advertised in the server directory
 #[derive(Clone, Copy, Debug)]
 pub struct ProfileMeta<'a> {
+    /// Short unique identifier for the profile
     pub name: &'a str,
-    pub description: &'a str,
+    /// URL pointing to a human-readable description of the profile
+    ///
+    /// This may be a `data:` URI containing an inline description.
+    pub url: &'a str,
 }
 
 #[derive(Serialize)]
