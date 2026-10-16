@@ -324,8 +324,8 @@ impl Account {
     }
 
     /// Get the [RFC 7638](https://www.rfc-editor.org/rfc/rfc7638) account key thumbprint
-    pub fn key_thumbprint(&self) -> Result<String, Error> {
-        Ok(BASE64_URL_SAFE_NO_PAD.encode(self.inner.key.thumb_sha256()?))
+    pub fn key_thumbprint(&self) -> &str {
+        self.inner.key.thumbprint()
     }
 }
 
@@ -569,9 +569,24 @@ impl AccountBuilder {
 pub struct Key {
     pub(crate) inner: Box<dyn SigningKey>,
     pub(crate) provider: &'static CryptoProvider,
+    thumbprint: String,
 }
 
 impl Key {
+    fn new(inner: Box<dyn SigningKey>, provider: &'static CryptoProvider) -> Result<Self, Error> {
+        let thumbprint = BASE64_URL_SAFE_NO_PAD.encode(
+            inner
+                .as_jwk()
+                .thumb_sha256(provider.sha256)
+                .map_err(Error::Json)?,
+        );
+        Ok(Self {
+            inner,
+            provider,
+            thumbprint,
+        })
+    }
+
     /// Generate a new key pair using the given [`CryptoProvider`]
     ///
     /// The key type depends on the provider.
@@ -579,20 +594,11 @@ impl Key {
         provider: &'static CryptoProvider,
     ) -> Result<(Self, PrivatePkcs8KeyDer<'static>), Error> {
         let (key, pkcs8) = provider.key_provider.generate_key()?;
-        Ok((
-            Self {
-                inner: key,
-                provider,
-            },
-            pkcs8,
-        ))
+        Ok((Self::new(key, provider)?, pkcs8))
     }
 
-    pub(crate) fn thumb_sha256(&self) -> Result<[u8; 32], Error> {
-        self.inner
-            .as_jwk()
-            .thumb_sha256(self.provider.sha256)
-            .map_err(Error::Json)
+    pub(crate) fn thumbprint(&self) -> &str {
+        &self.thumbprint
     }
 
     /// Create a key from the given PKCS#8 DER-encoded private key using the given
@@ -603,10 +609,7 @@ impl Key {
     ) -> Result<Self, Error> {
         let owned = PrivatePkcs8KeyDer::from(pkcs8_der.secret_pkcs8_der().to_vec());
         let key = provider.key_provider.load_key(owned)?;
-        Ok(Self {
-            inner: key,
-            provider,
-        })
+        Self::new(key, provider)
     }
 }
 
