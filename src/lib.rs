@@ -203,12 +203,10 @@ fn retry_after(rsp: &BytesResponse) -> Option<SystemTime> {
         return None;
     }
 
-    Some(match u64::from_str(value) {
-        // `delay-seconds` is a number of seconds to wait
-        Ok(secs) => SystemTime::now() + Duration::from_secs(secs),
-        // `HTTP-date` looks like `Fri, 31 Dec 1999 23:59:59 GMT`
-        Err(_) => SystemTime::from(HttpDate::from_str(value).ok()?),
-    })
+    match u64::from_str(value) {
+        Ok(secs) => SystemTime::now().checked_add(Duration::from_secs(secs)),
+        Err(_) => Some(SystemTime::from(HttpDate::from_str(value).ok()?)),
+    }
 }
 
 /// Default HTTP client implementation using hyper and rustls
