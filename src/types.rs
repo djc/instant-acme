@@ -2,7 +2,7 @@ use std::borrow::Cow;
 use std::collections::HashMap;
 use std::fmt::{self, Write};
 use std::net::IpAddr;
-use std::time::Instant;
+use std::time::{Instant, SystemTime};
 
 use base64::prelude::{BASE64_URL_SAFE_NO_PAD, Engine};
 use bytes::Bytes;
@@ -29,6 +29,15 @@ pub enum Error {
     /// RFC 8555 uses problem documents as described in RFC 7807.
     #[error(transparent)]
     Api(#[from] Problem),
+    /// An HTTP 429 response from the ACME server.
+    #[error("{problem}")]
+    RateLimited {
+        /// The server's explanation, including any remediation instructions.
+        #[source]
+        problem: Problem,
+        /// When the server permits retrying, if `Retry-After` was valid.
+        retry_after: Option<SystemTime>,
+    },
     /// Failed from cryptographic operations
     #[error("cryptographic operation failed")]
     Crypto,
@@ -169,10 +178,23 @@ impl Problem {
 
     pub(crate) async fn from_response(rsp: BytesResponse) -> Result<Bytes, Error> {
         let status = rsp.parts.status;
+        let retry_after = if status == http::StatusCode::TOO_MANY_REQUESTS {
+            crate::retry_after(&rsp)
+        } else {
+            None
+        };
         let body = rsp.body().await.map_err(Error::Other)?;
-        match status.is_informational() || status.is_success() || status.is_redirection() {
-            true => Ok(body),
-            false => Err(serde_json::from_slice::<Self>(&body)?.into()),
+        if status.is_informational() || status.is_success() || status.is_redirection() {
+            return Ok(body);
+        }
+
+        let problem = serde_json::from_slice::<Self>(&body)?;
+        match status {
+            http::StatusCode::TOO_MANY_REQUESTS => Err(Error::RateLimited {
+                problem,
+                retry_after,
+            }),
+            _ => Err(problem.into()),
         }
     }
 }
@@ -1127,6 +1149,132 @@ mod tests {
     use time::format_description::well_known::Rfc3339;
 
     use super::*;
+
+    fn problem_response(status: u16, retry_after: Option<&str>) -> BytesResponse {
+        let mut response = http::Response::builder().status(status);
+        if let Some(value) = retry_after {
+            response = response.header(http::header::RETRY_AFTER, value);
+        }
+        response
+            .body(http_body_util::Full::new(Bytes::from_static(
+                br#"{"type":"urn:ietf:params:acme:error:rateLimited","detail":"Please visit: https://portal.letsencrypt.org/sfe/v1/unpause?jwt=test-token"}"#,
+            )))
+            .unwrap()
+            .into()
+    }
+
+    #[tokio::test]
+    async fn rate_limit_preserves_retry_after_seconds_and_problem() {
+        let before = SystemTime::now();
+        let error = Problem::from_response(problem_response(429, Some("120")))
+            .await
+            .unwrap_err();
+        let after = SystemTime::now();
+        let Error::RateLimited {
+            problem,
+            retry_after,
+        } = &error
+        else {
+            panic!("unexpected error: {error:?}");
+        };
+        let retry_after = retry_after.unwrap();
+        assert!(retry_after >= before + std::time::Duration::from_secs(120));
+        assert!(retry_after <= after + std::time::Duration::from_secs(120));
+        assert_eq!(
+            problem.r#type.as_deref(),
+            Some("urn:ietf:params:acme:error:rateLimited")
+        );
+        assert!(
+            error
+                .to_string()
+                .contains("https://portal.letsencrypt.org/sfe/v1/unpause?jwt=test-token")
+        );
+        assert_eq!(error.to_string(), problem.to_string());
+        assert_eq!(
+            std::error::Error::source(&error).unwrap().to_string(),
+            problem.to_string()
+        );
+    }
+
+    #[tokio::test]
+    async fn rate_limit_preserves_retry_after_date() {
+        let deadline = SystemTime::UNIX_EPOCH + std::time::Duration::from_secs(1_900_000_000);
+        let header = httpdate::fmt_http_date(deadline);
+        let error = Problem::from_response(problem_response(429, Some(&header)))
+            .await
+            .unwrap_err();
+        assert!(
+            matches!(error, Error::RateLimited { retry_after: Some(value), .. } if value == deadline)
+        );
+    }
+
+    #[tokio::test]
+    async fn rate_limit_preserves_past_retry_after_date() {
+        let deadline = SystemTime::UNIX_EPOCH;
+        let header = httpdate::fmt_http_date(deadline);
+        let error = Problem::from_response(problem_response(429, Some(&header)))
+            .await
+            .unwrap_err();
+        assert!(
+            matches!(error, Error::RateLimited { retry_after: Some(value), .. } if value == deadline)
+        );
+    }
+
+    #[tokio::test]
+    async fn rate_limit_preserves_zero_retry_after() {
+        let before = SystemTime::now();
+        let error = Problem::from_response(problem_response(429, Some("0")))
+            .await
+            .unwrap_err();
+        let after = SystemTime::now();
+        assert!(
+            matches!(error, Error::RateLimited { retry_after: Some(value), .. } if before <= value && value <= after)
+        );
+    }
+
+    #[tokio::test]
+    async fn rate_limit_without_valid_retry_after_preserves_problem() {
+        for header in [
+            None,
+            Some(""),
+            Some("invalid"),
+            Some("-1"),
+            Some("18446744073709551615"),
+        ] {
+            let error = Problem::from_response(problem_response(429, header))
+                .await
+                .unwrap_err();
+            assert!(matches!(
+                error,
+                Error::RateLimited {
+                    retry_after: None,
+                    ..
+                }
+            ));
+            assert!(
+                error
+                    .to_string()
+                    .contains("https://portal.letsencrypt.org/sfe/v1/unpause?jwt=test-token")
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn non_429_problem_remains_api_error() {
+        let error = Problem::from_response(problem_response(400, Some("120")))
+            .await
+            .unwrap_err();
+        assert!(matches!(error, Error::Api(_)));
+    }
+
+    #[tokio::test]
+    async fn successful_response_body_is_unchanged() {
+        let response = http::Response::builder()
+            .status(200)
+            .body(http_body_util::Full::new(Bytes::from_static(b"{}")))
+            .unwrap();
+        assert_eq!(Problem::from_response(response.into()).await.unwrap(), "{}");
+    }
 
     // https://datatracker.ietf.org/doc/html/rfc8555#section-7.4
     #[test]
