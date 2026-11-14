@@ -17,8 +17,10 @@ mod ring;
 /// It is unrelated to the rustls [`CryptoProvider`][rustls_provider], which handles TLS
 /// for the HTTPS connection to the ACME server.
 ///
-/// Use [`CryptoProvider::aws_lc_rs()`] or [`CryptoProvider::ring()`] for a built-in backend,
-/// or populate the fields manually for a custom backend.
+/// Use [`CryptoProvider::aws_lc_rs()`] or [`CryptoProvider::ring()`] for a built-in P-256
+/// backend. The aws-lc-rs backend also provides
+/// [`CryptoProvider::aws_lc_rs_post_quantum()`]. Alternatively, populate the fields manually
+/// for a custom backend.
 ///
 /// [rustls_provider]: rustls::crypto::CryptoProvider
 pub struct CryptoProvider {
@@ -45,6 +47,12 @@ impl CryptoProvider {
     #[cfg(feature = "aws-lc-rs")]
     pub fn aws_lc_rs() -> &'static Self {
         aws_lc_rs::PROVIDER
+    }
+
+    /// A `CryptoProvider` using ML-DSA-44 account keys backed by aws-lc-rs.
+    #[cfg(feature = "aws-lc-rs")]
+    pub fn aws_lc_rs_post_quantum() -> &'static Self {
+        aws_lc_rs::ML_DSA_44_PROVIDER
     }
 
     /// A `CryptoProvider` using ECDSA P-256 account keys backed by ring.
