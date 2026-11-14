@@ -24,6 +24,7 @@ specification.
 * Support for processing multiple orders concurrently
 * Uses hyper with rustls and Tokio for HTTP requests
 * Uses aws-lc-rs or *ring* for ECDSA signing
+* Supports ML-DSA-44 account keys with aws-lc-rs
 * Relatively conservative MSRV policy
 
 [ACME renewal information (ARI)]: https://www.rfc-editor.org/rfc/rfc9773.html
@@ -43,7 +44,8 @@ If both `ring` and `aws-lc-rs` are enabled, `aws-lc-rs` will be used.
 
 ## Limitations
 
-* Only supports P-256 ECDSA account keys for now
+* Built-in account-key providers support P-256 ECDSA and, with aws-lc-rs,
+  ML-DSA-44
 * Device attestation support is experimental
 
 ## Getting started
