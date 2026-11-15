@@ -60,7 +60,7 @@ mod types;
 pub use types::{
     AccountCredentials, Authorization, AuthorizationState, AuthorizationStatus,
     AuthorizedIdentifier, CertificateIdentifier, Challenge, ChallengeStatus, ChallengeType,
-    DeviceAttestation, EcCurve, Error, Identifier, Jwk, JwkThumbFields, LetsEncrypt, NewAccount,
+    DeviceAttestation, EcCurve, Error, Identifier, Jwk, JwkKeyParameters, LetsEncrypt, NewAccount,
     NewOrder, OctetKeyCurve, OrderState, OrderStatus, Problem, ProfileMeta, RevocationReason,
     RevocationRequest, SigningAlgorithm, Subproblem, ZeroSsl,
 };

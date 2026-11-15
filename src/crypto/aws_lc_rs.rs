@@ -6,7 +6,7 @@ use aws_lc_rs::{digest, hmac};
 
 use super::{HmacKey, HmacKeyProvider, SigningKey, SigningKeyProvider};
 use crate::Error;
-use crate::types::{EcCurve, Jwk, JwkThumbFields, SigningAlgorithm};
+use crate::types::{EcCurve, Jwk, JwkKeyParameters, SigningAlgorithm};
 
 pub(crate) static PROVIDER: &super::CryptoProvider = &super::CryptoProvider {
     key_provider: &P256SigningKeyProvider,
@@ -53,7 +53,7 @@ impl SigningKey for P256Key {
         let (x, y) = self.key_pair.public_key().as_ref()[1..].split_at(32);
         Jwk {
             alg: SigningAlgorithm::Es256,
-            key: JwkThumbFields::Ec {
+            key: JwkKeyParameters::Ec {
                 crv: EcCurve::P256,
                 x,
                 y,
