@@ -271,14 +271,15 @@ pub(crate) enum KeyOrKeyId<'a> {
 
 /// A JSON Web Key (JWK) as used in JWS headers
 ///
-/// See [RFC 7517](https://www.rfc-editor.org/rfc/rfc7517) for more information.
+/// See [RFC 7517](https://www.rfc-editor.org/rfc/rfc7517) and
+/// [RFC 9964](https://www.rfc-editor.org/rfc/rfc9964) for more information.
 #[derive(Debug, Serialize)]
 pub struct Jwk<'a> {
     /// The algorithm intended for use with this key
     pub alg: SigningAlgorithm,
     /// Key-type-specific parameters
     #[serde(flatten)]
-    pub key: JwkThumbFields<'a>,
+    pub key: JwkKeyParameters<'a>,
     /// The intended use (`"sig"` for signing)
     pub r#use: &'static str,
 }
@@ -292,17 +293,35 @@ impl<'a> Jwk<'a> {
         &'a self,
         sha256: &dyn Sha256,
     ) -> Result<[u8; 32], serde_json::Error> {
-        Ok(sha256.hash(&serde_json::to_vec(&self.key)?))
+        Ok(sha256.hash(&serde_json::to_vec(&JwkThumbprint(self))?))
+    }
+}
+
+/// A borrowed view of a JWK for thumbprint serialization
+struct JwkThumbprint<'jwk, 'key>(&'jwk Jwk<'key>);
+
+impl Serialize for JwkThumbprint<'_, '_> {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        match &self.0.key {
+            JwkKeyParameters::Akp { public_key } => {
+                let mut map = serializer.serialize_map(Some(3))?;
+                map.serialize_entry("alg", &self.0.alg)?;
+                map.serialize_entry("kty", "AKP")?;
+                map.serialize_entry("pub", &Base64Bytes(public_key))?;
+                map.end()
+            }
+            key => key.serialize(serializer),
+        }
     }
 }
 
 /// Key-type-specific JWK parameters
 ///
-/// Each variant's fields are declared in lexicographic order for correct
-/// [RFC 7638](https://www.rfc-editor.org/rfc/rfc7638) thumbprint computation.
+/// Algorithm key pair (AKP) public keys use the `pub` member defined by
+/// [RFC 9964](https://www.rfc-editor.org/rfc/rfc9964#section-3).
 #[derive(Debug)]
 #[non_exhaustive]
-pub enum JwkThumbFields<'a> {
+pub enum JwkKeyParameters<'a> {
     /// Elliptic Curve key (P-256, P-384, etc.)
     Ec {
         /// The curve name
@@ -326,14 +345,25 @@ pub enum JwkThumbFields<'a> {
         /// The modulus (serialized as base64url)
         n: &'a [u8],
     },
+    /// Algorithm Key Pair public key (ML-DSA-44, etc.)
+    Akp {
+        /// The raw public key (serialized as base64url in the `pub` member)
+        public_key: &'a [u8],
+    },
 }
 
-impl Serialize for JwkThumbFields<'_> {
+impl Serialize for JwkKeyParameters<'_> {
     fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
         // Do this manually, because fields must be in lexicographic order for thumbprints.
         // In particular, this means the `kty` tag field must come after `crv` or `e` fields.
         // https://www.rfc-editor.org/rfc/rfc7638#section-3.3
         match self {
+            Self::Akp { public_key } => {
+                let mut map = serializer.serialize_map(Some(2))?;
+                map.serialize_entry("kty", "AKP")?;
+                map.serialize_entry("pub", &Base64Bytes(public_key))?;
+                map.end()
+            }
             Self::Ec { crv, x, y } => {
                 let mut map = serializer.serialize_map(Some(4))?;
                 map.serialize_entry("crv", crv)?;
@@ -1096,6 +1126,11 @@ pub enum SigningAlgorithm {
     ///
     /// [RFC 7518, Section 3.2](https://www.rfc-editor.org/rfc/rfc7518#section-3.2)
     Hs256,
+    /// ML-DSA using the ML-DSA-44 parameter set
+    ///
+    /// [RFC 9964, Section 5](https://www.rfc-editor.org/rfc/rfc9964#section-5)
+    #[serde(rename = "ML-DSA-44")]
+    MlDsa44,
     /// RSASSA-PKCS1-v1_5 using SHA-256
     ///
     /// [RFC 7518, Section 3.3](https://www.rfc-editor.org/rfc/rfc7518#section-3.3)
@@ -1127,6 +1162,151 @@ mod tests {
     use time::format_description::well_known::Rfc3339;
 
     use super::*;
+
+    // RFC 9964 sections 3 and 5 define the AKP members and registered ML-DSA
+    // algorithm names asserted by this test.
+    #[test]
+    fn mldsa_jwk_serialization() {
+        let jwk = Jwk {
+            alg: SigningAlgorithm::MlDsa44,
+            key: JwkKeyParameters::Akp {
+                public_key: &[0, 1, 2],
+            },
+            r#use: "sig",
+        };
+        assert_eq!(
+            serde_json::to_string(&jwk).unwrap(),
+            r#"{"alg":"ML-DSA-44","kty":"AKP","pub":"AAEC","use":"sig"}"#
+        );
+
+        let header = Header {
+            alg: SigningAlgorithm::MlDsa44,
+            key: KeyOrKeyId::Key(jwk),
+            nonce: Some("nonce"),
+            url: "https://example.com/new-account",
+        };
+        assert_eq!(
+            serde_json::to_string(&header).unwrap(),
+            r#"{"alg":"ML-DSA-44","jwk":{"alg":"ML-DSA-44","kty":"AKP","pub":"AAEC","use":"sig"},"nonce":"nonce","url":"https://example.com/new-account"}"#
+        );
+    }
+
+    #[test]
+    fn jwk_thumbprint_canonical_members() {
+        // These are the exact canonical members required by RFC 7638 for the
+        // existing key types and by RFC 9964 section 6 for AKP.
+        let cases = [
+            (
+                Jwk {
+                    alg: SigningAlgorithm::MlDsa44,
+                    key: JwkKeyParameters::Akp {
+                        public_key: &[0, 1, 2],
+                    },
+                    r#use: "sig",
+                },
+                r#"{"alg":"ML-DSA-44","kty":"AKP","pub":"AAEC"}"#,
+            ),
+            (
+                Jwk {
+                    alg: SigningAlgorithm::Es256,
+                    key: JwkKeyParameters::Ec {
+                        crv: EcCurve::P256,
+                        x: &[0],
+                        y: &[1],
+                    },
+                    r#use: "sig",
+                },
+                r#"{"crv":"P-256","kty":"EC","x":"AA","y":"AQ"}"#,
+            ),
+            (
+                Jwk {
+                    alg: SigningAlgorithm::Ed25519,
+                    key: JwkKeyParameters::Okp {
+                        crv: OctetKeyCurve::Ed25519,
+                        x: &[0],
+                    },
+                    r#use: "sig",
+                },
+                r#"{"crv":"Ed25519","kty":"OKP","x":"AA"}"#,
+            ),
+            (
+                Jwk {
+                    alg: SigningAlgorithm::Rs256,
+                    key: JwkKeyParameters::Rsa {
+                        e: &[1, 0, 1],
+                        n: &[0],
+                    },
+                    r#use: "sig",
+                },
+                r#"{"e":"AQAB","kty":"RSA","n":"AA"}"#,
+            ),
+        ];
+
+        for (jwk, canonical) in cases {
+            let sha256 = AssertSha256(canonical.as_bytes());
+            assert_eq!(jwk.thumb_sha256(&sha256).unwrap(), [0; 32]);
+        }
+    }
+
+    // A test SHA-256 implementation that asserts it receives the expected
+    // canonical JSON instead of computing a digest.
+    struct AssertSha256<'a>(&'a [u8]);
+
+    impl Sha256 for AssertSha256<'_> {
+        fn hash(&self, data: &[u8]) -> [u8; 32] {
+            assert_eq!(data, self.0);
+            [0; 32]
+        }
+    }
+
+    // RFC 9964 Appendix A.1, ML-DSA-44 example.
+    #[cfg(feature = "aws-lc-rs")]
+    #[test]
+    fn rfc9964_mldsa44_thumbprint() {
+        const PUBLIC_KEY: &str = concat!(
+            "unH59k4RuutY-pxvu24U5h8YZD2rSVtHU5qRZsoBmBMcRPgmu9VuNOVdteXi",
+            "1zNIXjnqJg_GAAxepLqA00Vc3lO0bzRIKu39VFD8Lhuk8l0V-cFEJC-zm7UihxiQMMUEmOFx",
+            "e3x1ixkKZ0jqmqP3rKryx8tSbtcXyfea64QhT6XNje2SoMP6FViBDxLHBQo2dwjRls0k5a-X",
+            "SQSu2OTOiHLoaWsLe8pQ5FLNfTDqmkrawDEdZyxr3oSWJAsHQxRjcIiVzZuvwxYy1zl2STiP",
+            "2vy_fTBaPemkleynQzqPg7oPCyXEE8bjnJbrfWkbNNN8438e6tHPIX4l7zTuzz98YPhLjt_d",
+            "6EBdT4MldsYe-Y4KLyjaGHcAlTkk9oa5RhRwW89T0z_t1DSO3dvfKLUGXh8gd1BD6Fz5Mfgp",
+            "F5NjoafnQEqDjsAAhrCXY4b-Y3yYJEdX4_dp3dRGdHG_rWcPmgX4JG7lCnser4f8QGnDriqi",
+            "AzJYEXeS8LzUngg_0bx0lqv_KcyU5IaLISFO0xZSU5mmEPvdSoDnyAcV8pV44qhLtAvd29n0",
+            "ehG259oRihtljTWeiu9V60a1N2tbZVl5mEqSK-6_xZvNYA1TCdzNctvweH24unV7U3wer9XA",
+            "9Q6kvJWDVJ4oKaQsKMrCSMlteBJMRxWbGK7ddUq6F7GdQw-3j2M-qdJvVKm9UPjY9rc1lPgo",
+            "l25-oJxTu7nxGlbJUH-4m5pevAN6NyZ6lfhbjWTKlxkrEKZvQXs_Yf6cpXEwpI_ZJeriq1UC",
+            "1XHIpRkDwdOY9MH3an4RdDl2r9vGl_IwlKPNdh_5aF3jLgn7PCit1FNJAwC8fIncAXgAlgcX",
+            "IpRXdfJk4bBiO89GGccSyDh2EgXYdpG3XvNgGWy7npuSoNTE7WIyblAk13UQuO4sdCbMIuri",
+            "CdyfE73mvwj15xgb07RZRQtFGlFTmnFcIdZ90zDrWXDbANntv7KCKwNvoTuv64bY3HiGbj-N",
+            "Q-U9eMylWVpvr4hrXcES8c9K3PqHWADZC0iIOvlzFv4VBoc_wVflcOrL_SIoaNFCNBAZZq-2",
+            "v5lAgpJTqVOtqJ_HVraoSfcKy5g45p-qULunXj6Jwq21fobQiKubBKKOZwcJFyJD7F4ACKXO",
+            "rz-HIvSHMCWW_9dVrRuCpJw0s0aVFbRqopDNhu446nqb4_EDYQM1tTHMozPd_jKxRRD0sH75",
+            "X8ZoToxFSpLBDbtdWcenxj-zBf6IGWfZnmaetjKEBYJWC7QDQx1A91pJVJCEgieCkoIfTqke",
+            "QuePpIyu48g2FG3P1zjRF-kumhUTfSjo5qS0YiZQy0E1BMs6M11EvuxXRsHClLHoy5nLYI2S",
+            "j4zjVjYyxSHyPRPGGo9hwB34yWxzYNtPPGiqXS_dNCpi_zRZwRY4lCGrQ-hYTEWIK1Dm5Olt",
+            "tvC4_eiQ1dv63NiGkLRJ5kJA3bICN0fzCDY-MBqnd1cWn8YVBijVkgtaoascjL9EywDgJdeH",
+            "nXK0eeOvUxHHhXJVkNqcibn8O4RQdpVU60TSA-uiu675ytIjcBHC6kTv8A8pmkj_4oypPd-F",
+            "92YIJC741swkYQoeIHj8rE-ThcMUkF7KqC5VORbZTRp8HsZSqgiJcIPaouuxd1-8Rxrid3fX",
+            "kE6p8bkrysPYoxWEJgh7ZFsRCPDWX-yTeJwFN0PKFP1j0F6YtlLfK5wv-c4F8ZQHA_-yc_gO",
+            "Dicy7KmWDZgbTP07e7gEWzw4MFRrndjbDQ",
+        );
+
+        let public_key = BASE64_URL_SAFE_NO_PAD.decode(PUBLIC_KEY).unwrap();
+        let jwk = Jwk {
+            alg: SigningAlgorithm::MlDsa44,
+            key: JwkKeyParameters::Akp {
+                public_key: &public_key,
+            },
+            r#use: "sig",
+        };
+        let thumbprint = jwk
+            .thumb_sha256(crate::CryptoProvider::aws_lc_rs().sha256)
+            .unwrap();
+        assert_eq!(
+            BASE64_URL_SAFE_NO_PAD.encode(thumbprint),
+            "T4xl70S7MT6Zeq6r9V9fPJGVn76wfnXJ21-gyo0Gu6o"
+        );
+    }
 
     // https://datatracker.ietf.org/doc/html/rfc8555#section-7.4
     #[test]
