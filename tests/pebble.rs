@@ -24,6 +24,8 @@ use http_body_util::BodyExt;
 use hyper_util::client::legacy::Client as HyperClient;
 use hyper_util::client::legacy::connect::HttpConnector;
 use hyper_util::rt::TokioExecutor;
+#[cfg(feature = "aws-lc-rs")]
+use instant_acme::AccountCredentials;
 use instant_acme::{
     Account, AuthorizationStatus, BodyWrapper, ChallengeHandle, ChallengeType, CryptoProvider,
     Error, ExternalAccountKey, Identifier, Key, KeyAuthorization, NewAccount, NewOrder, Order,
@@ -387,8 +389,14 @@ async fn update_key() -> Result<(), Box<dyn StdError>> {
     let mut env = Environment::new(EnvironmentConfig::default()).await?;
     let old_account = env.account.clone();
 
-    // Change the account key
-    let new_credentials = env.account.update_key().await?;
+    // Exercise account-key rollover. With aws-lc-rs, this also changes the
+    // key type from the default P-256 to ML-DSA-44. The ring-only fallback
+    // covers rollover without changing the key type.
+    #[cfg(feature = "aws-lc-rs")]
+    let new_provider = CryptoProvider::aws_lc_rs_post_quantum();
+    #[cfg(all(feature = "ring", not(feature = "aws-lc-rs")))]
+    let new_provider = test_provider();
+    let new_credentials = env.account.update_key_with_provider(new_provider).await?;
 
     // Using the old ACME account key should now produce malformed error.
     let Err(Error::Api(problem)) = old_account
@@ -404,13 +412,45 @@ async fn update_key() -> Result<(), Box<dyn StdError>> {
     );
 
     // Change the Pebble environment to use the new ACME account key.
-    env.account = Account::builder(Box::new(env.client.clone()), test_provider())?
+    env.account = Account::builder(Box::new(env.client.clone()), new_provider)?
         .from_credentials(new_credentials)
         .await?;
 
     // Using the new ACME account key should not produce an error.
     env.account
         .update_contacts(&["mailto:bob@example.com"])
+        .await?;
+
+    Ok(())
+}
+
+#[cfg(feature = "aws-lc-rs")]
+#[tokio::test]
+#[ignore]
+async fn mldsa44_account() -> Result<(), Box<dyn StdError>> {
+    try_tracing_init();
+
+    let env = Environment::new(EnvironmentConfig::default()).await?;
+    let directory_url = format!("https://{}/dir", env.config.pebble.listen_address);
+    let provider = CryptoProvider::aws_lc_rs_post_quantum();
+    let (_, credentials) = Account::builder(Box::new(env.client.clone()), provider)?
+        .create(
+            &NewAccount {
+                contact: &[],
+                terms_of_service_agreed: true,
+                only_return_existing: false,
+            },
+            directory_url,
+            None,
+        )
+        .await?;
+    let credentials =
+        serde_json::from_slice::<AccountCredentials>(&serde_json::to_vec(&credentials)?)?;
+    let account = Account::builder(Box::new(env.client.clone()), provider)?
+        .from_credentials(credentials)
+        .await?;
+    account
+        .update_contacts(&["mailto:mldsa@example.com"])
         .await?;
 
     Ok(())
