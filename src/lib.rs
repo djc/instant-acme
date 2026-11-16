@@ -45,24 +45,23 @@ use serde::Serialize;
 mod account;
 pub use account::{Account, AccountBuilder, ExternalAccountKey, Key};
 
+pub mod challenges;
+pub use challenges::{Challenge, ChallengeState, ChallengeStatus, DeviceAttestation};
+
 mod crypto;
 pub use crypto::{
     CryptoProvider, HmacKey, HmacKeyProvider, Sha256, SigningKey, SigningKeyProvider,
 };
 
 mod order;
-pub use order::{
-    AuthorizationHandle, Authorizations, ChallengeHandle, Identifiers, KeyAuthorization, Order,
-    RetryPolicy,
-};
+pub use order::{AuthorizationHandle, Authorizations, Identifiers, Order, RetryPolicy};
 
 mod types;
 pub use types::{
     AccountCredentials, Authorization, AuthorizationState, AuthorizationStatus,
-    AuthorizedIdentifier, CertificateIdentifier, Challenge, ChallengeStatus, ChallengeType,
-    DeviceAttestation, EcCurve, Error, Identifier, Jwk, JwkThumbFields, LetsEncrypt, NewAccount,
-    NewOrder, OctetKeyCurve, OrderState, OrderStatus, Problem, ProfileMeta, RevocationReason,
-    RevocationRequest, SigningAlgorithm, Subproblem, ZeroSsl,
+    AuthorizedIdentifier, CertificateIdentifier, EcCurve, Error, Identifier, Jwk, JwkThumbFields,
+    LetsEncrypt, NewAccount, NewOrder, OctetKeyCurve, OrderState, OrderStatus, Problem,
+    ProfileMeta, RevocationReason, RevocationRequest, SigningAlgorithm, Subproblem, ZeroSsl,
 };
 use types::{Directory, JoseJson, Signer};
 #[cfg(feature = "time")]
