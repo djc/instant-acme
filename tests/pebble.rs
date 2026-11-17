@@ -6,28 +6,30 @@
 
 use std::collections::HashMap;
 use std::error::Error as StdError;
+use std::future::Future;
 use std::io::{self, Read};
 use std::net::IpAddr;
 use std::path::Path;
+use std::pin::Pin;
 use std::process::{Child, Command};
 use std::str::FromStr;
 use std::sync::atomic::{AtomicU16, Ordering};
-use std::time::Duration;
+use std::time::{Duration, SystemTime};
 use std::{env, fs};
 
 use base64::Engine;
 use base64::prelude::BASE64_URL_SAFE_NO_PAD;
 use bytes::{Buf, Bytes};
-use http::header::CONTENT_TYPE;
-use http::{Method, Request};
+use http::header::{CONTENT_TYPE, RETRY_AFTER};
+use http::{HeaderValue, Method, Request, StatusCode};
 use http_body_util::BodyExt;
 use hyper_util::client::legacy::Client as HyperClient;
 use hyper_util::client::legacy::connect::HttpConnector;
 use hyper_util::rt::TokioExecutor;
 use instant_acme::{
-    Account, AuthorizationStatus, BodyWrapper, ChallengeHandle, ChallengeType, CryptoProvider,
-    Error, ExternalAccountKey, Identifier, Key, KeyAuthorization, NewAccount, NewOrder, Order,
-    OrderStatus, RetryPolicy,
+    Account, AuthorizationStatus, BodyWrapper, BytesResponse, ChallengeHandle, ChallengeType,
+    CryptoProvider, Error, ExternalAccountKey, HttpClient, Identifier, Key, KeyAuthorization,
+    NewAccount, NewOrder, Order, OrderStatus, RetryPolicy,
 };
 #[cfg(all(feature = "time", feature = "x509-parser"))]
 use instant_acme::{CertificateIdentifier, RevocationRequest};
@@ -91,6 +93,90 @@ async fn tls_alpn_01() -> Result<(), Box<dyn StdError>> {
         .test::<Alpn01>(&NewOrder::new(&dns_identifiers(["tlsalpn01.example.com"])))
         .await
         .map(|_| ())
+}
+
+#[tokio::test]
+#[ignore]
+async fn rate_limit_retry_after() -> Result<(), Box<dyn StdError>> {
+    try_tracing_init();
+
+    let retry_after = Duration::from_secs(60);
+    let mut config = EnvironmentConfig::default();
+    config.pebble.retry_after = RetryConfig {
+        authz: retry_after,
+        order: retry_after,
+    };
+    let mut env = Environment::new(config).await?;
+    let (account, _) = Account::builder(
+        Box::new(RateLimitedClient(env.client.clone())),
+        test_provider(),
+    )?
+    .create(
+        &NewAccount {
+            contact: &[],
+            terms_of_service_agreed: true,
+            only_return_existing: false,
+        },
+        format!("https://{}/dir", env.config.pebble.listen_address),
+        None,
+    )
+    .await?;
+    env.account = account;
+
+    let before = SystemTime::now();
+    let err = env
+        .test::<Http01>(&NewOrder::new(&dns_identifiers([
+            "retry-after.example.com",
+        ])))
+        .await
+        .unwrap_err();
+    let after = SystemTime::now();
+    let Error::RateLimited {
+        problem,
+        retry_after: Some(deadline),
+    } = *err.downcast::<Error>()?
+    else {
+        panic!("expected a rate limit with the server's retry deadline");
+    };
+
+    assert_eq!(
+        problem.r#type.as_deref(),
+        Some("urn:ietf:params:acme:error:rateLimited")
+    );
+    assert_eq!(problem.status, Some(429));
+    // HTTP dates have one-second precision.
+    assert!(deadline >= before + retry_after - Duration::from_secs(1));
+    assert!(deadline <= after + retry_after);
+
+    Ok(())
+}
+
+// Pebble supplies Retry-After headers but does not emit 429 responses.
+struct RateLimitedClient<C>(C);
+
+impl<C: HttpClient> HttpClient for RateLimitedClient<C> {
+    fn request(
+        &self,
+        req: Request<BodyWrapper<Bytes>>,
+    ) -> Pin<Box<dyn Future<Output = Result<BytesResponse, Error>> + Send>> {
+        let response = self.0.request(req);
+        Box::pin(async move {
+            let mut response = response.await?;
+            if !response.parts.headers.contains_key(RETRY_AFTER) {
+                return Ok(response);
+            }
+
+            response.parts.status = StatusCode::TOO_MANY_REQUESTS;
+            response.parts.headers.insert(
+                CONTENT_TYPE,
+                HeaderValue::from_static("application/problem+json"),
+            );
+            response.body = Box::new(Bytes::from_static(
+                br#"{"type":"urn:ietf:params:acme:error:rateLimited","status":429}"#,
+            ));
+            Ok(response)
+        })
+    }
 }
 
 /// Test subproblem handling by trying to issue for a forbidden identifier

@@ -2,7 +2,7 @@ use std::borrow::Cow;
 use std::collections::HashMap;
 use std::fmt::{self, Write};
 use std::net::IpAddr;
-use std::time::Instant;
+use std::time::{Instant, SystemTime};
 
 use base64::prelude::{BASE64_URL_SAFE_NO_PAD, Engine};
 use bytes::Bytes;
@@ -29,6 +29,15 @@ pub enum Error {
     /// RFC 8555 uses problem documents as described in RFC 7807.
     #[error(transparent)]
     Api(#[from] Problem),
+    /// An HTTP 429 response from the ACME server.
+    #[error("{problem}")]
+    RateLimited {
+        /// The server's explanation, including any remediation instructions.
+        #[source]
+        problem: Problem,
+        /// When the server permits retrying, if `Retry-After` was valid.
+        retry_after: Option<SystemTime>,
+    },
     /// Failed from cryptographic operations
     #[error("cryptographic operation failed")]
     Crypto,
@@ -167,12 +176,20 @@ impl Problem {
         Ok(serde_json::from_slice(&Self::from_response(rsp).await?)?)
     }
 
-    pub(crate) async fn from_response(rsp: BytesResponse) -> Result<Bytes, Error> {
+    pub(crate) async fn from_response(mut rsp: BytesResponse) -> Result<Bytes, Error> {
         let status = rsp.parts.status;
-        let body = rsp.body().await.map_err(Error::Other)?;
-        match status.is_informational() || status.is_success() || status.is_redirection() {
-            true => Ok(body),
-            false => Err(serde_json::from_slice::<Self>(&body)?.into()),
+        let body = rsp.body.into_bytes().await.map_err(Error::Other)?;
+        if status.is_informational() || status.is_success() || status.is_redirection() {
+            return Ok(body);
+        }
+
+        let problem = serde_json::from_slice::<Self>(&body)?;
+        match status {
+            http::StatusCode::TOO_MANY_REQUESTS => Err(Error::RateLimited {
+                problem,
+                retry_after: crate::retry_after(&rsp),
+            }),
+            _ => Err(problem.into()),
         }
     }
 }
@@ -1128,6 +1145,36 @@ mod tests {
 
     use super::*;
 
+    #[tokio::test]
+    async fn rate_limit_preserves_retry_after() {
+        let error = Problem::from_response(problem_response(Some("Thu, 01 Jan 1970 00:00:00 GMT")))
+            .await
+            .unwrap_err();
+        let Error::RateLimited {
+            problem,
+            retry_after,
+        } = error
+        else {
+            panic!("unexpected error: {error:?}");
+        };
+        assert_eq!(retry_after, Some(SystemTime::UNIX_EPOCH));
+        assert_eq!(problem.detail.as_deref(), Some("slow down"));
+    }
+
+    #[tokio::test]
+    async fn rate_limit_without_retry_after() {
+        let error = Problem::from_response(problem_response(None))
+            .await
+            .unwrap_err();
+        assert!(matches!(
+            error,
+            Error::RateLimited {
+                retry_after: None,
+                ..
+            }
+        ));
+    }
+
     // https://datatracker.ietf.org/doc/html/rfc8555#section-7.4
     #[test]
     fn order() {
@@ -1399,5 +1446,18 @@ mod tests {
         let window = info.suggested_window;
         assert_eq!(window.start.day(), 2);
         assert_eq!(window.end.day(), 3);
+    }
+
+    fn problem_response(retry_after: Option<&str>) -> BytesResponse {
+        let mut response = http::Response::builder().status(http::StatusCode::TOO_MANY_REQUESTS);
+        if let Some(value) = retry_after {
+            response = response.header(http::header::RETRY_AFTER, value);
+        }
+        response
+            .body(http_body_util::Full::new(Bytes::from_static(
+                br#"{"type":"urn:ietf:params:acme:error:rateLimited","detail":"slow down"}"#,
+            )))
+            .unwrap()
+            .into()
     }
 }
