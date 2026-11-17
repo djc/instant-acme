@@ -13,14 +13,16 @@ use rustls_pki_types::{PrivateKeyDer, PrivatePkcs8KeyDer};
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 
+use crate::challenges::dns_persist01::{self, DnsPersistMetadata};
 use crate::crypto::HmacKey;
 #[cfg(doc)]
 use crate::crypto::HmacKeyProvider;
 use crate::crypto::{CryptoProvider, SigningKey};
 use crate::order::Order;
 use crate::types::{
-    AccountCredentials, AuthorizationStatus, Empty, Header, JoseJson, Jwk, KeyOrKeyId, NewAccount,
-    NewAccountPayload, NewOrder, OrderState, Problem, ProfileMeta, RevocationRequest, Signer,
+    AccountCredentials, AuthorizationStatus, Empty, Header, Identifier, JoseJson, Jwk, KeyOrKeyId,
+    NewAccount, NewAccountPayload, NewOrder, OrderState, Problem, ProfileMeta, RevocationRequest,
+    Signer,
 };
 #[cfg(feature = "time")]
 use crate::types::{CertificateIdentifier, RenewalInfo};
@@ -327,6 +329,46 @@ impl Account {
     pub fn key_thumbprint(&self) -> &str {
         self.inner.key.thumbprint()
     }
+
+    /// Get the directory metadata needed to provision a `dns-persist-01` record
+    ///
+    /// Returns `None` if the ACME server does not advertise the required
+    /// `issuerDomainNames` and `accountHashPrefix` directory metadata, or if the
+    /// advertised values do not conform to draft-ietf-acme-dns-persist.
+    ///
+    /// The returned metadata can be used to pre-provision a persistent validation
+    /// record without an open order. See [`dns_persist01::Response`].
+    pub fn dns_persist_metadata(&self) -> Option<DnsPersistMetadata<'_>> {
+        DnsPersistMetadata::from_meta(&self.inner.client.directory.meta)
+    }
+
+    /// Create a persistent DNS validation record for `identifier`
+    ///
+    /// This is useful for pre-provisioning a `dns-persist-01` record before opening
+    /// an order. The first Issuer Domain Name advertised in the directory metadata
+    /// is used. To choose a different Issuer Domain Name, use
+    /// [`dns_persist01::Response::new`] instead.
+    ///
+    /// `identifier` may be an [`Identifier::Dns`] (optionally with a `*.` wildcard
+    /// prefix) or an [`Identifier::Ip`]. Wildcard identifiers automatically include
+    /// `policy=wildcard` in the record.
+    pub fn dns_persist_response(
+        &self,
+        identifier: &Identifier,
+    ) -> Result<dns_persist01::Response, Error> {
+        let metadata = self
+            .dns_persist_metadata()
+            .ok_or(Error::Unsupported("dns-persist-01 directory metadata"))?;
+        let issuer_domain_name = metadata
+            .issuer_domain_names
+            .first()
+            .ok_or(Error::Unsupported("dns-persist-01 issuer domain names"))?;
+        dns_persist01::Response::new(self, identifier, issuer_domain_name)
+    }
+
+    pub(crate) fn inner(&self) -> &AccountInner {
+        &self.inner
+    }
 }
 
 pub(crate) struct AccountInner {
@@ -336,6 +378,14 @@ pub(crate) struct AccountInner {
 }
 
 impl AccountInner {
+    pub(crate) fn id(&self) -> &str {
+        &self.id
+    }
+
+    pub(crate) fn meta(&self) -> &crate::types::Meta {
+        &self.client.directory.meta
+    }
+
     async fn from_credentials(
         credentials: AccountCredentials,
         http: Box<dyn HttpClient>,
@@ -573,7 +623,10 @@ pub struct Key {
 }
 
 impl Key {
-    fn new(inner: Box<dyn SigningKey>, provider: &'static CryptoProvider) -> Result<Self, Error> {
+    pub(crate) fn new(
+        inner: Box<dyn SigningKey>,
+        provider: &'static CryptoProvider,
+    ) -> Result<Self, Error> {
         let thumbprint = BASE64_URL_SAFE_NO_PAD.encode(
             inner
                 .as_jwk()

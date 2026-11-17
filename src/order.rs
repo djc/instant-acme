@@ -9,7 +9,9 @@ use serde::Serialize;
 use tokio::time::sleep;
 
 use crate::account::AccountInner;
-use crate::challenges::{ChallengeHandle, device_attest01, dns01, http01, tls_alpn01};
+use crate::challenges::{
+    ChallengeHandle, device_attest01, dns_persist01, dns01, http01, tls_alpn01,
+};
 use crate::types::{
     Authorization, AuthorizationState, AuthorizationStatus, AuthorizedIdentifier, Empty, Error,
     FinalizeRequest, OrderState, OrderStatus, Problem,
@@ -412,6 +414,19 @@ impl<'a> AuthorizationHandle<'a> {
     /// support IP address identifiers.
     #[must_use = "the returned challenge handle should be used to complete the authorization"]
     pub fn dns01(&mut self) -> Option<dns01::Handle<'_>> {
+        ChallengeHandle::new(self.state, self.nonce, self.account)
+    }
+
+    /// Get a handle for the dns-persist-01 challenge, if present
+    ///
+    /// Returns `None` if the challenge type isn't offered, if the challenge object is
+    /// malformed, or if the challenge identifier is not a
+    /// [`Identifier::Dns`][crate::Identifier::Dns] or [`Identifier::Ip`][crate::Identifier::Ip]
+    /// type identifier.
+    ///
+    /// Note: Persistent DNS challenge support is experimental.
+    #[must_use = "the returned challenge handle should be used to complete the authorization"]
+    pub fn dns_persist01(&mut self) -> Option<dns_persist01::Handle<'_>> {
         ChallengeHandle::new(self.state, self.nonce, self.account)
     }
 

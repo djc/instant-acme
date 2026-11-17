@@ -666,6 +666,15 @@ pub(crate) struct Directory {
 pub(crate) struct Meta {
     #[serde(default)]
     pub(crate) profiles: HashMap<String, String>,
+    /// Issuer Domain Names advertised for dns-persist-01 pre-provisioning
+    #[serde(default, rename = "issuerDomainNames")]
+    pub(crate) issuer_domain_names: Vec<String>,
+    /// Prefix for account bound hashed URIs used by dns-persist-01
+    #[serde(default, rename = "accountHashPrefix")]
+    pub(crate) account_hash_prefix: Option<String>,
+    /// CA identities, used to cross-check dns-persist-01 Issuer Domain Names
+    #[serde(default, rename = "caaIdentities")]
+    pub(crate) caa_identities: Vec<String>,
 }
 
 /// Profile information advertised in the server directory
@@ -734,6 +743,9 @@ pub struct AuthorizationState {
     /// Whether the identifier represents a wildcard domain name
     #[serde(default)]
     pub wildcard: bool,
+    /// Whether the authorization may be reused for subdomains (RFC 9444)
+    #[serde(default)]
+    pub subdomain_auth_allowed: bool,
 }
 
 impl AuthorizationState {
@@ -1072,6 +1084,30 @@ mod tests {
 
     use super::*;
 
+    #[test]
+    fn directory_dns_persist_metadata() {
+        const META: &str = r#"{
+          "meta": {
+            "accountHashPrefix": "https://ca.example/account-hash/",
+            "issuerDomainNames": ["authority.example", "ca.example.net"],
+            "caaIdentities": ["authority.example", "ca.example.net"]
+          }
+        }"#;
+
+        #[derive(Deserialize)]
+        struct DirectoryMeta {
+            meta: Meta,
+        }
+
+        let directory: DirectoryMeta = serde_json::from_str(META).unwrap();
+        assert_eq!(
+            directory.meta.account_hash_prefix.as_deref(),
+            Some("https://ca.example/account-hash/")
+        );
+        assert_eq!(directory.meta.issuer_domain_names.len(), 2);
+        assert_eq!(directory.meta.caa_identities.len(), 2);
+    }
+
     // https://datatracker.ietf.org/doc/html/rfc8555#section-7.4
     #[test]
     fn order() {
@@ -1142,6 +1178,24 @@ mod tests {
         assert_eq!(obj.status, AuthorizationStatus::Valid);
         assert_eq!(obj.identifier, Identifier::Dns("www.example.org".into()));
         assert_eq!(obj.challenges.len(), 1);
+        assert!(!obj.subdomain_auth_allowed);
+    }
+
+    // https://datatracker.ietf.org/doc/html/rfc9444#section-4.1
+    #[test]
+    fn authorization_subdomain_auth_allowed() {
+        const AUTHORIZATION: &str = r#"{
+          "status": "pending",
+          "identifier": {
+            "type": "dns",
+            "value": "example.org"
+          },
+          "subdomainAuthAllowed": true,
+          "challenges": []
+        }"#;
+
+        let obj = serde_json::from_str::<AuthorizationState>(AUTHORIZATION).unwrap();
+        assert!(obj.subdomain_auth_allowed);
     }
 
     // https://datatracker.ietf.org/doc/html/rfc8555#section-7.6

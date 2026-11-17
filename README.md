@@ -18,6 +18,7 @@ specification.
   * [ACME renewal information (ARI)]
   * [Profiles]
   * [draft-acme-device-attest-08] (**Experimental**)
+  * [draft-ietf-acme-dns-persist-03] (**Experimental**)
 * Support for external account binding, key rollover, and contact updates
 * Support for certificate revocation
 * Store/recover your account credentials by serializing/deserializing
@@ -30,6 +31,7 @@ specification.
 [ACME renewal information (ARI)]: https://www.rfc-editor.org/rfc/rfc9773.html
 [profiles]: https://datatracker.ietf.org/doc/draft-ietf-acme-profiles/
 [draft-acme-device-attest-08]: https://datatracker.ietf.org/doc/html/draft-acme-device-attest-08
+[draft-ietf-acme-dns-persist-03]: https://datatracker.ietf.org/doc/html/draft-ietf-acme-dns-persist-03
 
 ## Cargo features
 
