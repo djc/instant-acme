@@ -332,9 +332,10 @@ impl Account {
 
     /// Get the directory metadata needed to provision a `dns-persist-01` record
     ///
-    /// Returns `None` if the ACME server does not advertise the required
-    /// `issuerDomainNames` and `accountHashPrefix` directory metadata, or if the
-    /// advertised values do not conform to draft-ietf-acme-dns-persist.
+    /// Returns `None` if the ACME server does not advertise conforming
+    /// `issuerDomainNames` and `accountHashPrefix` directory metadata. Draft -01
+    /// servers such as Google Trust Services advertise neither; records for
+    /// them use the raw account URL and an explicitly chosen Issuer Domain Name.
     ///
     /// The returned metadata can be used to pre-provision a persistent validation
     /// record without an open order. See [`dns_persist01::Response`].
@@ -363,6 +364,18 @@ impl Account {
             .issuer_domain_names
             .first()
             .ok_or(Error::Unsupported("dns-persist-01 issuer domain names"))?;
+        dns_persist01::Response::new(self, identifier, issuer_domain_name)
+    }
+
+    /// Create a persistent DNS validation record using an explicit Issuer Domain Name
+    ///
+    /// Unlike [`Self::dns_persist_response`], this also works when the directory
+    /// advertises no dns-persist metadata, as with draft -01 servers.
+    pub fn dns_persist_response_with_issuer(
+        &self,
+        identifier: &Identifier,
+        issuer_domain_name: &str,
+    ) -> Result<dns_persist01::Response, Error> {
         dns_persist01::Response::new(self, identifier, issuer_domain_name)
     }
 

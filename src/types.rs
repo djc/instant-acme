@@ -667,10 +667,10 @@ pub(crate) struct Meta {
     #[serde(default)]
     pub(crate) profiles: HashMap<String, String>,
     /// Issuer Domain Names advertised for dns-persist-01 pre-provisioning
-    #[serde(default, rename = "issuerDomainNames")]
+    #[serde(default, rename = "issuerDomainNames", alias = "issuer-domain-names")]
     pub(crate) issuer_domain_names: Vec<String>,
     /// Prefix for account bound hashed URIs used by dns-persist-01
-    #[serde(default, rename = "accountHashPrefix")]
+    #[serde(default, rename = "accountHashPrefix", alias = "account-hash-prefix")]
     pub(crate) account_hash_prefix: Option<String>,
     /// CA identities, used to cross-check dns-persist-01 Issuer Domain Names
     #[serde(default, rename = "caaIdentities")]

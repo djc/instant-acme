@@ -384,6 +384,11 @@ pub mod dns_persist01 {
     //!
     //! Note: persistent DNS challenge support is experimental and tracks draft -03.
     //!
+    //! Draft -01 style challenges, which spell the challenge field
+    //! `issuer-domain-names` and use the raw account URL when the directory does
+    //! not advertise `accountHashPrefix`, are also accepted. Google Trust
+    //! Services currently serves that older dialect.
+    //!
     //! # Pre-provisioning
     //!
     //! A record can be created without an order once the account exists:
@@ -436,7 +441,7 @@ pub mod dns_persist01 {
         /// Issuer Domain Names accepted by the CA for this challenge
         ///
         /// The client must choose one of these names for the validation record.
-        #[serde(rename = "issuerDomainNames", default)]
+        #[serde(rename = "issuerDomainNames", alias = "issuer-domain-names", default)]
         pub issuer_domain_names: Vec<String>,
     }
 
@@ -527,8 +532,9 @@ pub mod dns_persist01 {
 
         /// Create a [`Response`] using the given Issuer Domain Name
         ///
-        /// Returns an error if `issuer_domain_name` is not offered by the challenge,
-        /// or if the directory does not advertise a usable `accountHashPrefix`.
+        /// Returns an error if `issuer_domain_name` is not offered by the challenge.
+        /// Directories without a usable `accountHashPrefix` (draft -01) use the
+        /// raw account URL in the record.
         pub fn response_with_issuer(&self, issuer_domain_name: &str) -> Result<Response, Error> {
             self.build_response(issuer_domain_name, None, false)
         }
@@ -674,7 +680,7 @@ pub mod dns_persist01 {
         provider: &'static crate::crypto::CryptoProvider,
         thumbprint: String,
         account_url: String,
-        account_hash_prefix: String,
+        account_hash_prefix: Option<String>,
         record_domain: String,
         domain_omitted: bool,
     }
@@ -682,8 +688,9 @@ pub mod dns_persist01 {
     impl Response {
         /// Create a pre-provisioning response using a directory-advertised Issuer Domain Name
         ///
-        /// `issuer_domain_name` must be advertised in the server directory metadata. Use
-        /// [`Self::new_at_ancestor()`] to validate via an ancestor record.
+        /// `issuer_domain_name` must be advertised in the server directory metadata
+        /// when the directory advertises it. Use [`Self::new_at_ancestor()`] to
+        /// validate via an ancestor record.
         ///
         /// `identifier` may be a DNS identifier with a `*.` wildcard prefix, in which
         /// case the generated record automatically includes `policy=wildcard`.
@@ -692,15 +699,14 @@ pub mod dns_persist01 {
             identifier: &Identifier,
             issuer_domain_name: &str,
         ) -> Result<Self, Error> {
-            let metadata = account
-                .dns_persist_metadata()
-                .ok_or(Error::Unsupported("dns-persist-01 directory metadata"))?;
-            if !metadata
-                .issuer_domain_names
-                .iter()
-                .any(|name| name == issuer_domain_name)
-            {
-                return Err(Error::Str("issuer domain name not advertised by directory"));
+            if let Some(metadata) = account.dns_persist_metadata() {
+                if !metadata
+                    .issuer_domain_names
+                    .iter()
+                    .any(|name| name == issuer_domain_name)
+                {
+                    return Err(Error::Str("issuer domain name not advertised by directory"));
+                }
             }
 
             Self::build(
@@ -726,15 +732,14 @@ pub mod dns_persist01 {
             identifier: &Identifier,
             issuer_domain_name: &str,
         ) -> Result<Self, Error> {
-            let metadata = account
-                .dns_persist_metadata()
-                .ok_or(Error::Unsupported("dns-persist-01 directory metadata"))?;
-            if !metadata
-                .issuer_domain_names
-                .iter()
-                .any(|name| name == issuer_domain_name)
-            {
-                return Err(Error::Str("issuer domain name not advertised by directory"));
+            if let Some(metadata) = account.dns_persist_metadata() {
+                if !metadata
+                    .issuer_domain_names
+                    .iter()
+                    .any(|name| name == issuer_domain_name)
+                {
+                    return Err(Error::Str("issuer domain name not advertised by directory"));
+                }
             }
 
             Self::build(
@@ -761,15 +766,14 @@ pub mod dns_persist01 {
             issuer_domain_name: &str,
             ancestor_domain: &str,
         ) -> Result<Self, Error> {
-            let metadata = account
-                .dns_persist_metadata()
-                .ok_or(Error::Unsupported("dns-persist-01 directory metadata"))?;
-            if !metadata
-                .issuer_domain_names
-                .iter()
-                .any(|name| name == issuer_domain_name)
-            {
-                return Err(Error::Str("issuer domain name not advertised by directory"));
+            if let Some(metadata) = account.dns_persist_metadata() {
+                if !metadata
+                    .issuer_domain_names
+                    .iter()
+                    .any(|name| name == issuer_domain_name)
+                {
+                    return Err(Error::Str("issuer domain name not advertised by directory"));
+                }
             }
 
             Self::build(
@@ -802,8 +806,7 @@ pub mod dns_persist01 {
                 domain_omitted,
             } = options;
 
-            let metadata = DnsPersistMetadata::from_meta(meta)
-                .ok_or(Error::Unsupported("dns-persist-01 directory metadata"))?;
+            let metadata = DnsPersistMetadata::from_meta(meta);
 
             if !is_domain_name(issuer_domain_name) {
                 return Err(Error::Str("invalid issuer domain name"));
@@ -834,14 +837,12 @@ pub mod dns_persist01 {
             };
 
             validate_validation_domain(&record_domain, label)?;
-            if !is_valid_hash_prefix(metadata.account_hash_prefix) {
-                return Err(Error::Str("invalid dns-persist-01 accountHashPrefix"));
-            }
+            let account_hash_prefix = metadata.map(|metadata| metadata.account_hash_prefix);
 
             let thumbprint = key.thumbprint().to_owned();
             let accounturi = compute_accounturi(
                 key.provider,
-                metadata.account_hash_prefix,
+                account_hash_prefix,
                 if domain_omitted { "*" } else { &record_domain },
                 &thumbprint,
                 account_url,
@@ -859,7 +860,7 @@ pub mod dns_persist01 {
                 provider: key.provider,
                 thumbprint,
                 account_url: account_url.to_owned(),
-                account_hash_prefix: metadata.account_hash_prefix.to_owned(),
+                account_hash_prefix: account_hash_prefix.map(str::to_owned),
                 record_domain,
                 domain_omitted,
             };
@@ -870,7 +871,7 @@ pub mod dns_persist01 {
         fn rebuild_accounturi(&mut self) {
             self.accounturi = compute_accounturi(
                 self.provider,
-                &self.account_hash_prefix,
+                self.account_hash_prefix.as_deref(),
                 if self.domain_omitted {
                     "*"
                 } else {
@@ -1075,11 +1076,15 @@ pub mod dns_persist01 {
 
     fn compute_accounturi(
         provider: &crate::crypto::CryptoProvider,
-        account_hash_prefix: &str,
+        account_hash_prefix: Option<&str>,
         domain: &str,
         thumbprint: &str,
         account_url: &str,
     ) -> String {
+        let Some(account_hash_prefix) = account_hash_prefix else {
+            // Draft -01 used the raw account URL and had no hashing prefix.
+            return account_url.to_owned();
+        };
         let mut preimage =
             Vec::with_capacity(1 + domain.len() + thumbprint.len() + account_url.len());
         preimage.push(domain.len() as u8);
@@ -1292,6 +1297,56 @@ pub mod dns_persist01 {
             let missing: Challenge = serde_json::from_str("{}").unwrap();
             assert!(missing.issuer_domain_names.is_empty());
             assert!(!Challenge::is_well_formed(&missing, &meta()));
+        }
+
+        #[test]
+        fn draft01_spellings_and_raw_accounturi() {
+            let challenge: Challenge = serde_json::from_str(
+                r#"{
+                  "type": "dns-persist-01",
+                  "issuer-domain-names": ["authority.example"]
+                }"#,
+            )
+            .unwrap();
+            assert_eq!(challenge.issuer_domain_names, ["authority.example"]);
+
+            let parsed_meta: Meta = serde_json::from_str(
+                r#"{
+                  "issuer-domain-names": ["authority.example"],
+                  "account-hash-prefix": "https://ca.example/account-hash/"
+                }"#,
+            )
+            .unwrap();
+            assert_eq!(
+                parsed_meta.account_hash_prefix.as_deref(),
+                Some("https://ca.example/account-hash/")
+            );
+
+            // Without an accountHashPrefix, draft -01 uses the raw account URL.
+            let draft01_meta = Meta {
+                account_hash_prefix: None,
+                ..meta()
+            };
+            let response = Response::build(
+                &Identifier::Dns("example.com".to_owned()),
+                &draft01_meta,
+                &example_key(),
+                "https://ca.example/acct/123",
+                BuildOptions {
+                    issuer_domain_name: "authority.example",
+                    ancestor_domain: None,
+                    wildcard: false,
+                    subdomain_auth_allowed: false,
+                    domain_omitted: false,
+                },
+            )
+            .unwrap();
+
+            assert_eq!(response.accounturi(), "https://ca.example/acct/123");
+            assert_eq!(
+                response.rdata(),
+                "authority.example; accounturi=https://ca.example/acct/123"
+            );
         }
 
         #[test]
@@ -1566,25 +1621,27 @@ pub mod dns_persist01 {
         }
 
         #[test]
-        fn invalid_hash_prefix() {
+        fn invalid_hash_prefix_falls_back_to_raw_accounturi() {
             for prefix in ["", "https://ca.example/a;b/", "https://ca.example/a\\b/"] {
                 let mut meta = meta();
                 meta.account_hash_prefix = Some(prefix.to_owned());
-                assert!(
-                    Response::build(
-                        &Identifier::Dns("example.com".to_owned()),
-                        &meta,
-                        &example_key(),
-                        "https://ca.example/acct/123",
-                        BuildOptions {
-                            issuer_domain_name: "authority.example",
-                            ancestor_domain: None,
-                            wildcard: false,
-                            subdomain_auth_allowed: false,
-                            domain_omitted: false,
-                        },
-                    )
-                    .is_err(),
+                let response = Response::build(
+                    &Identifier::Dns("example.com".to_owned()),
+                    &meta,
+                    &example_key(),
+                    "https://ca.example/acct/123",
+                    BuildOptions {
+                        issuer_domain_name: "authority.example",
+                        ancestor_domain: None,
+                        wildcard: false,
+                        subdomain_auth_allowed: false,
+                        domain_omitted: false,
+                    },
+                )
+                .unwrap();
+                assert_eq!(
+                    response.accounturi(),
+                    "https://ca.example/acct/123",
                     "{prefix:?}"
                 );
             }
