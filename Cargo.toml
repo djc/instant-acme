@@ -58,6 +58,10 @@ name = "provision"
 required-features = ["hyper-rustls", "rcgen", "aws-lc-rs"]
 
 [[example]]
+name = "dns_persist"
+required-features = ["hyper-rustls", "aws-lc-rs"]
+
+[[example]]
 name = "certgen"
 required-features = ["rcgen", "aws-lc-rs"]
 

@@ -46,7 +46,10 @@ mod account;
 pub use account::{Account, AccountBuilder, ExternalAccountKey, Key};
 
 pub mod challenges;
-pub use challenges::{Challenge, ChallengeState, ChallengeStatus, DeviceAttestation};
+pub use challenges::{
+    Challenge, ChallengeState, ChallengeStatus, DeviceAttestation,
+    dns_persist01::DnsPersistMetadata,
+};
 
 mod crypto;
 pub use crypto::{
